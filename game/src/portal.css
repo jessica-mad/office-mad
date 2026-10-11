@@ -135,7 +135,7 @@
 .madof-slot{font:500 15px/1.3 var(--madof-font);text-align:left;padding:14px 16px;border-radius:14px;border:2px solid var(--k);background:var(--c);color:var(--k);cursor:pointer;margin:0}
 .madof-slot::first-letter{text-transform:uppercase}
 button.madof-slot:hover,button.madof-slot:focus-visible{background:var(--g);outline:3px solid var(--y);outline-offset:2px}
-.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 var(--k)}
+button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 var(--k)}
 .madof-other-times{margin:0 0 18px}
 .madof-interpret,.madof-request-form{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:10px}
 .madof-interpret input,.madof-request-form textarea{width:100%;box-sizing:border-box;font:300 16px/1.4 var(--madof-font);padding:10px 12px;border:2px solid var(--k);border-radius:12px;background:#fff}
@@ -143,3 +143,4 @@ button.madof-slot:hover,button.madof-slot:focus-visible{background:var(--g);outl
 .madof-request p{margin:0}
 .madof-request strong::first-letter{text-transform:uppercase}
 .madof-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.madof-request .madof-lead:focus{outline:none}

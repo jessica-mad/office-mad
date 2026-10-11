@@ -14,18 +14,19 @@ if ( ! defined('ABSPATH') ) exit;
 final class Cards {
 
     const SIGNATURE = 'Mensaje automático de la oficina de MAD. Jessica lo ha revisado antes de enviarlo.';
+    const SIGNATURE_AUTO = 'Mensaje automático de la oficina de MAD.';
 
-    private static function button($text, $function, array $params){
+    public static function button($text, $function, array $params){
         $p = [];
         foreach ( $params as $k => $v ) $p[] = ['key' => (string) $k, 'value' => (string) $v];
         return ['text' => $text, 'onClick' => ['action' => ['function' => $function, 'parameters' => $p]]];
     }
 
-    private static function link($text, $url){
+    public static function link($text, $url){
         return ['text' => $text, 'onClick' => ['openLink' => ['url' => $url]]];
     }
 
-    private static function card($id, $title, $subtitle, array $widgets){
+    public static function card($id, $title, $subtitle, array $widgets){
         return ['cardsV2' => [['cardId' => $id, 'card' => [
             'header'   => ['title' => $title, 'subtitle' => $subtitle],
             'sections' => [['widgets' => $widgets]],

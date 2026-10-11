@@ -89,7 +89,7 @@ async function boot(root) {
   }
 
   root.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-panel],[data-room],[data-action]');
+    const btn = e.target.closest('button[data-panel],a[data-panel],[data-room],[data-action]'); // not the dialog box, which also carries data-panel
     if (!btn || !root.contains(btn)) return;
     if (btn.dataset.panel) dialog.open(btn.dataset.panel);
     else if (btn.dataset.room) openRoom(btn.dataset.room);

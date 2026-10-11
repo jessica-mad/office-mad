@@ -17,7 +17,7 @@ $tz = wp_timezone();
 
     <?php if ( ! $ready ) : ?>
     <section class="madof-card">
-        <p class="madof-warn"><?php esc_html_e('Faltan los permisos de Calendar. Ve a Conexiones y pulsa «Reconectar con Google» para concederlos.', 'mad-oficina'); ?></p>
+        <p class="madof-warn"><?php esc_html_e('Faltan los permisos de Calendar. Ve a Conexiones y pulsa «Volver a conectar» para concederlos.', 'mad-oficina'); ?></p>
         <a class="madof-btn" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-conexiones')); ?>"><?php esc_html_e('Ir a Conexiones', 'mad-oficina'); ?></a>
     </section>
     <?php endif; ?>

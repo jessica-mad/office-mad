@@ -155,6 +155,12 @@ final class Events {
             $wpdb->update(Schema::table('action_items'), ['status' => 'done', 'completed_at' => Time::now(), 'updated_at' => Time::now()], ['id' => $task['id']]);
             return $this->update(Cards::task_done($task));
         }
+        // Other modules' buttons (e.g. ideas from the Coordinadora). They return a
+        // message array (updates the card) or a string (plain reply).
+        $is_manager = $email !== '' && $email === $this->manager_email();
+        $out = apply_filters('madoficina_chat_action', null, $fn, $params, $email, $is_manager);
+        if ( is_array($out) ) return $this->update($out);
+        if ( is_string($out) ) return $this->text($out);
         return $this->text(__('No entiendo esa acción.', 'mad-oficina'));
     }
 }

@@ -155,7 +155,8 @@ final class Requests {
         $buffer = (int) $this->rules()['buffer'] * 60;
         $busy = Calendar::busy($start - $buffer, $end + $buffer, $this->calendars());
         if ( is_wp_error($busy) ) return $busy;
-        if ( $busy ) return new \WP_Error('madof_req_busy', __('Ese hueco ya no está libre en tu calendario. Cambia la hora en el formulario y vuelve a aprobar.', 'mad-oficina'));
+        $clash = array_filter($busy, fn($b) => $b[0] < $end + $buffer && $b[1] > $start - $buffer);
+        if ( $clash ) return new \WP_Error('madof_req_busy', __('Ese hueco ya no está libre en tu calendario. Cambia la hora en el formulario y vuelve a aprobar.', 'mad-oficina'));
 
         $attendees = [];
         foreach ( preg_split('/[\s,;]+/', (string) ($input['attendees'] ?? $p['email']), -1, PREG_SPLIT_NO_EMPTY) as $e ) {

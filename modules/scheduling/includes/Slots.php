@@ -112,7 +112,11 @@ final class Slots {
         return array_slice($out, 0, $n);
     }
 
+    /** "martes 13 de octubre · 10:00", in Spanish whatever the site language is. */
     public static function label($ts, \DateTimeZone $tz){
-        return wp_date('l j \d\e F · H:i', $ts, $tz);
+        $d = (new \DateTimeImmutable('@' . (int) $ts))->setTimezone($tz);
+        $days = [1 => __('lunes', 'mad-oficina'), __('martes', 'mad-oficina'), __('miércoles', 'mad-oficina'), __('jueves', 'mad-oficina'), __('viernes', 'mad-oficina'), __('sábado', 'mad-oficina'), __('domingo', 'mad-oficina')];
+        $months = [1 => __('enero', 'mad-oficina'), __('febrero', 'mad-oficina'), __('marzo', 'mad-oficina'), __('abril', 'mad-oficina'), __('mayo', 'mad-oficina'), __('junio', 'mad-oficina'), __('julio', 'mad-oficina'), __('agosto', 'mad-oficina'), __('septiembre', 'mad-oficina'), __('octubre', 'mad-oficina'), __('noviembre', 'mad-oficina'), __('diciembre', 'mad-oficina')];
+        return sprintf(__('%1$s %2$d de %3$s · %4$s', 'mad-oficina'), $days[(int) $d->format('N')], (int) $d->format('j'), $months[(int) $d->format('n')], $d->format('H:i'));
     }
 }

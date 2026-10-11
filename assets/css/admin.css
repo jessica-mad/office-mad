@@ -29,7 +29,7 @@
 .madof-form{display:flex;flex-direction:column;gap:14px;max-width:880px}
 .madof-form label{display:flex;flex-direction:column;gap:4px;font-weight:500;font-size:14px}
 .madof-form small{font-weight:300;color:#555}
-.madof-form input[type=text],.madof-form input[type=email],.madof-form input[type=password],.madof-form select,.madof-form textarea{font:300 15px/1.4 var(--madof-font);border:2px solid var(--k);border-radius:12px;padding:8px 12px;background:#fff;max-width:none}
+.madof-form input[type=text],.madof-form input[type=email],.madof-form input[type=password],.madof-form input[type=number],.madof-form input[type=date],.madof-form input[type=time],.madof-form input[type=datetime-local],.madof-form select,.madof-form textarea{font:300 15px/1.4 var(--madof-font);border:2px solid var(--k);border-radius:12px;padding:8px 12px;background:#fff;max-width:none}
 .madof-form input:focus,.madof-form select:focus,.madof-form textarea:focus{outline:3px solid var(--y);outline-offset:1px;box-shadow:none;border-color:var(--k)}
 .madof-form .madof-btn{align-self:flex-start}
 .madof-form label.madof-check{flex-direction:row;align-items:center;gap:8px;font-weight:300}

@@ -160,7 +160,7 @@ class SchedulingTest extends MADOF_TestCase {
         $this->assertWPError(Approvals::resolve($id, 'approve', []));
         $this->assertSame('pending', Approvals::get($id)['status']);
 
-        $this->busy = [];
+        $this->busy = [[$start + 3 * HOUR_IN_SECONDS, $start + 4 * HOUR_IN_SECONDS]]; // busy later that day: no clash
         $result = Approvals::resolve($id, 'approve', ['attendees' => 'ana@mom.example, not-an-email']);
         $this->assertSame('https://meet.google.com/abc-defg-hij', $result['meet']);
         $event = array_values(array_filter($this->calls, fn($c) => strpos($c['url'], '/events?') !== false))[0];

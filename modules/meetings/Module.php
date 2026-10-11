@@ -129,11 +129,14 @@ return new class($core) implements MAD_Oficina_Module {
                 ignore_user_abort(true);
                 if ( function_exists('set_time_limit') ) @set_time_limit(300);
                 $this->process_pending(280);
+                do_action('madoficina_tick');
             });
             return ['deferred' => true];
         }
         ignore_user_abort(true);
-        return ['processed' => $this->process_pending(200)];
+        $processed = $this->process_pending(200);
+        do_action('madoficina_tick'); // other agents piggyback on the Apps Script's 10-minute clock
+        return ['processed' => $processed];
     }
 
     /** Background processing (Action Scheduler; WP-Cron as a fallback). */
