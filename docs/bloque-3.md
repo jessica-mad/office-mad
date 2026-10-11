@@ -21,8 +21,9 @@ Secretaria (Sonnet 5.5, salida JSON con esquema)
 Bandeja de gerencia: revisas, editas y apruebas por partes
         ▼
 Tareas, ideas y temas creados · reunión visible en el portal (si lo marcas)
-· orden para el Apps Script: mover la carpeta a «Cliente/Reuniones/AAAA-MM-DD – Título»,
-  compartir la grabación sin email de Google y actualizar la hoja «Reuniones MAD»
+· orden para el Apps Script: archivar en «Google Meet/Reuniones por cliente/CÓDIGO · Cliente/
+  AAAA-MM-DD – Título» (privado, el equipo no lo ve), compartir solo la grabación con los
+  contactos del cliente sin email de Google y actualizar la hoja «Reuniones MAD»
 ```
 
 ## Puesta en marcha

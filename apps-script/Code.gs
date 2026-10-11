@@ -9,7 +9,9 @@
  *   MAD_ENDPOINT   https://imad.pro/wp-json/mad-oficina/v1   (shown in MAD Oficina → Reuniones → Apps Script)
  *   MAD_SECRET     shared secret (same page)
  *   ROOT_FOLDER_ID folder where Meet/Gemini leave each meeting (one subfolder per meeting)
- *   CLIENTS_FOLDER_ID (optional) parent folder for client folders when a client has none set
+ *   ARCHIVE_FOLDER_ID (optional) private archive for approved meetings; by default the script
+ *                  creates "Reuniones por cliente" inside ROOT_FOLDER_ID. Meetings are never
+ *                  moved to the clients' shared document folders (the team can see those).
  *   SHEET_ID       (optional) created automatically on first run
  *   START_DATE     (optional, YYYY-MM-DD) ignore meetings before this date; set by install()
  *
@@ -26,6 +28,7 @@ var NOTES_NAME_RE = /^(.*?)(?::\s+|\s+a las\s+|\s+at\s+)(\d{4})\/(\d{2})\/(\d{2}
 // Any date+time in a file name: "2026/10/07 17:57" or "(2026-07-24 17:46 GMT+2)"
 var ANY_DATE_RE = /(\d{4})[\/-](\d{2})[\/-](\d{2})\s+(\d{2}):(\d{2})/;
 var LEGACY_FOLDER = 'Meet Recordings';
+var ARCHIVE_NAME = 'Reuniones por cliente';
 var WAIT_MINUTES = 180; // how long to wait for notes before sending a recording on its own
 var MATCH_MINUTES = 20; // recording and notes of the same meeting start within this window
 var SHEET_HEADERS = ['Fecha', 'Título', 'Cliente', 'Estado', 'Resumen', 'Carpeta', 'Notas', 'Grabación', 'Clave', 'ID web'];
@@ -70,10 +73,11 @@ function scan() {
   var known = knownKeys_();
 
   var places = [{ folder: root, dated: null }];
+  var archiveId = archiveRoot_().getId();
   var sub = root.getFolders();
   while (sub.hasNext()) {
     var f = sub.next();
-    if (f.getName() === LEGACY_FOLDER) continue;
+    if (f.getName() === LEGACY_FOLDER || f.getId() === archiveId) continue;
     var dm = f.getName().match(DATED_FOLDER_RE);
     places.push({ folder: f, dated: dm ? cleanTitle_(dm[1]) : null });
   }
@@ -243,17 +247,23 @@ function processOrders() {
   });
 }
 
+/**
+ * Approved meeting → "<ROOT>/Reuniones por cliente/<CODE · Cliente>/AAAA-MM-DD – Título".
+ * The archive lives inside the private Meet folder, never in the client's shared
+ * document folder. Clients only get access to the specific files shared with them.
+ */
 function archiveMeeting_(p) {
-  var clientFolder = clientFolder_(p.client);
-  var reuniones = childFolder_(clientFolder, 'Reuniones');
+  var clientFolder = clientArchive_(p.client);
   var name = p.date + ' – ' + p.title;
   var folder;
   if (p.drive_folder_id) {
+    // One-off meeting folder created by Meet: move it as a whole.
     folder = DriveApp.getFolderById(p.drive_folder_id);
-    folder.moveTo(reuniones);
+    folder.moveTo(clientFolder);
     folder.setName(name);
   } else {
-    folder = childFolder_(reuniones, name);
+    // Recurring meeting (or loose files): move only this session's files.
+    folder = childFolder_(clientFolder, name);
     [p.recording_file_id].concat(p.notes_file_ids || []).forEach(function (id) {
       if (id) DriveApp.getFileById(id).moveTo(folder);
     });
@@ -272,15 +282,27 @@ function archiveMeeting_(p) {
   return { folder_id: folder.getId() };
 }
 
-function shareQuietly_(fileId, email) {
-  Drive.Permissions.create({ role: 'reader', type: 'user', emailAddress: email }, fileId, { sendNotificationEmail: false, supportsAllDrives: true });
+/** Private archive root inside the Meet folder (or ARCHIVE_FOLDER_ID). */
+function archiveRoot_() {
+  var p = props_(), id = p.getProperty('ARCHIVE_FOLDER_ID');
+  if (id) return DriveApp.getFolderById(id);
+  var folder = childFolder_(DriveApp.getFolderById(p.getProperty('ROOT_FOLDER_ID')), ARCHIVE_NAME);
+  p.setProperty('ARCHIVE_FOLDER_ID', folder.getId());
+  return folder;
 }
 
-function clientFolder_(client) {
-  if (client.drive_folder_id) return DriveApp.getFolderById(client.drive_folder_id);
-  var parentId = props_().getProperty('CLIENTS_FOLDER_ID');
-  var parent = parentId ? DriveApp.getFolderById(parentId) : childFolder_(DriveApp.getFolderById(props_().getProperty('ROOT_FOLDER_ID')), 'Clientes');
-  return childFolder_(parent, client.name);
+/** "<CODE> · <Name>" folder; found by code so renaming the client does not split the archive. */
+function clientArchive_(client) {
+  var root = archiveRoot_(), it = root.getFolders(), prefix = client.code + ' · ';
+  while (it.hasNext()) {
+    var f = it.next();
+    if (f.getName().indexOf(prefix) === 0) return f;
+  }
+  return root.createFolder(prefix + client.name);
+}
+
+function shareQuietly_(fileId, email) {
+  Drive.Permissions.create({ role: 'reader', type: 'user', emailAddress: email }, fileId, { sendNotificationEmail: false, supportsAllDrives: true });
 }
 
 function childFolder_(parent, name) {

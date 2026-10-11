@@ -3,7 +3,7 @@
 Este script vigila tu carpeta de Meet y hace tres cosas:
 - manda cada reunión nueva a la web,
 - apunta una fila en la hoja **«Reuniones MAD»**,
-- cuando apruebas el acta en la bandeja, archiva la reunión en la carpeta del cliente y comparte la grabación con sus contactos, **sin enviar el email de aviso de Google**.
+- cuando apruebas el acta en la bandeja, la archiva en una rama **privada** dentro de tu carpeta Google Meet (`Reuniones por cliente/<CÓDIGO · Cliente>/`) y comparte la grabación con los contactos del cliente, **sin enviar el email de aviso de Google**. Las reuniones nunca se mueven a la carpeta de documentos del cliente, que ve el equipo.
 
 ## Instalación (una vez)
 
@@ -16,7 +16,7 @@ Este script vigila tu carpeta de Meet y hace tres cosas:
    | `MAD_ENDPOINT` | Lo copias de *MAD Oficina → Reuniones → Apps Script y ajustes* |
    | `MAD_SECRET` | Lo copias de la misma pantalla |
    | `ROOT_FOLDER_ID` | `1a9Bw6H8lLV74nzD2DJ60FTqzvvUQ5cBo` (tu carpeta «Google Meet») |
-   | `CLIENTS_FOLDER_ID` | *(opcional)* La carpeta donde viven las carpetas de tus clientes |
+   | `ARCHIVE_FOLDER_ID` | *(opcional)* Si quieres el archivo en otra carpeta privada. Si no la pones, se crea `Reuniones por cliente` dentro de tu carpeta Google Meet. |
 
 4. Ejecuta la función **`install`** y acepta los permisos. Pide Drive, Docs, Calendar (lectura), Hojas y conexiones externas. Crea un disparador cada 10 minutos y la hoja «Reuniones MAD» dentro de tu carpeta de reuniones.
 
@@ -30,8 +30,9 @@ Cómo trabaja el script:
 - **La unidad es la nota de Gemini:** cada nota es una reunión. La grabación se empareja por fecha y hora (±20 min).
 - **Grabaciones sin nota** (porque no activaste Gemini): espera 3 horas y la envía sola. En la web aparecerá como «Sin transcripción».
 - **Al archivar una reunión aprobada:**
-  - si es una reunión única, mueve su subcarpeta entera a `Cliente/Reuniones/AAAA-MM-DD – Título`;
-  - si es periódica, **no toca la carpeta de Meet**: crea la carpeta de esa sesión en el cliente y mueve allí solo la nota y la grabación de ese día.
+  - si es una reunión única, mueve su subcarpeta entera a `Google Meet/Reuniones por cliente/<CÓDIGO · Cliente>/AAAA-MM-DD – Título`;
+  - si es periódica, **no toca la carpeta de Meet**: crea la carpeta de esa sesión en el archivo y mueve allí solo la nota y la grabación de ese día;
+  - el archivo sigue siendo privado, porque hereda los permisos de tu carpeta Google Meet. El cliente solo recibe acceso a los archivos concretos que compartes (la grabación y, si lo marcas, las notas). Nadie del equipo ve las reuniones.
 - **No toca la carpeta antigua** `Meet Recordings`.
 - **Solo envía las reuniones desde el día de la instalación.** Para mandar también las de los últimos N días, ejecuta `backfill(14)`.
 

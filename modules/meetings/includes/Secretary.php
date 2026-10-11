@@ -383,7 +383,8 @@ TXT;
             <fieldset class="madof-fieldset"><legend><?php esc_html_e('Al aprobar', 'mad-oficina'); ?></legend>
                 <label class="madof-check"><input type="checkbox" name="input[show_in_portal]" value="1" checked> <?php esc_html_e('Mostrar la reunión (resumen y acuerdos) en el portal del cliente', 'mad-oficina'); ?></label>
                 <?php if ( $meeting['source'] === 'apps_script' ) : ?>
-                <label class="madof-check"><input type="checkbox" name="input[share_recording]" value="1" checked> <?php esc_html_e('Archivar en la carpeta del cliente y compartir la grabación con sus contactos', 'mad-oficina'); ?></label>
+                <p class="description"><?php esc_html_e('La reunión se archiva en «Google Meet / Reuniones por cliente» (privada: el equipo no la ve).', 'mad-oficina'); ?></p>
+                <label class="madof-check"><input type="checkbox" name="input[share_recording]" value="1" checked> <?php esc_html_e('Compartir la grabación con los contactos del cliente que reciben resúmenes', 'mad-oficina'); ?></label>
                 <label class="madof-check"><input type="checkbox" name="input[share_notes]" value="1"> <?php esc_html_e('Compartir también las notas y la transcripción (pueden tener comentarios internos)', 'mad-oficina'); ?></label>
                 <?php endif; ?>
             </fieldset>
