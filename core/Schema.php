@@ -1,0 +1,264 @@
+<?php
+namespace MAD_Oficina\Core;
+
+if ( ! defined('ABSPATH') ) exit;
+
+/**
+ * Table definitions. Every CREATE statement follows dbDelta's formatting rules
+ * (one column per line, two spaces after PRIMARY KEY), so adding a column here
+ * and bumping Installer::DB_VERSION is enough to migrate existing installs.
+ *
+ * Tables for later phases (suppliers, expenses, billing_schedules, invoices,
+ * quotes) will be added with their own DB version bump.
+ */
+final class Schema {
+
+    const PREFIX = 'mad_of_';
+
+    const VISIBILITY_INTERNAL = 'internal';
+    const VISIBILITY_TEAM     = 'team';
+    const VISIBILITY_CLIENT   = 'client';
+
+    public static function table($name){
+        global $wpdb;
+        return $wpdb->prefix . self::PREFIX . $name;
+    }
+
+    public static function names(){
+        return array_keys(self::definitions());
+    }
+
+    /** @return array<string,string> table => column/index body */
+    public static function definitions(){
+        return [
+            'clients' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  name varchar(190) NOT NULL,
+  code varchar(12) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  domains text NULL,
+  drive_folder_id varchar(128) NULL,
+  chat_targets text NULL,
+  tracking_sheet_id varchar(128) NULL,
+  ads_accounts text NULL,
+  billing text NULL,
+  notes text NULL,
+  is_demo tinyint(1) NOT NULL DEFAULT 0,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY code (code),
+  KEY status (status)",
+
+            'client_users' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NOT NULL,
+  wp_user_id bigint(20) unsigned NOT NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY wp_user_id (wp_user_id),
+  KEY client_id (client_id)",
+
+            'client_contacts' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NOT NULL,
+  name varchar(190) NOT NULL,
+  aliases text NULL,
+  role varchar(120) NULL,
+  receives_summaries tinyint(1) NOT NULL DEFAULT 1,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id)",
+
+            'contact_emails' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  contact_id bigint(20) unsigned NOT NULL,
+  client_id bigint(20) unsigned NOT NULL,
+  email varchar(190) NOT NULL,
+  kind varchar(20) NOT NULL DEFAULT 'work',
+  learned_from varchar(40) NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY email (email),
+  KEY contact_id (contact_id),
+  KEY client_id (client_id)",
+
+            'team_members' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  wp_user_id bigint(20) unsigned NULL,
+  name varchar(190) NOT NULL,
+  slug varchar(40) NOT NULL,
+  workspace_email varchar(190) NULL,
+  chat_dm_space varchar(190) NULL,
+  skills text NULL,
+  active tinyint(1) NOT NULL DEFAULT 1,
+  is_demo tinyint(1) NOT NULL DEFAULT 0,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY slug (slug),
+  KEY wp_user_id (wp_user_id)",
+
+            'meetings' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  title varchar(255) NOT NULL,
+  starts_at datetime NULL,
+  ends_at datetime NULL,
+  calendar_event_id varchar(255) NULL,
+  conference_record varchar(255) NULL,
+  attendees text NULL,
+  recording_file_id varchar(128) NULL,
+  transcript_file_id varchar(128) NULL,
+  gemini_notes_id varchar(128) NULL,
+  drive_folder_id varchar(128) NULL,
+  sheet_row int(11) NULL,
+  transcript longtext NULL,
+  summary text NULL,
+  extraction longtext NULL,
+  next_meeting varchar(190) NULL,
+  shared_with text NULL,
+  status varchar(20) NOT NULL DEFAULT 'received',
+  visibility varchar(10) NOT NULL DEFAULT 'internal',
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id),
+  KEY status (status),
+  KEY starts_at (starts_at)",
+
+            'action_items' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  meeting_id bigint(20) unsigned NULL,
+  process_id bigint(20) unsigned NULL,
+  title varchar(255) NOT NULL,
+  description text NULL,
+  owner varchar(20) NOT NULL DEFAULT 'mad',
+  team_member_id bigint(20) unsigned NULL,
+  due_date date NULL,
+  priority varchar(10) NOT NULL DEFAULT 'normal',
+  status varchar(20) NOT NULL DEFAULT 'open',
+  visibility varchar(10) NOT NULL DEFAULT 'internal',
+  source varchar(20) NOT NULL DEFAULT 'manual',
+  synced_to text NULL,
+  completed_at datetime NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id),
+  KEY team_member_id (team_member_id),
+  KEY status_due (status,due_date)",
+
+            'pending_topics' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  meeting_id bigint(20) unsigned NULL,
+  text text NOT NULL,
+  investigable tinyint(1) NOT NULL DEFAULT 0,
+  research_note longtext NULL,
+  status varchar(20) NOT NULL DEFAULT 'open',
+  visibility varchar(10) NOT NULL DEFAULT 'internal',
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id)",
+
+            'ideas' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  meeting_id bigint(20) unsigned NULL,
+  title varchar(255) NOT NULL,
+  description text NULL,
+  resurface_at date NULL,
+  status varchar(20) NOT NULL DEFAULT 'dormant',
+  visibility varchar(10) NOT NULL DEFAULT 'internal',
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id),
+  KEY resurface (status,resurface_at)",
+
+            'processes' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NOT NULL,
+  area varchar(40) NOT NULL,
+  title varchar(255) NOT NULL,
+  description text NULL,
+  status varchar(20) NOT NULL DEFAULT 'planned',
+  starts_at date NULL,
+  ends_at date NULL,
+  sort int(11) NOT NULL DEFAULT 0,
+  visibility varchar(10) NOT NULL DEFAULT 'client',
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_id (client_id)",
+
+            'tasks' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  agent varchar(40) NOT NULL,
+  type varchar(60) NOT NULL,
+  client_id bigint(20) unsigned NULL,
+  payload longtext NULL,
+  status varchar(20) NOT NULL DEFAULT 'queued',
+  attempts int(11) NOT NULL DEFAULT 0,
+  scheduled_at datetime NULL,
+  result longtext NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY agent_status (agent,status)",
+
+            'approvals' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  agent varchar(40) NOT NULL,
+  action_type varchar(60) NOT NULL,
+  client_id bigint(20) unsigned NULL,
+  title varchar(255) NOT NULL,
+  summary text NULL,
+  payload longtext NULL,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  resolution longtext NULL,
+  resolved_by bigint(20) unsigned NULL,
+  resolved_at datetime NULL,
+  channel varchar(10) NULL,
+  chat_message_name varchar(255) NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY status (status),
+  KEY agent (agent)",
+
+            'agent_log' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  agent varchar(40) NOT NULL,
+  event varchar(60) NOT NULL,
+  client_id bigint(20) unsigned NULL,
+  model varchar(60) NULL,
+  input_tokens int(11) NOT NULL DEFAULT 0,
+  output_tokens int(11) NOT NULL DEFAULT 0,
+  cost_usd decimal(10,5) NOT NULL DEFAULT 0,
+  data longtext NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY agent_created (agent,created_at),
+  KEY client_id (client_id)",
+
+            'messages' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  thread varchar(64) NOT NULL,
+  author_type varchar(20) NOT NULL,
+  author_id bigint(20) unsigned NULL,
+  agent varchar(40) NULL,
+  body longtext NOT NULL,
+  channel varchar(10) NOT NULL DEFAULT 'portal',
+  visibility varchar(10) NOT NULL DEFAULT 'client',
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY client_thread (client_id,thread)",
+        ];
+    }
+}
