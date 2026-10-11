@@ -168,7 +168,14 @@ export const PANELS = {
   campanas: { kicker: 'Sala de campañas', title: 'Tus campañas', render: () => soon('Estamos preparando un resumen claro de tus campañas de Google y Meta.') },
   reunion: { kicker: 'Recepción', title: 'Pedir una reunión', render: () => soon('Pronto podrás elegir un hueco libre de la agenda de Jessica desde aquí. Mientras tanto, escríbele directamente.') },
   encargo: { kicker: 'Recepción', title: 'Nuevo encargo', render: () => soon('Pronto podrás contarnos un nuevo encargo con un pequeño formulario de briefing.') },
-  bandeja: { kicker: 'Despacho de gerencia', title: 'Bandeja de gerencia', render: () => soon('La bandeja con las aprobaciones de los agentes llega con la Secretaria de actas (bloque 3).') },
+  bandeja: {
+    kicker: 'Despacho de gerencia', title: 'Bandeja de gerencia',
+    render: ({ me }) => {
+      const n = me.inbox?.pending || 0;
+      return `<p class="madof-lead">${n ? `Tienes <strong>${n}</strong> ${n === 1 ? 'petición' : 'peticiones'} esperando tu decisión.` : 'No hay nada pendiente. Todo en orden.'}</p>
+        <p><a class="madof-btn" href="${esc(me.inbox?.url || '#')}">${icon('inbox')} Abrir la bandeja</a></p>`;
+    },
+  },
   privado: { kicker: 'Despacho de gerencia', title: 'Despacho de Jessica', render: (ctx) => `<p>Aquí trabaja ${esc(ctx.me.characters.jessica.name)}. Si necesitas hablar con ella, pide una reunión o escribe en recepción.</p>` },
 
   chat: {

@@ -125,6 +125,7 @@ final class Rest {
             ],
         ];
         if ( $role === 'manager' ) {
+            $data['inbox'] = ['pending' => \MAD_Oficina\Core\Approvals::count_pending(), 'url' => admin_url('admin.php?page=mad-oficina-bandeja')];
             $data['clients'] = array_map(fn($c) => ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']], Clients::all(['status' => 'active']));
         }
         return rest_ensure_response($data);
