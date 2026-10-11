@@ -1,0 +1,19 @@
+{
+  "name": "mad-oficina-game",
+  "private": true,
+  "type": "module",
+  "description": "Pixel-art office and client portal for MAD Oficina. Built into ../assets/game (committed: the server never builds).",
+  "scripts": {
+    "assets": "node scripts/generate-assets.mjs",
+    "build": "npm run assets && vite build",
+    "dev": "vite build --watch"
+  },
+  "dependencies": {
+    "easystarjs": "0.4.4",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "pngjs": "7.0.0",
+    "vite": "7.1.12"
+  }
+}
