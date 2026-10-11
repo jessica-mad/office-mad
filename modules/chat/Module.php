@@ -180,12 +180,33 @@ return new class($core) implements MAD_Oficina_Module {
     public function handle_chat_test(){
         $this->guard('chat_test');
         $url = admin_url('admin.php?page=' . $this->menu_slug());
-        $m = $this->messenger();
-        $r1 = $m->to_manager(['text' => __('Hola, soy el asistente de MAD Oficina. Si lees esto, el bot funciona.', 'mad-oficina')]);
-        $space = $this->settings()['test_space'] ?? '';
-        $r2 = $space && $this->api() ? $this->api()->create_message($space, ['text' => '*' . __('[PRUEBA]', 'mad-oficina') . '* ' . __('Así verás aquí los mensajes que irían a los clientes.', 'mad-oficina') . "\n\n_" . \MAD_Oficina\Chat\Cards::SIGNATURE . '_']) : null;
-        $errors = array_filter([is_wp_error($r1) ? $r1->get_error_message() : null, is_wp_error($r2) ? $r2->get_error_message() : null]);
-        $this->back($url, $errors ? implode(' · ', $errors) : __('Mensajes de prueba enviados. Míralos en Google Chat.', 'mad-oficina'), $errors ? 'error' : 'success');
+        $settings = $this->settings();
+        $api = $this->api();
+        if ( ! $api ) $this->back($url, __('Falta la clave de la cuenta de servicio.', 'mad-oficina'), 'error');
+
+        $report = [];
+        $ok = true;
+        // 1. Direct message to Jessica.
+        $dm = $settings['manager_dm'] ?? '';
+        if ( ! $dm ) {
+            $report[] = __('Chat directo: no enlazado (escríbele «hola» al bot).', 'mad-oficina');
+            $ok = false;
+        } else {
+            $r = $api->create_message($dm, ['text' => __('Hola, soy el asistente de MAD Oficina. Si lees esto, el bot funciona.', 'mad-oficina')]);
+            $report[] = is_wp_error($r) ? sprintf(__('Chat directo (%1$s): ERROR · %2$s', 'mad-oficina'), $dm, $r->get_error_message()) : sprintf(__('Chat directo: enviado (%s)', 'mad-oficina'), $dm);
+            if ( is_wp_error($r) ) { $ok = false; $this->log_error('test_dm', $r->get_error_message()); }
+        }
+        // 2. Test space.
+        $space = $settings['test_space'] ?? '';
+        if ( ! $space ) {
+            $report[] = __('Espacio de pruebas: no elegido. Elígelo y pulsa Guardar antes de probar.', 'mad-oficina');
+            $ok = false;
+        } else {
+            $r = $api->create_message($space, ['text' => '*' . __('[PRUEBA]', 'mad-oficina') . '* ' . __('Así verás aquí los mensajes que irían a los clientes.', 'mad-oficina') . "\n\n_" . \MAD_Oficina\Chat\Cards::SIGNATURE . '_']);
+            $report[] = is_wp_error($r) ? sprintf(__('Espacio de pruebas (%1$s): ERROR · %2$s', 'mad-oficina'), $space, $r->get_error_message()) : sprintf(__('Espacio de pruebas: enviado (%s)', 'mad-oficina'), $space);
+            if ( is_wp_error($r) ) { $ok = false; $this->log_error('test_space', $r->get_error_message()); }
+        }
+        $this->back($url, implode(' · ', $report), $ok ? 'success' : 'error');
     }
 
     public function handle_client_chat_targets(){
