@@ -1,0 +1,65 @@
+/* MAD Oficina · pantallas de administración */
+.madof-wrap{font:300 15px/1.6 var(--madof-font);color:var(--k);max-width:1180px}
+.madof-wrap h1,.madof-wrap h2,.madof-wrap h3{font-family:var(--madof-font);color:var(--k)}
+.madof-wrap a{color:var(--k);text-decoration-color:var(--y);text-decoration-thickness:2px;text-underline-offset:3px}
+.madof-wrap code{background:var(--g);padding:2px 6px;border-radius:6px}
+
+.madof-hero{background:var(--y) var(--madof-dots-yellow);background-size:22px 22px;border-radius:var(--madof-radius);padding:28px 32px;margin:16px 0 24px;border:2px solid var(--k)}
+.madof-hero h1{font-weight:400;font-size:34px;line-height:1.1;margin:6px 0 8px;padding:0}
+.madof-hero p{margin:0;max-width:70ch;font-size:15px}
+
+.madof-card{background:var(--c);border:2px solid var(--k);border-radius:var(--madof-radius);padding:24px 28px;margin:0 0 20px;position:relative}
+.madof-card h2{font-size:20px;font-weight:500;margin:10px 0 6px}
+.madof-card h3{font-size:16px;font-weight:500;margin:24px 0 8px}
+.madof-card .madof-kicker{margin-bottom:8px}
+.madof-card.is-on{background:var(--g)}
+.madof-card.is-muted{background:var(--g);border-style:dashed}
+.madof-card.is-danger{border-color:#8a1c1c}
+.madof-card .description{color:#3a3a3a}
+
+.madof-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.madof-grid .madof-card{margin:0;display:flex;flex-direction:column;gap:8px}
+.madof-grid .madof-card form{margin-top:auto}
+
+.madof-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.madof-warn{background:var(--k);color:var(--y);padding:8px 12px;border-radius:12px;font-size:13px}
+.madof-status{display:flex;align-items:center;gap:8px;font-weight:500}
+.madof-status.is-ok .madof-icon{color:#1f6f2a}
+
+.madof-form{display:flex;flex-direction:column;gap:14px;max-width:880px}
+.madof-form label{display:flex;flex-direction:column;gap:4px;font-weight:500;font-size:14px}
+.madof-form small{font-weight:300;color:#555}
+.madof-form input[type=text],.madof-form input[type=email],.madof-form input[type=password],.madof-form select,.madof-form textarea{font:300 15px/1.4 var(--madof-font);border:2px solid var(--k);border-radius:12px;padding:8px 12px;background:#fff;max-width:none}
+.madof-form input:focus,.madof-form select:focus,.madof-form textarea:focus{outline:3px solid var(--y);outline-offset:1px;box-shadow:none;border-color:var(--k)}
+.madof-form .madof-btn{align-self:flex-start}
+.madof-form label.madof-check{flex-direction:row;align-items:center;gap:8px;font-weight:300}
+.madof-input-code{text-transform:uppercase;font-family:var(--madof-pixel)!important;letter-spacing:.12em}
+.madof-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+
+.madof-table{width:100%;border-collapse:separate;border-spacing:0;background:var(--c);border:2px solid var(--k);border-radius:var(--madof-radius);overflow:hidden;margin:0 0 20px}
+.madof-table th{font:400 11px/1.2 var(--madof-pixel);text-transform:uppercase;letter-spacing:.14em;text-align:left;background:var(--k);color:var(--y);padding:12px 14px}
+.madof-table td{padding:12px 14px;border-top:1px solid rgba(11,11,11,.12);vertical-align:top}
+.madof-table tr:first-child td{border-top:0}
+.madof-card .madof-table{border-width:1px}
+
+.madof-row-actions{white-space:nowrap;text-align:right}
+.madof-row-actions > *{margin-left:10px}
+.madof-inline{display:inline}
+.madof-link{background:none;border:0;padding:0;font:inherit;color:var(--k);text-decoration:underline;text-decoration-color:var(--y);text-decoration-thickness:2px;text-underline-offset:3px;cursor:pointer}
+
+.madof-details{margin-top:16px}
+.madof-details summary{cursor:pointer;font-weight:500}
+.madof-steps{margin:12px 0 16px 20px}
+.madof-copy{display:block;margin-top:6px;user-select:all;word-break:break-all}
+
+@media (max-width:782px){
+  .madof-hero{padding:20px}
+  .madof-hero h1{font-size:26px}
+  .madof-card{padding:18px}
+  .madof-table thead{display:none}
+  .madof-table td{display:block;border-top:0;padding:6px 14px}
+  .madof-table tr td:first-child{padding-top:14px;border-top:1px solid rgba(11,11,11,.12)}
+  .madof-row-actions{text-align:left}
+  .madof-row-actions > *{margin:0 10px 0 0}
+}
+.madof-wrap hr.wp-header-end{border:0;margin:0}

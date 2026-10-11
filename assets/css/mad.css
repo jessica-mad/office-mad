@@ -1,0 +1,40 @@
+/* MAD · identidad visual compartida (admin, portal, A4). Pixel + mostaza + puntos. */
+@font-face{font-family:"Jost";font-weight:300;font-style:normal;font-display:swap;src:url(../fonts/jost-latin-300-normal.woff2) format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-style:normal;font-display:swap;src:url(../fonts/jost-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Jost";font-weight:500;font-style:normal;font-display:swap;src:url(../fonts/jost-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:"Jost";font-weight:600;font-style:normal;font-display:swap;src:url(../fonts/jost-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"Silkscreen";font-weight:400;font-style:normal;font-display:swap;src:url(../fonts/silkscreen-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Silkscreen";font-weight:700;font-style:normal;font-display:swap;src:url(../fonts/silkscreen-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:"Playfair Display";font-weight:400;font-style:italic;font-display:swap;src:url(../fonts/playfair-display-latin-400-italic.woff2) format("woff2")}
+
+:root{
+  --y:#FBB62F; /* amarillo mostaza */
+  --k:#0B0B0B; /* negro */
+  --c:#FDF8EA; /* crema */
+  --g:#F2F2DC; /* crema verdoso */
+  --madof-radius:22px;
+  --madof-font:"Jost",system-ui,sans-serif;
+  --madof-pixel:"Silkscreen",ui-monospace,monospace;
+  --madof-serif:"Playfair Display",Georgia,serif;
+  --madof-dots-dark:radial-gradient(rgba(251,182,47,.35) 1.4px,transparent 1.6px);
+  --madof-dots-yellow:radial-gradient(rgba(0,0,0,.16) 1.4px,transparent 1.6px);
+}
+
+.madof-kicker{font-family:var(--madof-pixel);text-transform:uppercase;letter-spacing:.18em;font-size:11px;line-height:1.4;display:inline-block}
+.madof-em{font-family:var(--madof-serif);font-style:italic;font-weight:400}
+.madof-icon{display:inline-block;vertical-align:-1px;image-rendering:pixelated}
+
+.madof-btn{display:inline-flex;align-items:center;gap:8px;background:var(--y);color:var(--k);border:2px solid var(--k);border-radius:999px;padding:9px 20px;font:600 14px/1.2 var(--madof-font);cursor:pointer;text-decoration:none;box-shadow:3px 3px 0 var(--k);transition:transform .08s,box-shadow .08s}
+.madof-btn:hover{color:var(--k);transform:translate(1px,1px);box-shadow:2px 2px 0 var(--k)}
+.madof-btn:focus-visible{outline:3px solid var(--k);outline-offset:3px}
+.madof-btn:active{transform:translate(3px,3px);box-shadow:none}
+.madof-btn[disabled]{opacity:.45;cursor:not-allowed;transform:none;box-shadow:3px 3px 0 var(--k)}
+.madof-btn.is-ghost{background:var(--c)}
+.madof-btn.is-danger{background:var(--k);color:var(--c)}
+.madof-btn.is-danger:hover{color:var(--y)}
+
+.madof-pill{display:inline-block;font:400 10px/1 var(--madof-pixel);text-transform:uppercase;letter-spacing:.14em;padding:5px 10px;border-radius:999px;background:var(--g);color:var(--k);border:1px solid rgba(11,11,11,.18)}
+.madof-pill.is-on{background:var(--y);border-color:var(--k)}
+.madof-pill.is-demo{background:var(--k);color:var(--y);border-color:var(--k)}
+.madof-code{font:700 13px/1 var(--madof-pixel);letter-spacing:.12em;background:var(--k);color:var(--y);padding:5px 8px;border-radius:6px}
+.madof-tag{font:400 9px/1 var(--madof-pixel);text-transform:uppercase;letter-spacing:.1em;padding:3px 6px;border-radius:4px;background:var(--g)}
