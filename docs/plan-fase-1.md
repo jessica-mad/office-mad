@@ -205,3 +205,25 @@ Sin cambios respecto a v1:
   - casilla de consentimiento con enlace a la política de privacidad;
   - las conversaciones de visitantes que no se convierten en lead se borran a los 30 días (configurable).
 - **Prompt injection:** lo que escribe el visitante es solo conversación. Ninguna herramienta envía nada fuera sin tu aprobación.
+
+---
+
+## 10. Bloque 7 · WhatsApp por Meta Business (propuesta, sin implementar)
+
+**Situación de Jessica:** usa la app **WhatsApp Business** y habla con sus clientes en **chats individuales**, no en grupos.
+
+**Cómo funcionaría:**
+- **Conexión:** la API de WhatsApp en modo **coexistencia**, conectada desde su portfolio de Meta Business y una app de Meta for Developers. Jessica sigue usando la app del móvil y Meta reenvía al plugin una copia de los mensajes recibidos y enviados.
+- **Quién es cada número:** se asocia a un contacto del cliente, para lo que hay que añadir el teléfono a los contactos.
+- **Una vez al día,** la Secretaria repasa las conversaciones de cada cliente y deja en la bandeja las tareas y los temas que detecte.
+- **Solo lectura:** el bot **nunca responde por WhatsApp**.
+
+**Antes de implementar, verificar en la documentación de Meta:**
+- si se puede hacer sin proveedor (BSP);
+- el requisito de antigüedad del número;
+- la ventana de 24 h para traer el historial;
+- que hay que abrir la app al menos cada 13 días.
+
+**RGPD:** hay que informar a los clientes en la política de privacidad y en el contrato.
+
+**Mientras tanto,** la opción «Importar conversación de WhatsApp» del bloque 4 cubre el caso a mano: el `.txt` exportado desde el chat.
