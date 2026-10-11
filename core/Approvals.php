@@ -18,6 +18,25 @@ final class Approvals {
     const APPROVED   = 'approved';
     const REJECTED   = 'rejected';
 
+    /**
+     * Creates the approval and, if Jessica gave this action type autonomy, runs it
+     * straight away with the proposed values (channel "auto").
+     * @return array{id:int, status:string, result:mixed}
+     */
+    public static function request($agent, $action_type, $title, array $payload, array $args = [], array $default_input = []){
+        $id = self::create($agent, $action_type, $title, $payload, $args);
+        $level = Autonomy::level($action_type);
+        if ( $level === 'ask' ) return ['id' => $id, 'status' => self::PENDING, 'result' => null];
+        $result = self::resolve($id, 'approve', $default_input, 0, 'auto');
+        if ( is_wp_error($result) ) {
+            // Could not run on its own (e.g. Calendar down): falls back to asking.
+            do_action('madoficina_approval_created', $id);
+            return ['id' => $id, 'status' => self::PENDING, 'result' => null];
+        }
+        if ( $level === 'notify' ) do_action('madoficina_autonomous_action', $id, $result);
+        return ['id' => $id, 'status' => self::APPROVED, 'result' => $result];
+    }
+
     /** @return int approval id */
     public static function create($agent, $action_type, $title, array $payload, array $args = []){
         global $wpdb;
@@ -35,7 +54,7 @@ final class Approvals {
             'updated_at'  => Time::now(),
         ]);
         $id = (int) $wpdb->insert_id;
-        do_action('madoficina_approval_created', $id);
+        if ( Autonomy::level($action_type) === 'ask' ) do_action('madoficina_approval_created', $id);
         return $id;
     }
 

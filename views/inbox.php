@@ -72,4 +72,21 @@ $who = function($agent){
         </tbody>
     </table>
     <?php endif; ?>
+
+    <section class="madof-card" id="autonomia">
+        <span class="madof-kicker"><?php esc_html_e('Autonomía de los agentes', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('Por defecto todo te pregunta. Aquí puedes dejar que algunas acciones se hagan solas. Los resúmenes, las facturas y los mensajes a Liz siempre pasan por ti.', 'mad-oficina'); ?></p>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form">
+            <?php wp_nonce_field('madof_autonomy_save'); ?>
+            <input type="hidden" name="action" value="madof_autonomy_save">
+            <?php $levels = ['ask' => __('Preguntarme siempre', 'mad-oficina'), 'notify' => __('Hacerlo y avisarme', 'mad-oficina'), 'silent' => __('Hacerlo en silencio', 'mad-oficina')]; ?>
+            <?php foreach ( \MAD_Oficina\Core\Autonomy::ADJUSTABLE as $type => $label ) : $current = \MAD_Oficina\Core\Autonomy::level($type); ?>
+                <label><?php echo esc_html__($label, 'mad-oficina'); ?>
+                    <select name="autonomy[<?php echo esc_attr($type); ?>]"><?php foreach ( $levels as $value => $text ) : ?>
+                        <option value="<?php echo esc_attr($value); ?>" <?php selected($current, $value); ?>><?php echo esc_html($text); ?></option>
+                    <?php endforeach; ?></select></label>
+            <?php endforeach; ?>
+            <button class="madof-btn is-ghost"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
+        </form>
+    </section>
 </div>

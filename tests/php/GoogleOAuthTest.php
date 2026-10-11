@@ -9,6 +9,7 @@ class GoogleOAuthTest extends MADOF_TestCase {
 
     public function set_up(){
         parent::set_up();
+        remove_all_filters('madoficina_google_scopes'); // only the base scopes, whatever modules are on
         $this->oauth = MAD_Oficina_Core::instance()->get_module('google')->oauth();
         wp_set_current_user($this->make_admin());
         $this->oauth->save_credentials('client-id.apps.googleusercontent.com', 'shh-secret', 'imad.example');

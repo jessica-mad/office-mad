@@ -25,6 +25,9 @@ const detail = (text) => !text ? '' : text.length <= 90
 
 const empty = (text) => `<p class="madof-empty">${esc(text)}</p>`;
 const pill = (text, mod = '') => `<span class="madof-pill ${mod}">${esc(text)}</span>`;
+const slotList = (slots, readonly = false) => slots.length
+  ? slots.map((s) => readonly ? `<p class="madof-slot">${esc(s.label)}</p>` : `<button type="button" class="madof-slot" role="radio" aria-checked="false" data-start="${Number(s.start)}">${esc(s.label)}</button>`).join('')
+  : '<p class="madof-meta">No quedan huecos libres en los próximos días. Escríbele a Jessica y lo buscáis juntas.</p>';
 const soon = (text) => `<div class="madof-soon">${pill('Pronto', 'is-on')}<p>${esc(text)}</p></div>`;
 
 /* ───────────── menu (reception quick buttons) ───────────── */
@@ -36,7 +39,7 @@ export const MENU = [
   { panel: 'documentos', label: 'Mis documentos', icon: 'folder' },
   { panel: 'facturas', label: 'Mis facturas y presupuestos', icon: 'receipt', soon: true },
   { panel: 'campanas', label: 'Mis campañas', icon: 'megaphone', soon: true },
-  { panel: 'reunion', label: 'Pedir una reunión', icon: 'plus', soon: true },
+  { panel: 'reunion', label: 'Pedir una reunión', icon: 'plus' },
   { panel: 'encargo', label: 'Nuevo encargo', icon: 'pencil', soon: true },
   { panel: 'chat', label: 'Escribir libremente', icon: 'chat', chat: true },
 ];
@@ -171,7 +174,90 @@ export const PANELS = {
 
   facturas: { kicker: 'Administración', title: 'Facturas y presupuestos', render: () => soon('Muy pronto verás aquí tus facturas y presupuestos, con su estado (pendiente o pagada).') },
   campanas: { kicker: 'Sala de campañas', title: 'Tus campañas', render: () => soon('Estamos preparando un resumen claro de tus campañas de Google y Meta.') },
-  reunion: { kicker: 'Recepción', title: 'Pedir una reunión', render: () => soon('Pronto podrás elegir un hueco libre de la agenda de Jessica desde aquí. Mientras tanto, escríbele directamente.') },
+  reunion: {
+    kicker: 'Recepción', title: 'Pedir una reunión', needsClient: true,
+    async render({ api }) {
+      let data;
+      try { data = await api.meetingRequests(); } catch (e) {
+        if (e.status === 404) return soon('Pronto podrás elegir un hueco libre de la agenda de Jessica desde aquí. Mientras tanto, escríbele directamente.');
+        throw e;
+      }
+      const r = data.request;
+      if (r && (r.status === 'pending' || r.status === 'processing')) {
+        return `<div class="madof-request is-pending">${pill('Pendiente', 'is-on')}
+          <p class="madof-lead">Has pedido reunión para el <strong>${esc(r.label)}</strong>.</p>
+          <p>Jessica la confirma en cuanto la vea y te llegará la invitación de Google Calendar con el enlace de Meet.</p></div>`;
+      }
+      let last = '';
+      if (r && r.status === 'approved') {
+        last = `<div class="madof-request is-ok">${pill('Confirmada', 'is-on')}<p>Tu última reunión pedida: <strong>${esc(r.label)}</strong>.${r.meet ? ` <a href="${esc(r.meet)}" target="_blank" rel="noopener">Enlace de Meet</a>` : ''}</p></div>`;
+      } else if (r && r.status === 'rejected') {
+        last = `<div class="madof-request">${pill('No pudo ser')}<p>Jessica no pudo el ${esc(r.label)}. Elige otro hueco, por favor.</p></div>`;
+      }
+      if (data.error) return last + `<p class="madof-lead">${esc(data.error)}</p>`;
+      if (!data.can_book) return last + `<p class="madof-meta">Vista previa de gerencia: estos son los huecos que vería el cliente.</p>${slotList(data.slots, true)}`;
+      return `${last}
+        <p class="madof-lead">Estos huecos están libres ahora mismo en la agenda de Jessica. Elige uno:</p>
+        <div class="madof-slots" role="radiogroup" aria-label="Huecos libres">${slotList(data.slots)}</div>
+        <details class="madof-more madof-other-times"><summary>Ninguno me va bien</summary>
+          <form class="madof-interpret">
+            <label for="madof-avail">Cuéntame qué días u horas te vienen bien</label>
+            <input id="madof-avail" type="text" maxlength="300" placeholder="Ej.: el jueves por la tarde o el lunes que viene" required>
+            <button class="madof-btn is-ghost" type="submit">Buscar huecos</button>
+          </form>
+        </details>
+        <form class="madof-request-form">
+          <label for="madof-topic">¿De qué quieres hablar? <span class="madof-meta">(opcional)</span></label>
+          <textarea id="madof-topic" rows="2" maxlength="500"></textarea>
+          <p class="madof-meta" aria-live="polite" data-status></p>
+          <button class="madof-btn" type="submit" disabled>${icon('check')} Pedir esta reunión</button>
+        </form>`;
+    },
+    mount(el, ctx) {
+      const form = el.querySelector('.madof-request-form');
+      if (!form) return;
+      const button = form.querySelector('button');
+      const status = form.querySelector('[data-status]');
+      const slots = el.querySelector('.madof-slots');
+      let chosen = null;
+      const pick = (b) => {
+        slots.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+        chosen = Number(b.dataset.start);
+        button.disabled = false;
+        status.textContent = `Has elegido: ${b.textContent.trim()}`;
+      };
+      slots.addEventListener('click', (e) => { const b = e.target.closest('button[data-start]'); if (b) pick(b); });
+
+      el.querySelector('.madof-interpret').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = e.target.querySelector('input');
+        const b = e.target.querySelector('button');
+        b.disabled = true; status.textContent = 'Buscando en la agenda…';
+        try {
+          const res = await ctx.api.interpretAvailability(input.value.trim());
+          slots.innerHTML = slotList(res.slots);
+          chosen = null; button.disabled = true;
+          status.textContent = res.slots.length ? 'Te he encontrado estos huecos.' : 'No hay huecos libres en esas fechas. Prueba con otras o elige uno de la lista.';
+        } catch (err) { status.textContent = err.message; } finally { b.disabled = false; }
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!chosen) return;
+        button.disabled = true; status.textContent = 'Enviando…';
+        try {
+          const res = await ctx.api.requestMeeting(chosen, form.querySelector('textarea').value.trim());
+          el.innerHTML = res.status === 'approved'
+            ? `<div class="madof-request is-ok">${pill('Confirmada', 'is-on')}<p class="madof-lead">¡Hecho! Reunión el <strong>${esc(res.label)}</strong>. Te llega la invitación de Google Calendar con el enlace de Meet.</p></div>`
+            : `<div class="madof-request is-pending">${pill('Pendiente', 'is-on')}<p class="madof-lead">Petición enviada para el <strong>${esc(res.label)}</strong>.</p><p>Jessica la confirma en cuanto la vea y te llegará la invitación por email.</p></div>`;
+          el.querySelector('.madof-lead')?.setAttribute('tabindex', '-1');
+          el.querySelector('.madof-lead')?.focus();
+        } catch (err) {
+          status.textContent = err.message; button.disabled = false;
+        }
+      });
+    },
+  },
   encargo: { kicker: 'Recepción', title: 'Nuevo encargo', render: () => soon('Pronto podrás contarnos un nuevo encargo con un pequeño formulario de briefing.') },
   bandeja: {
     kicker: 'Despacho de gerencia', title: 'Bandeja de gerencia',

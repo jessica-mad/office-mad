@@ -57,6 +57,7 @@ final class MAD_Oficina_Core {
         add_action('rest_api_init', [$this,'register_rest_routes']);
         add_action('admin_post_madof_toggle_module', [$this, 'handle_toggle_module']);
         add_action('admin_post_madof_approval_resolve', [$this, 'handle_approval_resolve']);
+        add_action('admin_post_madof_autonomy_save', [$this, 'handle_autonomy_save']);
         add_action('admin_notices', [$this,'admin_notices']);
 
         if ( defined('WP_CLI') && WP_CLI ) {
@@ -128,6 +129,17 @@ final class MAD_Oficina_Core {
             \MAD_Oficina\Core\AdminUi::flash($result['message'] ?? __('Hecho.', 'mad-oficina'));
         }
         wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja'));
+        exit;
+    }
+
+    public function handle_autonomy_save(){
+        if ( ! current_user_can(self::CAPABILITY) ) {
+            wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        }
+        check_admin_referer('madof_autonomy_save');
+        \MAD_Oficina\Core\Autonomy::save(isset($_POST['autonomy']) && is_array($_POST['autonomy']) ? wp_unslash($_POST['autonomy']) : []);
+        \MAD_Oficina\Core\AdminUi::flash(__('Niveles de autonomía guardados.', 'mad-oficina'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja#autonomia'));
         exit;
     }
 

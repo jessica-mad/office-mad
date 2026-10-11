@@ -10,6 +10,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     const APPROVAL_HOOK = 'madoficina_chat_approval';
     const MEETING_HOOK  = 'madoficina_chat_meeting';
+    const NOTICE_HOOK   = 'madoficina_chat_autonomy_notice';
 
     private $core;
 
@@ -62,7 +63,9 @@ return new class($core) implements MAD_Oficina_Module {
         // Sends run in the background so approving never waits for Google.
         add_action('madoficina_approval_created', fn($id) => $this->queue(self::APPROVAL_HOOK, [(int) $id]));
         add_action('madoficina_meeting_approved', fn($id, $counts = [], $ctx = []) => $this->queue(self::MEETING_HOOK, [(int) $id, ! empty($ctx['notify_team']), ! empty($ctx['send_summary'])]), 10, 3);
+        add_action('madoficina_autonomous_action', fn($id, $result = []) => $this->queue(self::NOTICE_HOOK, [(int) $id]), 10, 2);
         add_action(self::APPROVAL_HOOK, [$this, 'send_approval_card']);
+        add_action(self::NOTICE_HOOK, [$this, 'send_autonomy_notice']);
         add_action(self::MEETING_HOOK, [$this, 'send_meeting_messages'], 10, 3);
 
         add_action('madoficina_client_edit_sections', [$this, 'render_client_section']);
@@ -105,6 +108,15 @@ return new class($core) implements MAD_Oficina_Module {
         $res = $this->messenger()->to_manager(\MAD_Oficina\Chat\Cards::approval($a, admin_url('admin.php?page=mad-oficina-bandeja'), $lines));
         if ( is_wp_error($res) ) { $this->log_error('approval_card', $res->get_error_message(), $a['client_id']); return; }
         $wpdb->update(\MAD_Oficina\Core\Schema::table('approvals'), ['chat_message_name' => $res['name'] ?? null], ['id' => $a['id']]);
+    }
+
+    /** An action that ran on its own ("hacerlo y avisarme") → short note to Jessica. */
+    public function send_autonomy_notice($approval_id){
+        $a = \MAD_Oficina\Core\Approvals::get($approval_id);
+        if ( ! $a || $a['status'] !== 'approved' ) return;
+        $done = $a['resolution']['result']['message'] ?? $a['title'];
+        $res = $this->messenger()->to_manager(['text' => sprintf(__('Hecho sin preguntarte (lo tienes en autonomía): %s', 'mad-oficina'), $done)]);
+        if ( is_wp_error($res) ) $this->log_error('autonomy_notice', $res->get_error_message(), $a['client_id']);
     }
 
     /** Approved meeting → Liz's tasks by DM and, if checked, the summary to the client. */

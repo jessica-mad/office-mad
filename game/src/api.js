@@ -29,6 +29,9 @@ export function createApi(config) {
     section: (name) => request('portal/' + name),
     chatHistory: () => request('portal/chat'),
     chatSend: (message) => request('portal/chat', { method: 'POST', body: { message } }),
+    meetingRequests: () => request('portal/meeting-requests'),
+    requestMeeting: (start, topic) => request('portal/meeting-requests', { method: 'POST', body: { start, topic } }),
+    interpretAvailability: (text) => request('portal/meeting-requests/interpret', { method: 'POST', body: { text } }),
     teamTasks: () => request('team/tasks', { withClient: false }),
   };
 }
