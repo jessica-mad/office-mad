@@ -1,184 +1,167 @@
-# Plan · Fase 1 (MVP)
+# Plan · Fase 1 (MVP) · v2
 
-> Propuesta para revisar antes de escribir código. Nada de esto está implementado todavía.
-> Cuando des el OK, empiezo por el **Bloque 1** y te lo enseño antes de pasar al siguiente.
-
----
-
-## 0. Decisiones que necesito de ti
-
-| # | Pregunta | Mi propuesta por defecto |
-|---|---|---|
-| 1 | **Convenciones de MAD Suite.** No tengo acceso a su código. ¿Me pasas el archivo principal y la interfaz de módulos (o el repo)? | Si no puedes, uso `namespace MAD\Oficina`, PSR-4 con Composer, `Plugin::instance()` como singleton y `ModuleInterface` con `id()`, `register()`, `activate()` y `deactivate()`. Después lo adapto a MAD Suite. |
-| 2 | ¿El repo **es** el plugin (raíz = `mad-oficina/`)? | Sí. El código del juego va en `game/` y no entra en el zip de distribución. |
-| 3 | **Servidor de pruebas con HTTPS público.** Google Chat solo envía eventos (clics en tarjetas, mensajes al bot) a una URL pública. Con `wp-env` en local no llegan. | Para los bloques 1 a 3, `wp-env` en local. Para el bloque 4, un staging (subdominio de imad.pro) o un túnel (Cloudflare Tunnel). |
-| 4 | ¿Tu hosting permite un **cron real** (crontab o panel)? | Sí. Lo dejo documentado: `*/5 * * * * wp cron event run --due-now`. |
-| 5 | **Modelos de Claude por agente** (configurables) | Recepcionista: Haiku 5.5, rápido y barato. Secretaria de actas: Sonnet 5.5, extracción fiable. Te enseño el coste real por reunión en el registro. |
+> Propuesta para revisar antes de escribir código.
+> v2: incorpora tus respuestas (convenciones de MAD Suite, Apps Script para Meet, bot con nombre propio, despliegue directo en la web y modelos aprobados).
 
 ---
 
-## 1. Limitaciones de Google que debes conocer ya
+## 0. Decisiones tomadas
 
-1. **App OAuth "Interna"**: es posible porque solo tú (y Liz) os conectáis. Con ella no hace falta la verificación de Google, ni siquiera para scopes restringidos (Drive completo y, en la fase 2, Gmail). Los clientes **nunca** inician sesión con Google; ven los datos a través del plugin.
-2. **Meet REST API**: solo devuelve transcripciones si la **transcripción estaba activada** en esa reunión, y solo de las reuniones que **organizaste tú** (o tu dominio). Las notas de Gemini son un Google Doc aparte. Propongo detectar **por las dos vías** (API de Meet y carpeta "Meet Recordings"), con **importación manual** (pegar o subir la transcripción) como alternativa.
-3. **Mover archivos de Meet** a la carpeta del cliente requiere el scope `drive` completo (restringido). Con la app Interna no hay problema. La alternativa más prudente sería crear un **acceso directo** en la carpeta del cliente en lugar de mover el original.
-4. **Google Chat con usuarios externos**: es el punto más delicado. Antes del bloque 4 haré la investigación del apartado 5.7 (bot vs. publicar como tú vs. webhooks) **verificada con la documentación actual** y te la presentaré. No asumo nada todavía, porque esta política de Google ha cambiado varias veces.
-5. **Bot "MAD Oficina" en Chat**: hay que configurar la app de Chat en Google Cloud (nombre, avatar y URL del endpoint) y **publicarla en tu dominio**. Para escribirte por DM, el bot necesita que lo añadas una vez (o que lo instales como administradora).
-6. **Disponibilidad (freebusy)**: siempre en el momento, sin caché, como pides. Cada consulta tarda unos 300–600 ms. Es perfectamente asumible.
-
----
-
-## 2. Estructura de carpetas
-
-```
-mad-oficina/
-├── mad-oficina.php            # Cabecera, constantes, arranque de Plugin::instance()
-├── uninstall.php              # Borra datos solo si está activado "borrar al desinstalar"
-├── composer.json              # PSR-4 + woocommerce/action-scheduler + phpunit
-├── .wp-env.json
-├── includes/
-│   ├── Core/
-│   │   ├── Plugin.php          # Singleton, registro de módulos
-│   │   ├── ModuleInterface.php
-│   │   ├── Installer.php       # Migraciones versionadas (dbDelta)
-│   │   ├── Roles.php           # mad_team, mad_client, capacidades
-│   │   ├── Crypto.php          # Cifrado de tokens (sodium, clave derivada de wp-config)
-│   │   ├── Visibility.php      # internal/team/client + filtros de consulta
-│   │   └── Rest/               # Controlador base, permisos, rate limit
-│   ├── Agents/
-│   │   ├── AgentInterface.php
-│   │   ├── AbstractAgent.php   # Prompt, tools, triggers, log
-│   │   ├── ClaudeClient.php    # Messages API + tool use + validación con JSON Schema
-│   │   └── ToolRegistry.php    # client_id siempre inyectado por el servidor
-│   ├── Approvals/
-│   │   ├── ApprovalService.php # Crea, resuelve (también por partes) y ejecuta
-│   │   └── AutonomyPolicy.php  # ask / notify / silent, por tipo de acción
-│   ├── Modules/
-│   │   ├── Portal/   Google/   Meetings/   Scheduling/   Tasks/
-│   │   ├── Chat/     Admin/
-│   │   └── Suppliers/  Billing/  Ads/   # Solo esqueleto (fases 2 y 3)
-│   └── Cli/SeedCommand.php     # wp mad-oficina seed [--reset]
-├── migrations/                 # 0001_initial.php, 0002_…
-├── templates/                  # Vista clásica, paneles y correos
-├── assets/
-│   ├── fonts/                  # Jost, Silkscreen, Playfair Display (OFL, autoalojadas)
-│   ├── icons/                  # SVG pixel 12×12, crispEdges
-│   ├── css/mad.css             # Tokens --y --k --c --g, puntos, tarjetas
-│   └── game/                   # Build de Vite (generado)
-├── game/                       # Fuente Phaser 3 + Vite + mapa de Tiled
-├── languages/mad-oficina.pot
-└── tests/
-    ├── php/                    # PHPUnit (wp-env tests-cli)
-    └── e2e/                    # Playwright: escritorio y móvil
-```
-
----
-
-## 3. Tablas de la fase 1
-
-Prefijo `{$wpdb->prefix}mad_of_`. Todas llevan `created_at` y `updated_at`. Las que muestran contenido llevan `visibility ENUM('internal','team','client')`.
-
-| Tabla | Columnas clave |
+| Tema | Decisión |
 |---|---|
-| `clients` | id, name, code (`MOM`, único), domains (JSON), drive_folder_id, chat_targets (JSON: tipo de mensaje → espacio o DM), tracking_sheet_id, status |
-| `client_users` | client_id, wp_user_id. *Nueva*: varios usuarios WP por empresa. |
-| `client_contacts` | client_id, name, aliases (JSON), role, receives_summaries |
-| `contact_emails` | contact_id, email (índice único), kind (work/personal), learned_from. *Nueva*: hace rápido el cruce con los invitados y permite "aprender". |
-| `team_members` | wp_user_id, name, workspace_email, chat_dm_space |
-| `meetings` | client_id, calendar_event_id, conference_record, title, starts_at, recording_file_id, transcript_file_id, gemini_notes_id, summary, next_meeting, status (detected → identified → extracted → approved), visibility |
-| `action_items` | client_id, meeting_id, title, description, owner (cliente/jessica/liz/mad), team_member_id, due_date, priority, status, visibility, process_id, synced_to (JSON) |
-| `pending_topics` | client_id, meeting_id, text, investigable, research_note, status |
-| `ideas` | client_id, meeting_id, text, resurface_at, status (dormant/due/postponed/discarded/converted), visibility |
-| `processes` | client_id, area (web/ads/diseño/contenidos…), title, status, starts_at, ends_at, sort |
-| `tasks` | agent, type, payload (JSON), status, attempts, scheduled_at, result. *Tareas de agentes; la cola real es Action Scheduler.* |
-| `approvals` | agent, action_type, client_id, title, payload (JSON con partes), status, resolved_by, resolved_at, channel (web/chat), chat_message_name |
-| `agent_log` | agent, event, client_id, model, input_tokens, output_tokens, cost_eur, data (JSON) |
-| `messages` | client_id, thread, author_type (client/agent/jessica), author_id, body, channel, visibility |
-
-`suppliers`, `expenses`, `billing_schedules`, `invoices` y `quotes` se crean en la fase 2 con su propia migración.
+| **Convenciones** | Las mismas que en [`jessica-mad/plugin-mad`](https://github.com/jessica-mad/plugin-mad). Detalle en la sección 2. |
+| **Despliegue** | Sin staging: trabajamos directamente en la web. Por eso: (a) todos los módulos vienen **desactivados** al instalar, como en MAD Suite, y los activas uno a uno; (b) **sin paso de build en el servidor**: el juego compilado (`assets/game/`) y cualquier librería van incluidos en el repo; (c) migraciones idempotentes, que nunca borran datos al actualizar. |
+| **Reuniones de Meet** | Tu idea: un **Apps Script** vigila la carpeta de grabaciones, mueve lo nuevo, apunta una fila en un Sheet y avisa a la web. Detalle en la sección 4. |
+| **Grabaciones para clientes** | Se comparten en Drive (lector) con los emails de los contactos del cliente. La **transcripción** solo se comparte si lo marcas al aprobar, porque puede contener comentarios internos. |
+| **Chat** | Un **bot propio (app de Chat)** con nombre y avatar propios ("MAD Oficina"). Cada mensaje lleva en la cabecera de la tarjeta el personaje que habla (Secretaria, Coordinadora…). Queda pendiente verificar los **espacios con externos** antes del bloque 4. |
+| **Modelos** | Recepcionista: Haiku 5.5. Secretaria de actas: Sonnet 5.5. Configurables por agente. |
+| **Endpoint público** | Como la web ya tiene HTTPS público, Google Chat y Apps Script pueden llamarla directamente. No hace falta túnel. |
 
 ---
 
-## 4. Roles y capacidades
+## 1. Limitaciones de Google (actualizado)
 
-- `mad_manage_office`: se añade a `administrator` (Jessica).
-- `mad_team` (Liz): `mad_view_assigned`. Solo ve sus tareas, los briefs y archivos relacionados.
-- `mad_client`: `mad_view_portal`. Todas sus consultas van filtradas por un `client_id` que se resuelve **en el servidor** a partir de `client_users`, y por `visibility = 'client'`.
+1. **App OAuth "Interna"** en el plugin: la usaremos solo para **Calendar** (disponibilidad en tiempo real y crear reuniones con Meet, bloque 5). Drive y Meet van por Apps Script, que funciona como tú, así que el plugin **no necesita permisos de Drive** en la Fase 1.
+2. **Transcripciones**: solo existen si la transcripción o las notas de Gemini estaban activadas en esa reunión. Si una grabación llega sin transcripción, el script la registra igual y la web te avisa ("Reunión sin transcripción: ¿la pegas a mano?").
+3. **Compartir con clientes**: tu Workspace debe permitir compartir fuera del dominio, y el cliente tiene que tener una cuenta de Google con ese email. Si no la tiene, la grabación se ve desde el portal con un enlace, sin acceso al archivo.
+4. **Bot en espacios externos**: es lo único que todavía no doy por hecho. Lo verifico con la documentación actual antes del bloque 4. Si el bot no pudiera entrar en espacios de clientes de otros dominios, la alternativa es: **bot para ti y para Liz**, y para los clientes, mensajes publicados **como tú** (autenticación de usuario) o por email.
+5. **Bot por DM**: tienes que añadir al bot una vez desde Chat, o instalarlo como administradora, para que pueda escribirte.
 
-**Tests obligatorios** (PHPUnit):
-- Un cliente A nunca obtiene datos de B por ningún endpoint, aunque manipule IDs.
-- Ningún contenido `internal` o `team` llega a un cliente.
-- Liz no ve márgenes ni notas internas.
-- Ninguna acción externa se ejecuta sin una `approval` resuelta (o sin autonomía configurada).
+---
+
+## 2. Convenciones (copiadas de MAD Suite)
+
+- **Archivo principal** `mad-oficina.php` con `final class MAD_Oficina_Core`, singleton con `instance()`, constantes `CAPABILITY`, `MENU_SLUG_ROOT = 'mad-oficina'` y `ENABLED_MODULES_OPTION = 'madoficina_enabled_modules'`.
+- **Interfaz `MAD_Oficina_Module`**, que replica `MAD_Suite_Module` (`slug()`, `title()`, `menu_label()`, `menu_slug()`, `init()`, `admin_init()`, `render_settings_page()`, y opcionalmente `description()` y `required_plugins()`). Añade tres métodos opcionales:
+  - `install()`, para las tablas del módulo,
+  - `rest_routes()`,
+  - `dependencies()`, porque `meetings` depende de `tasks`.
+- **Módulos** en `modules/{slug}/Module.php`, cada uno con `return new class($core) implements MAD_Oficina_Module`. Cada módulo tiene:
+  - un autoloader propio con namespace `MAD_Oficina\{Modulo}\`,
+  - las carpetas `includes/`, `views/` y `assets/`.
+- **Código compartido** en `core/` (namespace `MAD_Oficina\Core\`): tablas, roles, cifrado, aprobaciones, cliente de Claude y agentes.
+- **Opciones** en `madoficina_{slug}_settings`. Página raíz "MAD Oficina" con el gestor de módulos (activar y desactivar), igual que "MAD Plugins".
+- **Mejoras respecto a MAD Suite** (te las propongo, no las impongo):
+  - El cifrado de tokens usa `sodium` con una clave propia (`MAD_OFICINA_SECRET` en `wp-config.php`). El de MAD Suite tiene una clave de reserva fija en el código que conviene evitar.
+  - No hay archivos de depuración accesibles por URL (como `debug-mcs.php`). La depuración va dentro del admin.
+
+```
+office-mad/                       # = carpeta del plugin en wp-content/plugins/
+├── mad-oficina.php                # Core singleton + interfaz + bootstrap
+├── uninstall.php
+├── core/                          # Installer, Roles, Crypto, Visibility, Rest, Approvals, Agents, Claude
+├── modules/
+│   ├── portal/   tasks/   meetings/   chat/   scheduling/   google/   admin/
+│   └── suppliers/   billing/   ads/  # Fases 2 y 3 (aún no)
+├── views/modules-manager.php
+├── assets/                        # mad.css, fuentes, iconos pixel, game/ (compilado)
+├── lib/action-scheduler/          # Incluida (si WooCommerce está activo, se usa la suya)
+├── game/                          # Fuente Phaser + Vite + Tiled (no se ejecuta en el servidor)
+├── apps-script/                   # Código del Apps Script "cartero" (con clasp)
+├── languages/
+└── tests/
+```
+
+---
+
+## 3. Tablas, roles y tests
+
+Sin cambios respecto a v1: prefijo `mad_of_`, tablas `clients`, `client_users`, `client_contacts`, `contact_emails`, `team_members`, `meetings`, `action_items`, `pending_topics`, `ideas`, `processes`, `tasks`, `approvals`, `agent_log` y `messages`. Cada módulo crea las suyas al activarse.
+
+Cambios en `meetings`:
+- nuevos campos `sheet_row` (fila del Sheet de reuniones), `drive_folder_id` y `shared_with` (JSON),
+- el estado pasa a ser `received → identified → extracted → approved → archived`.
+
+Roles: `mad_manage_office` (Jessica), `mad_team` (Liz), `mad_client`.
+
+Tests de aislamiento entre clientes, visibilidad y aprobaciones: igual que en v1.
+
+---
+
+## 4. Flujo de reuniones con Apps Script ("el cartero")
+
+```
+Meet Recordings (tu Drive)
+      │  Apps Script, disparador cada 10 min
+      ▼
+1. Detecta grabación / transcripción / notas Gemini nuevas
+2. Las mueve a "MAD Oficina/Reuniones/_Entrada/AAAA-MM-DD – Título/"
+3. Busca el evento de Calendar (por hora y título): invitados, título, códigos
+4. Añade fila al Sheet "Reuniones MAD": fecha, título, enlaces, estado = recibida
+5. POST firmado (HMAC) → /wp-json/mad-oficina/v1/hooks/meetings
+      con: metadatos + invitados + TEXTO de la transcripción
+      ▼
+WordPress (la web)
+6. Identifica cliente (código → emails → nombres → te pregunta y aprende)
+7. Secretaria de actas extrae JSON → borrador en la bandeja
+8. Tú apruebas (por partes, y marcas qué compartir con el cliente)
+9. Deja una "orden" pendiente para el script
+      ▼
+Apps Script (siguiente pasada, o al instante si lo llamas)
+10. Mueve la carpeta a  Cliente/Reuniones/AAAA-MM-DD – Título/
+11. Comparte grabación (y transcripción si la marcaste) con los contactos
+12. Actualiza la fila del Sheet: cliente, resumen rápido, estado = procesada
+13. Confirma a la web → la reunión aparece en el portal del cliente
+```
+
+**Por qué así:**
+- Usas un lenguaje que dominas.
+- El plugin no guarda permisos sobre todo tu Drive.
+- El Sheet te queda como registro aunque la web falle.
+- Si algún día cambias de web, el registro sigue ahí.
+
+**Seguridad:**
+- Secreto compartido y firma HMAC con marca de tiempo (contra repeticiones).
+- La web solo acepta del script datos y confirmaciones, nunca instrucciones.
+- El script solo ejecuta órdenes que la web ha emitido tras una aprobación tuya.
+
+**Alternativa manual (siempre disponible):** "Importar reunión", para pegar o subir una transcripción, y el botón "Procesar esta reunión".
 
 ---
 
 ## 5. Endpoints REST (`/wp-json/mad-oficina/v1`)
 
+Los de v1, más estos:
+
 | Método | Ruta | Permiso |
 |---|---|---|
-| GET | `/me` | conectado: perfil, rol, personajes y salas visibles |
-| GET | `/office/state` | conectado: estados de los personajes (polling cada 25 s) |
-| GET | `/portal/timeline` · `/portal/meetings` · `/portal/tasks` · `/portal/ideas` · `/portal/documents` | cliente (o admin con `?client=`) |
-| POST | `/portal/chat` | cliente + rate limit diario |
-| GET | `/portal/slots` | cliente: freebusy en el momento |
-| POST | `/portal/meeting-requests` · `/portal/briefs` | cliente → crea una approval |
-| GET | `/admin/approvals` | `mad_manage_office` |
-| POST | `/admin/approvals/{id}` | aprobar, rechazar o editar, también por partes |
-| POST | `/admin/meetings/{id}/process` | botón "Procesar esta reunión" |
-| POST | `/admin/meetings/import` | subir o pegar una transcripción |
-| POST | `/chat/events` | **público**, verificado con el JWT de Google (audiencia = número de proyecto) |
-
-OAuth de Google: callback en una página de admin (`admin.php?page=mad-oficina-connections`) con `state` + nonce.
+| POST | `/hooks/meetings` | Apps Script, firma HMAC |
+| GET | `/hooks/orders` | Apps Script, firma HMAC: órdenes pendientes (mover, compartir, actualizar fila) |
+| POST | `/hooks/orders/{id}/done` | Apps Script, firma HMAC |
+| POST | `/chat/events` | Google Chat, JWT verificado |
 
 ---
 
-## 6. Scopes de Google (incrementales, por bloque)
+## 6. Scopes
 
-| Bloque | Scopes |
-|---|---|
-| 1 | `openid`, `email` (solo para conectar e identificar) |
-| 2 | `drive` (documentos del cliente y estructura de carpetas) |
-| 3 | `meetings.space.readonly`, `documents.readonly`, `calendar.events.readonly` |
-| 4 | Bot: autenticación de app (`chat.bot`, cuenta de servicio). Opcional: `chat.messages.create` si eliges publicar como tú. |
-| 5 | `calendar.freebusy`, `calendar.events`, `calendar.calendarlist.readonly` |
-| Fase 2 | `gmail.readonly`, `gmail.settings.basic` (filtros), `spreadsheets` |
+| Dónde | Bloque | Permisos |
+|---|---|---|
+| Apps Script | 3 | Drive, Calendar (lectura), Sheets, Docs (lectura). Se autoriza como tú en tu cuenta. |
+| Plugin (OAuth Interna) | 5 | `calendar.freebusy`, `calendar.events`, `calendar.calendarlist.readonly` |
+| App de Chat | 4 | `chat.bot` (cuenta de servicio) |
+| Plugin | Fase 2 | `gmail.readonly`, etc. |
+
+El bloque 1 incluye la pantalla **Conexiones**, con OAuth listo, aunque Calendar no se use hasta el bloque 5.
 
 ---
 
 ## 7. Oficina (Phaser 3)
 
-- **Escenas**: `Boot` → `Preload` → `Office` (+ `UI` superpuesta para los bocadillos).
-- **Mapa** en Tiled (JSON), tiles de 16 px, zoom entero (×2/×3) con `pixelArt: true`. Ocho salas: recepción, reuniones, proyectos, estudio creativo, archivo, administración, campañas y despacho de gerencia (este último solo se dibuja abierto para la admin).
-- **Personajes**: máquina de estados `idle` / `caminando` / `trabajando` / `esperando_gerencia`. Usan pathfinding sobre la capa de colisiones (EasyStar) y van a su mesa o al despacho según `/office/state`.
-- **Paneles**: el juego emite `CustomEvent('mad:open-panel', {panel})`. Los paneles son HTML y CSS de MAD encima del canvas, con foco atrapado, `Esc` para cerrar y `aria-live` en el chat.
-- **Vista clásica**: el mismo menú y los mismos paneles sin canvas. Es la vista por defecto en móvil y con `prefers-reduced-motion`, y siempre hay un botón para cambiar.
-
-### Formato de spritesheet (para tus sprites)
-
-PNG de **128 × 192 px**: 4 columnas × 6 filas de **32 × 32 px**, fondo transparente.
-
-| Fila | Contenido | Frames |
-|---|---|---|
-| 0 | Caminar ↓ | 4 |
-| 1 | Caminar ← | 4 |
-| 2 | Caminar → | 4 |
-| 3 | Caminar ↑ | 4 |
-| 4 | Idle ↓ ← → ↑ | 1 por dirección |
-| 5 | Sentado ↓ ← → ↑ | 1 por dirección |
-
-El punto de apoyo está en el centro de la base (16, 30). Un archivo por personaje: `characters/{slug}.png`. Si un PNG tiene otro tamaño, el plugin lo rechaza con un mensaje claro. Mientras tanto genero sprites provisionales con la paleta MAD.
+Sin cambios respecto a v1:
+- Escenas `Boot`, `Preload`, `Office` y `UI`.
+- Mapa de Tiled con tiles de 16 px.
+- Spritesheet de 128 × 192: 4 columnas × 6 filas de 32 × 32. Filas: caminar ↓ ← → ↑, idle y sentado.
+- Paneles HTML encima del canvas.
+- Vista clásica por defecto en móvil y con `prefers-reduced-motion`.
 
 ---
 
 ## 8. Bloques y entregables
 
-| Bloque | Entregable que te enseño |
+| Bloque | Entregable |
 |---|---|
-| **1 · Base** | Plugin activable en `wp-env`, tablas, roles, menú "MAD Oficina", conexión con Google (botón Conectar, token cifrado), pantallas Clientes y Equipo, `wp mad-oficina seed` (3 clientes ficticios, contactos, Liz, tareas, ideas y reuniones), tests de permisos y aislamiento. |
-| **2 · Oficina y portal** | `/oficina` con escena, personajes, recepcionista con chat (Claude), línea de tiempo, Drive, reuniones, tareas e ideas. Vista clásica. Capturas de escritorio y móvil. |
-| **3 · Secretaria de actas** | Detección e importación, identificación del cliente (código → emails → nombres → preguntar y aprender), extracción con JSON Schema, borrador en la bandeja, aprobación por partes, creación de tareas e ideas. |
-| **4 · Google Chat** | Primero el informe de 5.7. Después, el bot con DM a ti y tarjetas con botones, las tareas a Liz y el resumen al cliente (o por email como alternativa). |
-| **5 · Agenda y seguimiento** | Huecos reales, creación con Meet tras aprobación, interpretación de lenguaje natural, recordatorios, banco de ideas y resumen de los lunes. |
-
-Commits pequeños, uno por pieza, en la rama de trabajo.
+| **1 · Base** | Core y gestor de módulos al estilo MAD Suite, tablas, roles, menú, pantalla Conexiones (OAuth y secretos), Clientes y Equipo, `wp mad-oficina seed`, tests. |
+| **2 · Oficina y portal** | `/oficina`, escena, personajes, recepcionista con chat, línea de tiempo, documentos, reuniones, tareas e ideas. Vista clásica. |
+| **3 · Secretaria de actas** | Apps Script "cartero", endpoints firmados, identificación, extracción, bandeja, aprobación por partes, órdenes de vuelta y Sheet de reuniones. |
+| **4 · Google Chat** | Informe de 5.7 verificado y bot "MAD Oficina": DM contigo con tarjetas, tareas a Liz y resumen al cliente. |
+| **5 · Agenda y seguimiento** | Freebusy en tiempo real, reuniones con Meet tras aprobación, recordatorios, banco de ideas y resumen de los lunes. |
