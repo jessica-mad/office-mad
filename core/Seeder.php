@@ -107,6 +107,7 @@ final class Seeder {
                 'starts_at'    => $dt(-7),
                 'ends_at'      => $dt(-7, 11),
                 'summary'      => 'Repasamos el estado de los proyectos y acordamos próximos pasos.',
+                'extraction'   => wp_json_encode(['client_decisions' => ['Lanzamos la tienda antes de Black Friday', 'Las fotos de producto las hace el cliente']]),
                 'next_meeting' => $date(21),
                 'status'       => 'approved',
                 'visibility'   => 'client',
