@@ -9,6 +9,8 @@ if ( ! defined('ABSPATH') ) exit;
 return new class($core) implements MAD_Oficina_Module {
 
     const PROCESS_HOOK = 'madoficina_process_meeting';
+    const SWEEP_HOOK   = 'madoficina_meetings_sweep';
+    const LAST_RUN     = 'madoficina_meetings_last_run';
 
     private $core;
     private $secretary;
@@ -47,7 +49,16 @@ return new class($core) implements MAD_Oficina_Module {
 
     /* ==== Hooks ==== */
     public function init(){
-        add_action(self::PROCESS_HOOK, fn($id) => $this->secretary()->process((int) $id));
+        // Three ways to start the secretary, all going through claim_and_process() so a
+        // meeting is never processed twice: Action Scheduler (right after it arrives),
+        // the Apps Script "tick" every 10 min, and a WP-Cron sweep every 5 min.
+        add_action(self::PROCESS_HOOK, fn($id) => $this->claim_and_process((int) $id));
+        add_action(self::SWEEP_HOOK, fn() => $this->process_pending(120));
+        add_filter('cron_schedules', function($s){
+            $s['madof_5min'] = ['interval' => 5 * MINUTE_IN_SECONDS, 'display' => 'MAD Oficina · 5 min'];
+            return $s;
+        });
+        if ( ! wp_next_scheduled(self::SWEEP_HOOK) ) wp_schedule_event(time() + 60, 'madof_5min', self::SWEEP_HOOK);
         add_filter('madoficina_approval_handler_' . \MAD_Oficina\Meetings\Secretary::ACTION, fn() => [$this->secretary(), 'approve']);
         add_filter('madoficina_approval_form_' . \MAD_Oficina\Meetings\Secretary::ACTION, ['MAD_Oficina\\Meetings\\Secretary', 'render_form'], 10, 2);
         add_action('madoficina_approval_rejected_' . \MAD_Oficina\Meetings\Secretary::ACTION, ['MAD_Oficina\\Meetings\\Secretary', 'on_reject']);
@@ -62,8 +73,66 @@ return new class($core) implements MAD_Oficina_Module {
     public function rest_routes(){
         (new \MAD_Oficina\Meetings\Hooks(
             fn() => \MAD_Oficina\Meetings\Hooks::secret_from($this->settings()),
-            fn($id) => $this->enqueue($id)
+            fn($id) => $this->enqueue($id),
+            fn() => $this->tick()
         ))->register();
+    }
+
+    /**
+     * Atomically takes a received meeting (received → processing) and runs the
+     * secretary. Returns false when someone else already took it.
+     */
+    public function claim_and_process($meeting_id){
+        global $wpdb;
+        $claimed = $wpdb->query($wpdb->prepare(
+            'UPDATE ' . \MAD_Oficina\Core\Schema::table('meetings') . " SET status = 'processing', updated_at = %s WHERE id = %d AND status = 'received'",
+            \MAD_Oficina\Core\Time::now(), $meeting_id
+        ));
+        if ( ! $claimed ) return false;
+        $this->secretary()->process($meeting_id);
+        return true;
+    }
+
+    /**
+     * Processes waiting meetings until the time budget runs out. Also recovers
+     * meetings stuck in "processing" (a run that died half-way) after 20 minutes.
+     * @return int processed meetings
+     */
+    public function process_pending($budget_seconds = 200){
+        global $wpdb;
+        $table = \MAD_Oficina\Core\Schema::table('meetings');
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$table} SET status = 'received' WHERE status = 'processing' AND updated_at < %s",
+            gmdate('Y-m-d H:i:s', time() - 20 * MINUTE_IN_SECONDS)
+        ));
+        update_option(self::LAST_RUN, time(), false);
+
+        $start = time();
+        $done = 0;
+        while ( time() - $start < $budget_seconds - 90 ) { // leave room for one more Claude call
+            $id = (int) $wpdb->get_var("SELECT id FROM {$table} WHERE status = 'received' AND transcript <> '' ORDER BY id ASC LIMIT 1");
+            if ( ! $id ) break;
+            if ( $this->claim_and_process($id) ) $done++;
+        }
+        return $done;
+    }
+
+    /**
+     * Signed "tick" from the Apps Script. On PHP-FPM the response is sent first and
+     * the work continues in the background, so the script never waits for Claude.
+     */
+    public function tick(){
+        if ( apply_filters('madoficina_defer_tick', function_exists('fastcgi_finish_request')) ) {
+            register_shutdown_function(function(){
+                if ( function_exists('fastcgi_finish_request') ) fastcgi_finish_request();
+                ignore_user_abort(true);
+                if ( function_exists('set_time_limit') ) @set_time_limit(300);
+                $this->process_pending(280);
+            });
+            return ['deferred' => true];
+        }
+        ignore_user_abort(true);
+        return ['processed' => $this->process_pending(200)];
     }
 
     /** Background processing (Action Scheduler; WP-Cron as a fallback). */

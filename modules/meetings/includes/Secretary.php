@@ -352,7 +352,8 @@ TXT;
                 <tr>
                     <td><input type="checkbox" name="<?php echo esc_attr($n); ?>[on]" value="1" checked aria-label="<?php esc_attr_e('Incluir', 'mad-oficina'); ?>"></td>
                     <td><input type="text" name="<?php echo esc_attr($n); ?>[title]" value="<?php echo esc_attr($t['title']); ?>">
-                        <textarea name="<?php echo esc_attr($n); ?>[description]" rows="2"><?php echo esc_textarea($t['description'] ?? ''); ?></textarea>
+                        <details class="madof-more"><summary><?php echo ($t['description'] ?? '') !== '' ? esc_html__('Detalle', 'mad-oficina') : esc_html__('Añadir detalle', 'mad-oficina'); ?></summary>
+                        <textarea name="<?php echo esc_attr($n); ?>[description]" rows="4"><?php echo esc_textarea($t['description'] ?? ''); ?></textarea></details>
                         <?php if ( ! empty($t['owner_name']) ) : ?><small><?php echo esc_html($t['owner_name']); ?></small><?php endif; ?></td>
                     <td><select name="<?php echo esc_attr($n); ?>[owner]"><?php foreach ( $owners as $v => $l ) echo '<option value="' . esc_attr($v) . '"' . selected($t['owner'], $v, false) . '>' . esc_html($l) . '</option>'; ?></select></td>
                     <td><input type="date" name="<?php echo esc_attr($n); ?>[due_date]" value="<?php echo esc_attr($t['due_date'] ?? ''); ?>"></td>

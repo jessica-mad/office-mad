@@ -78,7 +78,10 @@ $clients = Clients::all();
         </section>
     </form>
 
-    <?php else : $list = Meetings::latest(60); ?>
+    <?php else : $list = Meetings::latest(60); $last = (int) get_option('madoficina_meetings_last_run'); ?>
+        <p class="description"><?php echo $last
+            ? esc_html(sprintf(__('Procesado automático: la última revisión fue hace %s. Las reuniones nuevas se procesan solas en unos minutos.', 'mad-oficina'), human_time_diff($last)))
+            : esc_html__('Procesado automático: todavía no se ha ejecutado ninguna revisión. Se activa con el Apps Script (cada 10 min) o con el cron de WordPress.', 'mad-oficina'); ?></p>
         <?php if ( ! $list ) : ?>
             <div class="madof-card is-muted"><p><?php esc_html_e('Todavía no hay reuniones. Conecta el Apps Script o importa una a mano.', 'mad-oficina'); ?></p></div>
         <?php else : ?>

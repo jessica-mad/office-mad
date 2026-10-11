@@ -54,7 +54,7 @@ function run() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
   try {
-    try { scan(); } finally { processOrders(); }
+    try { scan(); } finally { processOrders(); tick_(); }
   } finally {
     lock.releaseLock();
   }
@@ -229,6 +229,12 @@ function calendarEventId_(doc) {
     var decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(eid)).getDataAsString();
     return decoded.split(' ')[0];
   } catch (e) { return null; }
+}
+
+/** Asks the website to process waiting meetings (it answers at once and works in the background). */
+function tick_() {
+  try { signedFetch_('post', '/hooks/tick', {}); }
+  catch (e) { console.warn('tick: ' + e); } // a slow answer is fine: the website keeps working
 }
 
 /* ───────────────────────── orders ───────────────────────── */

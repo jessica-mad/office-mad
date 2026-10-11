@@ -355,4 +355,44 @@ class MeetingsTest extends MADOF_TestCase {
         $this->assertSame('approved', $m['status']);
         $this->assertSame('9', (string) $m['sheet_row']);
     }
+
+    /* ───────────── automatic processing ───────────── */
+
+    private function module(){
+        return MAD_Oficina_Core::instance()->get_module('meetings');
+    }
+
+    public function test_tick_processes_waiting_meetings_without_manual_clicks(){
+        add_filter('madoficina_defer_tick', '__return_false');
+        $a = $this->received_meeting();
+        $b = $this->received_meeting();
+        $res = $this->hook('POST', '/hooks/tick', []);
+        $this->assertSame(200, $res->get_status());
+        $this->assertGreaterThanOrEqual(1, $res->get_data()['processed']);
+        $this->assertSame('extracted', Meetings::get($a)['status']);
+        $this->assertNotEmpty(get_option('madoficina_meetings_last_run'));
+        $this->assertSame(401, $this->hook('POST', '/hooks/tick', [], 'wrong-secret')->get_status());
+        remove_filter('madoficina_defer_tick', '__return_false');
+    }
+
+    public function test_a_meeting_is_claimed_only_once(){
+        $id = $this->received_meeting();
+        $this->assertTrue($this->module()->claim_and_process($id));
+        $this->assertFalse($this->module()->claim_and_process($id), 'Second runner (Action Scheduler, cron, tick) skips it');
+        $this->assertCount(1, $this->claude);
+        $this->assertCount(1, Approvals::for_object('meeting', $id));
+    }
+
+    public function test_stuck_meetings_are_recovered_by_the_sweep(){
+        global $wpdb;
+        $id = $this->received_meeting();
+        $wpdb->update(Schema::table('meetings'), ['status' => 'processing', 'updated_at' => gmdate('Y-m-d H:i:s', time() - 3600)], ['id' => $id]);
+        $this->assertSame(1, $this->module()->process_pending(200));
+        $this->assertSame('extracted', Meetings::get($id)['status']);
+
+        $empty = $this->received_meeting(['transcript' => '']);
+        $this->assertSame(0, $this->module()->process_pending(200), 'Meetings without text are left for manual import');
+        $this->assertSame('received', Meetings::get($empty)['status']);
+        $this->assertNotFalse(wp_next_scheduled('madoficina_meetings_sweep'));
+    }
 }

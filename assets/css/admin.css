@@ -80,3 +80,10 @@
 .madof-internal{background:var(--k);color:var(--c);border-radius:14px;padding:12px 16px}
 .madof-internal .madof-kicker{color:var(--y)}
 .madof-internal ul{margin:6px 0 0 18px}
+.madof-more{margin-top:4px}
+.madof-more summary{cursor:pointer;font:400 10px/1.6 var(--madof-pixel);letter-spacing:.12em;text-transform:uppercase;color:#555;list-style:none}
+.madof-more summary::-webkit-details-marker{display:none}
+.madof-more summary::before{content:"+ "}
+.madof-more[open] summary::before{content:"– "}
+.madof-more textarea{margin-top:6px}
+.madof-draft-table td:nth-child(2){width:46%;min-width:260px}

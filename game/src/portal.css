@@ -122,3 +122,10 @@
   .madof-dialog-body{padding:16px}
 }
 @media (prefers-reduced-motion:reduce){ .madof-app *{transition:none!important} }
+
+.madof-more{margin-top:4px}
+.madof-more summary{cursor:pointer;font:400 10px/1.8 var(--madof-pixel);letter-spacing:.12em;text-transform:uppercase;list-style:none;display:inline-block;border-bottom:2px solid var(--y)}
+.madof-more summary::-webkit-details-marker{display:none}
+.madof-more summary::before{content:"+ "}
+.madof-more[open] summary::before{content:"– "}
+.madof-more p{margin:6px 0 0;font-size:14px;white-space:pre-line}

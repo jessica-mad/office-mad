@@ -10,6 +10,7 @@ if ( ! defined('ABSPATH') ) exit;
  *   POST /hooks/meetings          a meeting (metadata + notes/transcript text)
  *   GET  /hooks/orders            approved work to do in Drive/Sheets
  *   POST /hooks/orders/{id}/done  result of an order
+ *   POST /hooks/tick              "process whatever is waiting" (every run of the script)
  *
  * Signature: hex HMAC-SHA256 over "{timestamp}\n{METHOD}\n{route}\n{body}" with the
  * shared secret, sent as X-Mad-Timestamp / X-Mad-Signature. Requests older than
@@ -23,11 +24,13 @@ final class Hooks {
 
     private $secret_cb;
     private $on_meeting;
+    private $on_tick;
 
     /** @param callable $secret_cb returns the plain secret or '' */
-    public function __construct(callable $secret_cb, callable $on_meeting){
+    public function __construct(callable $secret_cb, callable $on_meeting, ?callable $on_tick = null){
         $this->secret_cb = $secret_cb;
         $this->on_meeting = $on_meeting;
+        $this->on_tick = $on_tick;
     }
 
     public function register(){
@@ -36,6 +39,10 @@ final class Hooks {
         ]);
         register_rest_route(self::NS, '/hooks/orders', [
             'methods' => 'GET', 'callback' => fn() => rest_ensure_response(['orders' => Orders::pending()]), 'permission_callback' => [$this, 'verify'],
+        ]);
+        register_rest_route(self::NS, '/hooks/tick', [
+            'methods' => 'POST', 'permission_callback' => [$this, 'verify'],
+            'callback' => fn() => rest_ensure_response($this->on_tick ? call_user_func($this->on_tick) : ['processed' => 0]),
         ]);
         register_rest_route(self::NS, '/hooks/orders/(?P<id>\d+)/done', [
             'methods' => 'POST', 'callback' => [$this, 'order_done'], 'permission_callback' => [$this, 'verify'],

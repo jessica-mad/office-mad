@@ -18,6 +18,11 @@ const month = (s) => { const d = parseDate(s); return d ? fmtMonth.format(d) : '
 const PROCESS_STATUS = { planned: 'Planificado', in_progress: 'En marcha', done: 'Hecho', paused: 'En pausa' };
 const TASK_STATUS = { open: 'Pendiente', in_progress: 'En marcha', done: 'Hecho', blocked: 'Bloqueada' };
 
+// Long task details stay folded so lists remain scannable.
+const detail = (text) => !text ? '' : text.length <= 90
+  ? `<p>${esc(text)}</p>`
+  : `<details class="madof-more"><summary>Ver detalle</summary><p>${esc(text)}</p></details>`;
+
 const empty = (text) => `<p class="madof-empty">${esc(text)}</p>`;
 const pill = (text, mod = '') => `<span class="madof-pill ${mod}">${esc(text)}</span>`;
 const soon = (text) => `<div class="madof-soon">${pill('Pronto', 'is-on')}<p>${esc(text)}</p></div>`;
@@ -108,7 +113,7 @@ export const PANELS = {
           <span class="madof-check">${i.status === 'done' ? icon('check', 'Hecha') : ''}</span>
           <div><strong>${esc(i.title)}</strong>
             <div class="madof-meta">${esc(i.owner)}${i.due_date ? ` · ${esc(date(i.due_date))}` : ''} · ${esc(TASK_STATUS[i.status] || i.status)}${i.overdue ? ' · <b>con retraso</b>' : ''}</div>
-            ${i.description ? `<p>${esc(i.description)}</p>` : ''}</div>
+            ${detail(i.description)}</div>
         </li>`).join('')}</ul>` : empty(none);
       return `<div class="madof-cols2">
         <section><h3 class="madof-kicker">Te toca a ti</h3>${list(t.client, 'Nada pendiente por tu parte. ¡Bien!')}</section>
@@ -148,7 +153,7 @@ export const PANELS = {
       const liz = t.mad.filter((i) => i.owner === me.characters.liz.name || i.owner === 'Liz');
       if (!liz.length) return empty(`${me.characters.liz.name} no tiene encargos tuyos abiertos ahora mismo.`);
       return `<ul class="madof-tasks">${liz.map((i) => `<li><span class="madof-check"></span><div><strong>${esc(i.title)}</strong>
-        <div class="madof-meta">${i.due_date ? esc(date(i.due_date)) + ' · ' : ''}${esc(TASK_STATUS[i.status] || i.status)}</div></div></li>`).join('')}</ul>`;
+        <div class="madof-meta">${i.due_date ? esc(date(i.due_date)) + ' · ' : ''}${esc(TASK_STATUS[i.status] || i.status)}</div>${detail(i.description)}</div></li>`).join('')}</ul>`;
     },
   },
 
@@ -160,7 +165,7 @@ export const PANELS = {
       return `<ul class="madof-tasks">${items.map((i) => `<li class="${i.due_date && i.due_date < new Date().toISOString().slice(0, 10) ? 'is-overdue' : ''}">
         <span class="madof-check"></span><div><strong>${esc(i.title)}</strong>
         <div class="madof-meta">${i.client ? `<span class="madof-code">${esc(i.client.code)}</span> ${esc(i.client.name)} · ` : ''}${i.due_date ? esc(date(i.due_date)) : 'sin fecha'}</div>
-        ${i.description ? `<p>${esc(i.description)}</p>` : ''}</div></li>`).join('')}</ul>`;
+        ${detail(i.description)}</div></li>`).join('')}</ul>`;
     },
   },
 
