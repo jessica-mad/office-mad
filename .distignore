@@ -1,0 +1,11 @@
+# Files the deploy does not need on the live site
+/.git
+/.github
+/tests
+/game
+/docs
+/node_modules
+/.wp-env.json
+/phpunit.xml.dist
+/composer.json
+/CLAUDE.md

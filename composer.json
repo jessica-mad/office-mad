@@ -1,0 +1,16 @@
+{
+    "name": "jessica-mad/mad-oficina",
+    "description": "MAD Oficina — WordPress plugin. Composer is only used for development (tests); the plugin has no runtime dependencies.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6",
+        "yoast/phpunit-polyfills": "^4.0"
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}
