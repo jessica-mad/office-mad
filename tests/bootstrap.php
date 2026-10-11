@@ -25,7 +25,7 @@ tests_add_filter('muplugins_loaded', function(){
 // Every test starts with the Block 1 modules enabled and the schema installed.
 tests_add_filter('setup_theme', function(){
     MAD_Oficina\Core\Installer::install();
-    update_option(MAD_Oficina_Core::ENABLED_MODULES_OPTION, ['clients', 'google', 'portal', 'meetings']);
+    update_option(MAD_Oficina_Core::ENABLED_MODULES_OPTION, ['clients', 'google', 'portal', 'meetings', 'chat']);
 });
 
 require $tests_dir . '/includes/bootstrap.php';

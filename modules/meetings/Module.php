@@ -62,6 +62,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_approval_handler_' . \MAD_Oficina\Meetings\Secretary::ACTION, fn() => [$this->secretary(), 'approve']);
         add_filter('madoficina_approval_form_' . \MAD_Oficina\Meetings\Secretary::ACTION, ['MAD_Oficina\\Meetings\\Secretary', 'render_form'], 10, 2);
         add_action('madoficina_approval_rejected_' . \MAD_Oficina\Meetings\Secretary::ACTION, ['MAD_Oficina\\Meetings\\Secretary', 'on_reject']);
+        add_filter('madoficina_approval_default_input_' . \MAD_Oficina\Meetings\Secretary::ACTION, ['MAD_Oficina\\Meetings\\Secretary', 'default_input'], 10, 2);
 
         foreach ( ['meeting_import', 'meeting_process', 'meetings_settings'] as $action ){
             add_action('admin_post_madof_' . $action, [$this, 'handle_' . $action]);
@@ -161,19 +162,44 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('meeting_import');
         $p = wp_unslash($_POST);
         $text = (string) ($p['transcript'] ?? '');
+        $whatsapp = ($p['kind'] ?? '') === 'whatsapp';
         if ( ! empty($_FILES['transcript_file']['tmp_name']) && is_uploaded_file($_FILES['transcript_file']['tmp_name']) ) {
+            $tmp = $_FILES['transcript_file']['tmp_name'];
             $ext = strtolower(pathinfo($_FILES['transcript_file']['name'], PATHINFO_EXTENSION));
-            if ( ! in_array($ext, ['txt', 'md', 'vtt', 'srt'], true) ) $this->back(['tab' => 'import'], __('Sube un archivo .txt, .md, .vtt o .srt (o pega el texto).', 'mad-oficina'), 'error');
-            $text = (string) file_get_contents($_FILES['transcript_file']['tmp_name'], false, null, 0, 2000000);
+            if ( $ext === 'zip' && class_exists('ZipArchive') ) {
+                // iPhone exports a .zip with "_chat.txt" inside (plus media, which is ignored).
+                $zip = new \ZipArchive();
+                if ( $zip->open($tmp) === true ) {
+                    for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+                        $name = $zip->getNameIndex($i);
+                        if ( strtolower(pathinfo($name, PATHINFO_EXTENSION)) === 'txt' ) { $text = (string) $zip->getFromIndex($i, 2000000); break; }
+                    }
+                    $zip->close();
+                }
+            } elseif ( in_array($ext, ['txt', 'md', 'vtt', 'srt'], true) ) {
+                $text = (string) file_get_contents($tmp, false, null, 0, 2000000);
+            } else {
+                $this->back(['tab' => 'import'], __('Sube un archivo .txt, .zip (WhatsApp), .md, .vtt o .srt, o pega el texto.', 'mad-oficina'), 'error');
+            }
         }
         if ( trim($text) === '' ) $this->back(['tab' => 'import'], __('Pega la transcripción o las notas de Gemini.', 'mad-oficina'), 'error');
+
+        if ( $whatsapp ) {
+            $since = preg_match('/^\d{4}-\d{2}-\d{2}$/', $p['since'] ?? '') ? $p['since'] : null;
+            $chat = \MAD_Oficina\Meetings\WhatsApp::parse($text, $since);
+            if ( ! $chat['messages'] ) $this->back(['tab' => 'import'], __('No he encontrado mensajes de WhatsApp en ese archivo (o ninguno desde la fecha elegida).', 'mad-oficina'), 'error');
+            $text = \MAD_Oficina\Meetings\WhatsApp::to_transcript($chat);
+            if ( trim($p['title'] ?? '') === '' ) $p['title'] = 'WhatsApp · ' . implode(', ', array_slice($chat['people'], 0, 3));
+            $p['date'] = substr($chat['to'], 0, 10);
+            $p['time'] = substr($chat['to'], 11, 5);
+        }
 
         $attendees = [];
         foreach ( preg_split('/[\s,;]+/', (string) ($p['attendees'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $email ) $attendees[] = ['email' => $email];
         $client_id = absint($p['client_id'] ?? 0);
 
         $id = \MAD_Oficina\Meetings\Meetings::upsert([
-            'source'     => 'manual',
+            'source'     => $whatsapp ? 'whatsapp' : 'manual',
             'title'      => $p['title'] ?? '',
             'starts_at'  => ($p['date'] ?? '') ? $p['date'] . ' ' . (($p['time'] ?? '') ?: '10:00') : null,
             'attendees'  => $attendees,

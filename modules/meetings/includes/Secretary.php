@@ -137,6 +137,11 @@ TXT;
         $client_line = $client
             ? sprintf('%s (código %s). Contactos: %s', $client['name'], $client['code'], implode(', ', array_column(Clients::contacts($client['id']), 'name')) ?: '—')
             : 'sin identificar todavía';
+        if ( $meeting['source'] === 'whatsapp' ) {
+            return "Tipo: CONVERSACIÓN DE WHATSAPP (no es una reunión). Extrae solo tareas, temas pendientes, ideas y acuerdos que surjan de los mensajes; next_meeting = \"none\" salvo que se acuerde una cita.\n"
+                . "Título: {$meeting['title']}\nÚltimo mensaje: {$date}\nCliente: {$client_line}\n\n"
+                . "<reunion>\n" . $meeting['transcript'] . "\n</reunion>";
+        }
         return "Reunión: {$meeting['title']}\nFecha: {$date}\nCliente: {$client_line}\nInvitados: {$people}\n\n"
             . "<reunion>\n" . $meeting['transcript'] . "\n</reunion>";
     }
@@ -277,7 +282,10 @@ TXT;
             Orders::queue_archive(Meetings::get($meeting['id']), $client, ! empty($input['share_recording']), ! empty($input['share_notes']));
         }
 
-        do_action('madoficina_meeting_approved', $meeting['id'], $counts);
+        do_action('madoficina_meeting_approved', $meeting['id'], $counts, [
+            'notify_team'  => ! empty($input['notify_team']),
+            'send_summary' => ! empty($input['send_summary']),
+        ]);
         return [
             'message' => sprintf(__('Acta aprobada: %1$d tareas, %2$d ideas y %3$d temas pendientes.', 'mad-oficina'), $counts['tasks'], $counts['ideas'], $counts['topics']),
             'counts'  => $counts,
@@ -382,7 +390,9 @@ TXT;
             <?php endforeach; endif; ?>
 
             <fieldset class="madof-fieldset"><legend><?php esc_html_e('Al aprobar', 'mad-oficina'); ?></legend>
-                <label class="madof-check"><input type="checkbox" name="input[show_in_portal]" value="1" checked> <?php esc_html_e('Mostrar la reunión (resumen y acuerdos) en el portal del cliente', 'mad-oficina'); ?></label>
+                <label class="madof-check"><input type="checkbox" name="input[show_in_portal]" value="1" <?php checked($meeting['source'] !== 'whatsapp'); ?>> <?php esc_html_e('Mostrar la reunión (resumen y acuerdos) en el portal del cliente', 'mad-oficina'); ?></label>
+                <label class="madof-check"><input type="checkbox" name="input[notify_team]" value="1" checked> <?php echo esc_html(sprintf(__('Enviar a %s sus tareas por Chat', 'mad-oficina'), Characters::get('liz')['name'])); ?></label>
+                <label class="madof-check"><input type="checkbox" name="input[send_summary]" value="1" <?php checked($meeting['source'] !== 'whatsapp'); ?>> <?php esc_html_e('Enviar el resumen al cliente (por el bot, según el destino de su ficha; en modo pruebas va a tu espacio de pruebas)', 'mad-oficina'); ?></label>
                 <?php if ( $meeting['source'] === 'apps_script' ) : ?>
                 <p class="description"><?php esc_html_e('La reunión se archiva en «Google Meet / Reuniones por cliente» (privada: el equipo no la ve).', 'mad-oficina'); ?></p>
                 <label class="madof-check"><input type="checkbox" name="input[share_recording]" value="1" checked> <?php esc_html_e('Compartir la grabación con los contactos del cliente que reciben resúmenes', 'mad-oficina'); ?></label>
@@ -392,6 +402,35 @@ TXT;
         </div>
         <?php
         return ob_get_clean();
+    }
+
+    /**
+     * The draft exactly as proposed (what the inbox form pre-fills), used when
+     * Jessica approves "as is" from a Chat card.
+     */
+    public static function default_input(array $input, array $approval){
+        $meeting = Meetings::get($approval['payload']['meeting_id'] ?? 0);
+        if ( ! $meeting ) return [];
+        $x = $meeting['extraction'];
+        $tasks = [];
+        foreach ( (array) ($x['tasks'] ?? []) as $t ) {
+            $tasks[] = ['on' => 1, 'title' => $t['title'], 'description' => $t['description'] ?? '', 'owner' => $t['owner'], 'due_date' => $t['due_date'] ?? '', 'priority' => $t['priority'] ?? 'normal',
+                'visibility' => ! empty($t['client_visible']) ? 'client' : ($t['owner'] === 'liz' ? 'team' : 'internal')];
+        }
+        return [
+            'client_id'        => $meeting['client_id'],
+            'summary_client'   => $x['summary_client'] ?? '',
+            'summary_internal' => $x['summary_internal'] ?? '',
+            'next_meeting'     => self::next_meeting_text($x['next_meeting'] ?? []),
+            'decisions'        => array_map(fn($d) => ['on' => 1, 'text' => $d], (array) ($x['decisions'] ?? [])),
+            'tasks'            => $tasks,
+            'topics'           => array_map(fn($p) => ['on' => 1, 'text' => $p['text'], 'investigable' => ! empty($p['investigable']), 'visibility' => 'client'], (array) ($x['pending_topics'] ?? [])),
+            'ideas'            => array_map(fn($i) => ['on' => 1, 'title' => $i['title'], 'description' => $i['description'] ?? '', 'resurface_at' => $i['resurface_at'] ?? '', 'visibility' => 'client'], (array) ($x['ideas'] ?? [])),
+            'show_in_portal'   => $meeting['source'] === 'whatsapp' ? 0 : 1,
+            'share_recording'  => 1,
+            'notify_team'      => 1,
+            'send_summary'     => $meeting['source'] === 'whatsapp' ? 0 : 1,
+        ];
     }
 
     public static function next_meeting_text(array $n){

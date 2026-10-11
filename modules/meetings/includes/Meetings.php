@@ -43,7 +43,7 @@ final class Meetings {
         global $wpdb;
         $row = [
             'title'              => mb_substr(sanitize_text_field($data['title'] ?? '') ?: __('Reunión sin título', 'mad-oficina'), 0, 250),
-            'source'             => in_array($data['source'] ?? '', ['apps_script', 'manual'], true) ? $data['source'] : 'manual',
+            'source'             => in_array($data['source'] ?? '', ['apps_script', 'manual', 'whatsapp'], true) ? $data['source'] : 'manual',
             'starts_at'          => self::to_utc($data['starts_at'] ?? null),
             'ends_at'            => self::to_utc($data['ends_at'] ?? null),
             'calendar_event_id'  => self::id_or_null($data['calendar_event_id'] ?? null),

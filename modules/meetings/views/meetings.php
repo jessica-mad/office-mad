@@ -29,12 +29,18 @@ $clients = Clients::all();
     <?php if ( $tab === 'import' ) : ?>
     <section class="madof-card">
         <span class="madof-kicker"><?php esc_html_e('Importar a mano', 'mad-oficina'); ?></span>
-        <p class="description"><?php esc_html_e('Pega las notas de Gemini (con la pestaña de transcripción) o una transcripción, y procesa la reunión sin esperar al Apps Script.', 'mad-oficina'); ?></p>
+        <p class="description"><?php esc_html_e('Pega las notas de Gemini (con la pestaña de transcripción) o una transcripción, o sube una conversación exportada de WhatsApp. La Secretaria sacará tareas, temas e ideas a la bandeja.', 'mad-oficina'); ?></p>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data" class="madof-form">
             <?php wp_nonce_field('madof_meeting_import'); ?>
             <input type="hidden" name="action" value="madof_meeting_import">
+            <fieldset class="madof-fieldset"><legend><?php esc_html_e('¿Qué vas a importar?', 'mad-oficina'); ?></legend>
+                <label class="madof-check"><input type="radio" name="kind" value="meeting" checked> <?php esc_html_e('Una reunión (notas de Gemini o transcripción)', 'mad-oficina'); ?></label>
+                <label class="madof-check"><input type="radio" name="kind" value="whatsapp"> <?php esc_html_e('Una conversación de WhatsApp (en el chat: ⋮ → Más → Exportar chat → Sin archivos)', 'mad-oficina'); ?></label>
+                <label><?php esc_html_e('Solo mensajes desde (WhatsApp)', 'mad-oficina'); ?><input type="date" name="since" value="<?php echo esc_attr(gmdate('Y-m-d', strtotime('-14 days'))); ?>">
+                    <small><?php esc_html_e('El archivo trae todo el historial: así solo se procesan los mensajes recientes.', 'mad-oficina'); ?></small></label>
+            </fieldset>
             <div class="madof-cols">
-                <label><?php esc_html_e('Título del evento', 'mad-oficina'); ?><input type="text" name="title" required placeholder="RF x MAD"></label>
+                <label><?php esc_html_e('Título', 'mad-oficina'); ?><input type="text" name="title" placeholder="RF x MAD · o vacío para WhatsApp"></label>
                 <label><?php esc_html_e('Fecha', 'mad-oficina'); ?><input type="date" name="date" value="<?php echo esc_attr(current_time('Y-m-d')); ?>"></label>
                 <label><?php esc_html_e('Hora', 'mad-oficina'); ?><input type="time" name="time"></label>
             </div>
@@ -45,7 +51,7 @@ $clients = Clients::all();
                 <label><?php esc_html_e('Emails de los invitados (opcional)', 'mad-oficina'); ?><input type="text" name="attendees" placeholder="ana@cliente.com, otro@gmail.com"></label>
             </div>
             <label><?php esc_html_e('Notas de Gemini / transcripción', 'mad-oficina'); ?><textarea name="transcript" rows="10"></textarea></label>
-            <label><?php esc_html_e('…o súbela como archivo (.txt, .md, .vtt, .srt)', 'mad-oficina'); ?><input type="file" name="transcript_file" accept=".txt,.md,.vtt,.srt"></label>
+            <label><?php esc_html_e('…o súbela como archivo (.txt, .zip de WhatsApp, .md, .vtt, .srt)', 'mad-oficina'); ?><input type="file" name="transcript_file" accept=".txt,.zip,.md,.vtt,.srt"></label>
             <label class="madof-check"><input type="checkbox" name="process_now" value="1" checked> <?php esc_html_e('Procesarla ahora (tarda entre 20 y 90 segundos)', 'mad-oficina'); ?></label>
             <button class="madof-btn"><?php esc_html_e('Importar', 'mad-oficina'); ?></button>
         </form>
@@ -99,7 +105,7 @@ $clients = Clients::all();
                     <td><?php echo esc_html($m['starts_at'] ? get_date_from_gmt($m['starts_at'], 'j M Y H:i') : '—'); ?></td>
                     <td><a href="<?php echo esc_url($base . '&meeting=' . $m['id']); ?>"><strong><?php echo esc_html($m['title']); ?></strong></a></td>
                     <td><?php echo $c ? '<span class="madof-code">' . esc_html($c['code']) . '</span>' : '—'; ?></td>
-                    <td><?php echo $m['source'] === 'apps_script' ? 'Apps Script' : esc_html__('Manual', 'mad-oficina'); ?></td>
+                    <td><?php echo $m['source'] === 'apps_script' ? 'Apps Script' : ($m['source'] === 'whatsapp' ? 'WhatsApp' : esc_html__('Manual', 'mad-oficina')); ?></td>
                     <td><span class="madof-pill <?php echo in_array($m['status'], ['extracted', 'error', 'no_transcript'], true) ? 'is-on' : ''; ?>"><?php echo esc_html($statuses[$m['status']] ?? $m['status']); ?></span></td>
                 </tr>
             <?php endforeach; ?>

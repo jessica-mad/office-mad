@@ -143,6 +143,8 @@ $edit_contact = isset($_GET['contact']) ? absint($_GET['contact']) : 0;
         </form>
     </section>
 
+    <?php do_action('madoficina_client_edit_sections', $c); ?>
+
     <section class="madof-card is-danger">
         <span class="madof-kicker"><?php esc_html_e('Borrar cliente', 'mad-oficina'); ?></span>
         <p><?php esc_html_e('Borra el cliente y todos sus datos en MAD Oficina (contactos, reuniones, tareas, ideas, mensajes). Sus usuarios pierden el acceso al portal. No toca nada de Google Drive. No se puede deshacer.', 'mad-oficina'); ?></p>

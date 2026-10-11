@@ -87,3 +87,7 @@
 .madof-more[open] summary::before{content:"– "}
 .madof-more textarea{margin-top:6px}
 .madof-draft-table td:nth-child(2){width:46%;min-width:260px}
+.madof-checklist{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:6px}
+.madof-checklist li{display:flex;gap:8px;align-items:center}
+.madof-checklist li.is-ok .madof-icon{color:#1f6f2a}
+.madof-steps ul{margin:6px 0 6px 18px;list-style:disc}

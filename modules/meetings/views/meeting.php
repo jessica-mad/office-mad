@@ -18,7 +18,11 @@ $drive = fn($id) => $id ? 'https://drive.google.com/open?id=' . rawurlencode($id
         <div class="madof-cols">
             <div><span class="madof-kicker"><?php esc_html_e('Cliente', 'mad-oficina'); ?></span>
                 <p><?php echo $client ? '<span class="madof-code">' . esc_html($client['code']) . '</span> ' . esc_html($client['name']) : esc_html__('Sin identificar', 'mad-oficina'); ?></p></div>
-            <div><span class="madof-kicker"><?php esc_html_e('Estado', 'mad-oficina'); ?></span><p><?php echo esc_html($meeting['status']); ?></p></div>
+            <div><span class="madof-kicker"><?php esc_html_e('Estado', 'mad-oficina'); ?></span><p><?php
+                $labels = ['received' => __('Recibida (se procesará sola en unos minutos)', 'mad-oficina'), 'processing' => __('Procesando…', 'mad-oficina'), 'extracted' => __('Borrador en la bandeja', 'mad-oficina'),
+                    'approved' => __('Aprobada', 'mad-oficina'), 'archived' => __('Aprobada y archivada', 'mad-oficina'), 'no_transcript' => __('Sin transcripción', 'mad-oficina'),
+                    'error' => __('Error', 'mad-oficina'), 'discarded' => __('Descartada', 'mad-oficina')];
+                echo esc_html($labels[$meeting['status']] ?? $meeting['status']); ?></p></div>
             <div><span class="madof-kicker"><?php esc_html_e('Archivos', 'mad-oficina'); ?></span><p>
                 <?php foreach ( ['drive_folder_id' => __('Carpeta', 'mad-oficina'), 'recording_file_id' => __('Grabación', 'mad-oficina'), 'gemini_notes_id' => __('Notas de Gemini', 'mad-oficina')] as $field => $label ) : ?>
                     <?php if ( $meeting[$field] ) : ?><a href="<?php echo esc_url($drive($meeting[$field])); ?>" target="_blank" rel="noopener"><?php echo esc_html($label); ?></a><br><?php endif; ?>
