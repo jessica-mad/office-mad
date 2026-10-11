@@ -66,7 +66,7 @@ office-mad/                       # = carpeta del plugin en wp-content/plugins/
 
 ## 3. Tablas, roles y tests
 
-Sin cambios respecto a v1: prefijo `mad_of_`, tablas `clients`, `client_users`, `client_contacts`, `contact_emails`, `team_members`, `meetings`, `action_items`, `pending_topics`, `ideas`, `processes`, `tasks`, `approvals`, `agent_log` y `messages`. Cada módulo crea las suyas al activarse.
+Sin cambios respecto a v1: prefijo `mad_of_`, tablas `clients`, `client_users`, `client_contacts`, `contact_emails`, `team_members`, `meetings`, `action_items`, `pending_topics`, `ideas`, `processes`, `tasks`, `approvals`, `agent_log` y `messages`. El núcleo crea todas las tablas de la fase 1, porque varios módulos las comparten. Cada fase posterior añade las suyas subiendo `Installer::DB_VERSION`.
 
 Cambios en `meetings`:
 - nuevos campos `sheet_row` (fila del Sheet de reuniones), `drive_folder_id` y `shared_with` (JSON),
