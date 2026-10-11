@@ -39,15 +39,23 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
             <span class="madof-kicker"><?php esc_html_e('Ajustes', 'mad-oficina'); ?></span>
             <label class="madof-check"><input type="checkbox" name="test_mode" value="1" <?php checked($messenger->test_mode()); ?>> <strong><?php esc_html_e('Modo pruebas', 'mad-oficina'); ?></strong> — <?php esc_html_e('desviar a mi espacio de pruebas todo lo que iría a clientes', 'mad-oficina'); ?></label>
             <label><?php esc_html_e('Espacio de pruebas', 'mad-oficina'); ?>
-                <?php if ( is_array($spaces) && $spaces ) : ?>
+                <?php $listed = is_array($spaces) ? array_values(array_filter($spaces, fn($s) => ! in_array($s['type'], ['DIRECT_MESSAGE', 'DM'], true))) : []; ?>
+                <?php if ( $listed ) : ?>
                     <select name="test_space"><option value=""><?php esc_html_e('— elige —', 'mad-oficina'); ?></option>
-                    <?php foreach ( $spaces as $s ) : if ( in_array($s['type'], ['DIRECT_MESSAGE', 'DM'], true) ) continue; ?>
+                    <?php foreach ( $listed as $s ) : ?>
                         <option value="<?php echo esc_attr($s['name']); ?>" <?php selected($settings['test_space'] ?? '', $s['name']); ?>><?php echo esc_html($s['title'] ?: $s['name']); ?></option>
                     <?php endforeach; ?></select>
-                <?php else : ?>
-                    <input type="text" name="test_space" value="<?php echo esc_attr($settings['test_space'] ?? ''); ?>" placeholder="spaces/AAAA…">
-                    <small><?php echo is_wp_error($spaces) ? esc_html($spaces->get_error_message()) : esc_html__('Cuando el bot esté configurado y lo añadas a un espacio, aparecerá aquí.', 'mad-oficina'); ?></small>
-                <?php endif; ?></label>
+                <?php elseif ( ! empty($settings['test_space']) ) : ?>
+                    <input type="hidden" name="test_space" value="<?php echo esc_attr($settings['test_space']); ?>">
+                    <code><?php echo esc_html($settings['test_space']); ?></code>
+                <?php endif; ?>
+                <small><?php
+                    if ( is_wp_error($spaces) ) echo esc_html($spaces->get_error_message()) . ' · ';
+                    elseif ( is_array($spaces) && ! $listed ) echo esc_html__('El bot todavía no aparece en ningún espacio (solo en tu chat directo).', 'mad-oficina') . ' ';
+                    esc_html_e('La lista son los espacios donde está el bot, consultados ahora mismo.', 'mad-oficina'); ?></small></label>
+            <label><?php esc_html_e('…o pega el enlace del espacio', 'mad-oficina'); ?>
+                <input type="text" name="test_space_link" value="" placeholder="https://mail.google.com/chat/u/0/#chat/space/AAAA…">
+                <small><?php esc_html_e('Abre el espacio en Chat y copia la dirección del navegador. Si lo rellenas, tiene prioridad sobre el desplegable.', 'mad-oficina'); ?></small></label>
             <div class="madof-cols">
                 <label><?php esc_html_e('Número de proyecto de Google Cloud', 'mad-oficina'); ?><input type="text" name="project_number" value="<?php echo esc_attr($settings['project_number'] ?? ''); ?>" inputmode="numeric"></label>
                 <label><?php esc_html_e('Tu email (quien puede aprobar desde Chat)', 'mad-oficina'); ?><input type="email" name="manager_email" value="<?php echo esc_attr($settings['manager_email'] ?? ''); ?>" placeholder="<?php echo esc_attr($messenger->manager_email()); ?>"></label>

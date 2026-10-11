@@ -30,6 +30,8 @@ $types = ['none' => __('No enviar', 'mad-oficina'), 'space' => __('Espacio de Ch
                     <input type="text" name="targets[<?php echo esc_attr($kind); ?>][space]" value="<?php echo esc_attr($t['type'] === 'space' ? $t['value'] : ''); ?>" placeholder="spaces/AAAA…">
                     <small><?php esc_html_e('Cuando el bot esté configurado verás aquí la lista de espacios donde lo has añadido.', 'mad-oficina'); ?></small>
                 <?php endif; ?></label>
+            <label><?php esc_html_e('…o enlace del espacio', 'mad-oficina'); ?>
+                <input type="text" name="targets[<?php echo esc_attr($kind); ?>][link]" value="" placeholder="https://mail.google.com/chat/u/0/#chat/space/…"></label>
             <label><?php esc_html_e('URL del webhook (solo si eliges webhook)', 'mad-oficina'); ?>
                 <input type="password" name="targets[<?php echo esc_attr($kind); ?>][webhook]" value="" autocomplete="off" placeholder="<?php echo $t['type'] === 'webhook' ? esc_attr__('Guardada (déjalo vacío para mantenerla)', 'mad-oficina') : 'https://chat.googleapis.com/v1/spaces/…/messages?key=…'; ?>"></label>
         </div>

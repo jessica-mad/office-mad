@@ -225,4 +225,25 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame(['Rosa Prieto', 'Jessica Murillo'], $q['people']);
         $this->assertSame('2026-10-07 17:57', $q['from']);
     }
+
+    public function test_space_ids_are_read_from_chat_links(){
+        $m = $this->module();
+        $this->assertSame('spaces/AAQAx1y2Z3', $m::parse_space('https://mail.google.com/chat/u/0/#chat/space/AAQAx1y2Z3'));
+        $this->assertSame('spaces/AAQAx1y2Z3', $m::parse_space('https://chat.google.com/room/AAQAx1y2Z3?cls=7'));
+        $this->assertSame('spaces/AAQAx1y2Z3', $m::parse_space('spaces/AAQAx1y2Z3'));
+        $this->assertSame('', $m::parse_space('https://evil.example/whatever'));
+    }
+
+    public function test_spaces_list_is_always_fresh(){
+        add_filter('pre_http_request', function($pre, $args, $url){
+            if ( strpos($url, 'https://chat.googleapis.com/v1/spaces?') !== 0 ) return $pre;
+            return ['response' => ['code' => 200], 'body' => wp_json_encode(['spaces' => [
+                ['name' => 'spaces/DM1', 'spaceType' => 'DIRECT_MESSAGE'],
+                ['name' => 'spaces/PRUEBAS', 'spaceType' => 'SPACE', 'displayName' => 'Pruebas MAD Oficina'],
+            ]])];
+        }, 15, 3); // after fake_google, which answers every other Chat call
+        $spaces = $this->module()->spaces();
+        $this->assertSame(['spaces/DM1', 'spaces/PRUEBAS'], array_column($spaces, 'name'));
+        $this->assertSame('Pruebas MAD Oficina', $spaces[1]['title']);
+    }
 }

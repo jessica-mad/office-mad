@@ -172,10 +172,8 @@ return new class($core) implements MAD_Oficina_Module {
         $s['manager_email'] = sanitize_email($p['manager_email'] ?? '');
         $s['portal_url'] = esc_url_raw($p['portal_url'] ?? '') ?: home_url('/oficina/');
         $s['test_mode'] = ! empty($p['test_mode']);
-        $space = sanitize_text_field($p['test_space'] ?? '');
-        $s['test_space'] = preg_match('#^spaces/[A-Za-z0-9_-]+$#', $space) ? $space : '';
+        $s['test_space'] = self::parse_space($p['test_space_link'] ?? '') ?: self::parse_space($p['test_space'] ?? '');
         $this->save_settings($s);
-        delete_transient('madof_chat_spaces');
         $this->back($url, __('Ajustes de Chat guardados.', 'mad-oficina'));
     }
 
@@ -200,10 +198,10 @@ return new class($core) implements MAD_Oficina_Module {
         $targets = [];
         foreach ( array_keys(\MAD_Oficina\Chat\Messenger::KINDS) as $kind ) {
             $type = sanitize_key($p['targets'][$kind]['type'] ?? 'none');
-            $space = trim((string) ($p['targets'][$kind]['space'] ?? ''));
+            $space = self::parse_space($p['targets'][$kind]['link'] ?? '') ?: self::parse_space($p['targets'][$kind]['space'] ?? '');
             $hook = trim((string) ($p['targets'][$kind]['webhook'] ?? ''));
             $current = \MAD_Oficina\Chat\Messenger::target($client, $kind);
-            if ( $type === 'space' && preg_match('#^spaces/[A-Za-z0-9_-]+$#', $space) ) {
+            if ( $type === 'space' && $space ) {
                 $targets[$kind] = ['type' => 'space', 'value' => $space, 'label' => $labels[$space] ?? $space];
             } elseif ( $type === 'webhook' && preg_match('#^https://chat\.googleapis\.com/v1/spaces/[^/]+/messages\?\S+$#', $hook) ) {
                 $targets[$kind] = ['type' => 'webhook', 'value' => \MAD_Oficina\Core\Crypto::encrypt($hook), 'label' => 'Webhook']; // the URL is a secret
@@ -218,15 +216,25 @@ return new class($core) implements MAD_Oficina_Module {
         $this->back(admin_url('admin.php?page=mad-oficina-clientes&client=' . $client['id']), __('Destinos de mensajes guardados.', 'mad-oficina'));
     }
 
-    /** Spaces where the bot is a member (cached 10 min). @return array|\WP_Error|null */
+    /**
+     * Spaces where the bot is a member, asked to Google on every page load so a
+     * space the app was just added to shows up straight away.
+     * @return array|\WP_Error|null
+     */
     public function spaces(){
         $api = $this->api();
-        if ( ! $api ) return null;
-        $cached = get_transient('madof_chat_spaces');
-        if ( is_array($cached) ) return $cached;
-        $spaces = $api->list_spaces();
-        if ( ! is_wp_error($spaces) ) set_transient('madof_chat_spaces', $spaces, 10 * MINUTE_IN_SECONDS);
-        return $spaces;
+        return $api ? $api->list_spaces() : null;
+    }
+
+    /**
+     * Accepts "spaces/AAAA", or a Chat link such as
+     * https://mail.google.com/chat/u/0/#chat/space/AAAA or https://chat.google.com/room/AAAA.
+     */
+    public static function parse_space($value){
+        $value = trim((string) $value);
+        if ( preg_match('#^spaces/([A-Za-z0-9_-]+)$#', $value, $m) ) return 'spaces/' . $m[1];
+        if ( preg_match('#(?:/space/|/room/|/spaces/)([A-Za-z0-9_-]{6,})#', $value, $m) ) return 'spaces/' . $m[1];
+        return '';
     }
 
     public function render_client_section($client){
