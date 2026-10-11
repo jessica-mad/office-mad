@@ -20,20 +20,26 @@ Según las ayudas oficiales de Workspace [1][2]:
 | **B. Bot «MAD Oficina»** (app de Chat) | Mensaje del bot, con tarjetas | Imagen de marca y tarjetas bonitas | Los externos **no pueden pulsar** los botones. Hay que añadir el bot a cada espacio. No puede escribir por DM a externos. |
 | **C. Webhook entrante** | Mensaje con el nombre y avatar que elijas | Lo más sencillo: una URL por espacio, sin Google Cloud | Solo envía, no recibe respuestas. Hay que crear la URL en cada espacio. Depende de tu edición de Workspace y de la política de administración. |
 
-## 3. Propuesta
+## 3. Decisión: siempre el bot, nunca en nombre de Jessica
 
-- **Para ti, Jessica: bot «MAD Oficina» por DM**, con tarjetas y botones **Aprobar / Editar en la web / Descartar** para cada petición de la bandeja. También responde a mensajes sencillos, como «¿qué tengo pendiente?».
-- **Para Liz: el mismo bot por DM** (es interna, así que las tarjetas funcionan). Cada tarea le llega con contexto, enlaces, fecha y un botón **«Hecha»**.
-- **Para clientes: la opción A por defecto,** publicar como tú en su espacio o en tu DM con ellos. Es lo más natural, no les obliga a nada y funciona ya en los espacios que tienes.
-  - En la ficha de cada cliente eliges el destino por tipo de mensaje (resumen de reunión, recordatorios): espacio compartido, DM con una persona, webhook (opción C) o email.
-  - **Nada se envía al cliente sin pasar por la bandeja.** El resumen de reunión sale al aprobar el acta, si marcas «Enviar resumen».
+Jessica quiere que se entienda que escribe un bot, no ella. Así que **se descarta la opción A**.
+
+- **Para Jessica y para Liz: bot «MAD Oficina» por mensaje directo,** con tarjetas y botones. Funciona porque son del mismo dominio.
+- **Para clientes: el mismo bot dentro de un espacio compartido con el cliente.**
+  - Google Chat marca al bot con la etiqueta **«App»** junto a su nombre, así que se ve claramente que no es una persona.
+  - Los mensajes a clientes **no llevan botones**, porque no podrían pulsarlos. Llevan un enlace a su oficina en la web.
+  - **El espacio lo crea Jessica, desde su Workspace:** «Cliente x MAD», con las personas del cliente. Ella añade el bot con «Añadir apps» y lo elige en la ficha del cliente. Si lo creara el cliente, la política de su organización podría impedir añadir apps de fuera.
+  - **Si un espacio no admite apps,** se puede usar un **webhook** (opción C) con el nombre y avatar «MAD Oficina · Asistente», que tampoco parece una persona.
+  - **Si el cliente no usa Chat,** se le escribe por **email** desde la web, firmado por «MAD Oficina · Asistente».
+- **Nada se envía al cliente sin pasar por la bandeja.** El resumen de reunión sale al aprobar el acta, si marcas «Enviar resumen».
+- **Todos los mensajes del bot a clientes terminan con una firma breve:** «Mensaje automático de la oficina de MAD. Jessica lo ha revisado antes de enviarlo».
 
 ## 4. Cosas a tener en cuenta antes de empezar
 
 1. **Credenciales del bot.** Para que el bot escriba por iniciativa propia (avisarte de una aprobación nueva) necesita una **cuenta de servicio** con clave JSON. En organizaciones de Workspace recientes, Google **bloquea por defecto la creación de claves** con la política `iam.disableServiceAccountKeyCreation`. Si al crearla te sale ese error, hay que desactivar esa política en el proyecto, como administradora de la organización en Google Cloud. Te guiaré.
 2. **Cloudflare.** Google Chat enviará los clics de las tarjetas a `/wp-json/mad-oficina/v1/chat/events`. Hará falta una segunda regla, igual que la de `/hooks/`.
 3. **Verificación.** Cada evento de Chat llega firmado por Google (un token JWT). El plugin comprueba la firma con las claves públicas de Google y que va dirigido a tu proyecto antes de hacer nada.
-4. **Permisos nuevos de tu cuenta** (solo para la opción A): `chat.messages.create` y `chat.spaces.readonly`, este último para que elijas el espacio de cada cliente de una lista. Tendrás que volver a conectar Google en *Conexiones*.
+4. **No hacen falta permisos de Chat en tu cuenta:** todo lo publica el bot, con su cuenta de servicio. Los espacios donde el bot está añadido se listan con sus propias credenciales para elegirlos en la ficha del cliente.
 
 ## 5. Qué tendrás que hacer en Google Cloud
 
