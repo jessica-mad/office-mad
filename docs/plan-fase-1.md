@@ -165,3 +165,43 @@ Sin cambios respecto a v1:
 | **3 · Secretaria de actas** | Apps Script "cartero", endpoints firmados, identificación, extracción, bandeja, aprobación por partes, órdenes de vuelta y Sheet de reuniones. |
 | **4 · Google Chat** | Informe de 5.7 verificado y bot "MAD Oficina": DM contigo con tarjetas, tareas a Liz y resumen al cliente. |
 | **5 · Agenda y seguimiento** | Freebusy en tiempo real, reuniones con Meet tras aprobación, recordatorios, banco de ideas y resumen de los lunes. |
+| **6 · Visitantes** | Recepción abierta para quien no tiene usuario: hablar con la recepcionista sobre qué hace MAD, pedir una primera cita y dejar un brief. Detalle abajo. |
+
+---
+
+## 9. Bloque 6 · Vista de visitante (propuesta, sin implementar)
+
+**Por qué va después del bloque 5:** necesita la bandeja de gerencia (bloque 3) para que apruebes citas y briefs, y la agenda con disponibilidad real (bloque 5). El formulario de brief se reutiliza para el botón «Nuevo encargo» de los clientes.
+
+**Qué ve el visitante en `/oficina` sin iniciar sesión:**
+- La oficina con **solo la recepción encendida**. El resto de salas aparecen a oscuras, con el cartel «Solo clientes» y un botón «Ya soy cliente: entrar».
+- En la vista clásica, la recepción con tres botones:
+  - **«Qué hacemos»**: charla con la recepcionista;
+  - **«Pedir una primera reunión»**;
+  - **«Dejar un brief»**.
+
+**Recepcionista en modo visitante (otro agente, otras herramientas):**
+- **Conocimiento:** solo una ficha de MAD que editas tú (servicios, forma de trabajar, casos que se puedan contar y preguntas frecuentes). No tiene ninguna herramienta que lea datos de clientes: el código del modo visitante no las incluye.
+- **Herramientas:**
+  - `get_free_slots`: huecos reales de tu agenda, con las reglas del bloque 5 y solo para una «primera reunión» de duración fija;
+  - `request_meeting`: crea una **petición** en la bandeja con nombre, email, empresa y hueco elegido; tú apruebas y entonces se crea el evento con Meet;
+  - `save_brief`: guarda el brief en la bandeja como **lead**.
+- **Precios y plazos:** no da precios ni compromete plazos. Si se los piden, propone la reunión.
+
+**Leads:**
+- Tabla nueva `leads`: nombre, email, empresa, origen, brief, estado (nuevo / contactado / cliente / descartado) y consentimiento RGPD con fecha.
+- Al convertir un lead en cliente se crea su ficha.
+
+**Riesgos y cómo los cubro** (cualquiera puede escribir, así que es la parte más expuesta):
+- **Coste y abuso:**
+  - Haiku 5.5;
+  - límite por IP y por sesión (por ejemplo, 15 mensajes por conversación y 3 conversaciones al día);
+  - tope de gasto diario global para el modo visitante, configurable; al llegar al tope, el chat se cambia por el formulario;
+  - Cloudflare Turnstile (gratuito y sin molestias) antes de empezar a chatear o de enviar formularios.
+- **Spam en la bandeja:**
+  - un honeypot en los formularios;
+  - verificación del email (enlace de confirmación) antes de que una petición de cita llegue a la bandeja.
+- **RGPD:**
+  - casilla de consentimiento con enlace a la política de privacidad;
+  - las conversaciones de visitantes que no se convierten en lead se borran a los 30 días (configurable).
+- **Prompt injection:** lo que escribe el visitante es solo conversación. Ninguna herramienta envía nada fuera sin tu aprobación.
