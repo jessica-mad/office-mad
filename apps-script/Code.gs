@@ -18,9 +18,16 @@
 
 var NOTES_RE = /(Notas de Gemini|Notes by Gemini)/i;
 var TRANSCRIPT_RE = /(Transcripci[oó]n|Transcript)/i;
-var FOLDER_RE = /^(.*?)\s+-\s+(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})/;
-var LOOSE_DOC_RE = /^(.*?):\s+(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}).*-\s+(Notas de Gemini|Notes by Gemini)/i;
-var WAIT_MINUTES = 180; // how long to wait for notes before sending a meeting without them
+// Google Meet creates one folder per meeting ("RF x MAD - 2026/10/07 17:57 CEST")
+// and one reused folder per recurring meeting ("Divano Toscano x MAD (recurring)").
+var DATED_FOLDER_RE = /^(.*?)\s+-\s+(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})/;
+// Notes: "RF x MAD: 2026/10/07 17:57 CEST - Notas de Gemini" or "La reunión se inició a las 2026/07/24 17:46 CEST - …"
+var NOTES_NAME_RE = /^(.*?)(?::\s+|\s+a las\s+|\s+at\s+)(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})/i;
+// Any date+time in a file name: "2026/10/07 17:57" or "(2026-07-24 17:46 GMT+2)"
+var ANY_DATE_RE = /(\d{4})[\/-](\d{2})[\/-](\d{2})\s+(\d{2}):(\d{2})/;
+var LEGACY_FOLDER = 'Meet Recordings';
+var WAIT_MINUTES = 180; // how long to wait for notes before sending a recording on its own
+var MATCH_MINUTES = 20; // recording and notes of the same meeting start within this window
 var SHEET_HEADERS = ['Fecha', 'Título', 'Cliente', 'Estado', 'Resumen', 'Carpeta', 'Notas', 'Grabación', 'Clave', 'ID web'];
 
 function props_() { return PropertiesService.getScriptProperties(); }
@@ -53,57 +60,80 @@ function run() {
 
 /* ───────────────────────── scanning ───────────────────────── */
 
+/**
+ * The unit is the Gemini notes doc (one per meeting, also inside recurring
+ * folders). Recordings are matched to notes by date and time; a recording with
+ * no notes after WAIT_MINUTES is sent on its own.
+ */
 function scan() {
   var root = DriveApp.getFolderById(props_().getProperty('ROOT_FOLDER_ID'));
   var start = props_().getProperty('START_DATE') || '1970-01-01';
   var known = knownKeys_();
 
-  // 1. One subfolder per meeting: "RF x MAD - 2026/10/07 17:57 CEST"
-  var folders = root.getFolders();
-  while (folders.hasNext()) {
-    var f = folders.next();
-    var m = f.getName().match(FOLDER_RE);
-    if (!m) continue;
-    var key = 'drive-folder:' + f.getId();
-    if (known[key]) continue;
-    var startsAt = toDate_(m);
-    if (Utilities.formatDate(startsAt, 'Europe/Madrid', 'yyyy-MM-dd') < start) continue;
-    var files = filesIn_(f);
-    sendMeeting_(key, cleanTitle_(m[1]), startsAt, files, f.getId(), f.getDateCreated());
+  var places = [{ folder: root, dated: null }];
+  var sub = root.getFolders();
+  while (sub.hasNext()) {
+    var f = sub.next();
+    if (f.getName() === LEGACY_FOLDER) continue;
+    var dm = f.getName().match(DATED_FOLDER_RE);
+    places.push({ folder: f, dated: dm ? cleanTitle_(dm[1]) : null });
   }
 
-  // 2. Gemini notes left loose in the root folder: "RF x MAD: 2026/10/07 17:57 CEST - Notas de Gemini"
-  var docs = root.getFilesByType(MimeType.GOOGLE_DOCS);
-  while (docs.hasNext()) {
-    var d = docs.next();
-    var dm = d.getName().match(LOOSE_DOC_RE);
-    if (!dm) continue;
-    var dkey = 'drive-doc:' + d.getId();
-    if (known[dkey]) continue;
-    var dStart = toDate_(dm);
-    if (Utilities.formatDate(dStart, 'Europe/Madrid', 'yyyy-MM-dd') < start) continue;
-    sendMeeting_(dkey, cleanTitle_(dm[1]), dStart, { notes: d, transcript: null, recording: null }, null, d.getDateCreated());
-  }
+  places.forEach(function (place) {
+    var docs = [], videos = [], transcripts = [];
+    var it = place.folder.getFiles();
+    while (it.hasNext()) {
+      var file = it.next(), type = file.getMimeType(), name = file.getName();
+      if (type === MimeType.GOOGLE_DOCS && NOTES_RE.test(name)) docs.push(file);
+      else if (type === MimeType.GOOGLE_DOCS && TRANSCRIPT_RE.test(name)) transcripts.push(file);
+      else if (type.indexOf('video/') === 0) videos.push(file);
+    }
+    var usedVideos = {};
+
+    docs.forEach(function (doc) {
+      var m = doc.getName().match(NOTES_NAME_RE) || doc.getName().match(ANY_DATE_RE) && [null, ''].concat(doc.getName().match(ANY_DATE_RE).slice(1));
+      var startsAt = m ? toDate_(m) : doc.getDateCreated();
+      var video = closest_(videos, startsAt);
+      if (video) usedVideos[video.getId()] = true;
+      var key = 'drive-doc:' + doc.getId();
+      if (known[key] || day_(startsAt) < start) return;
+      var title = place.dated || (m && m[1] ? cleanTitle_(m[1]) : 'Reunión sin título');
+      sendMeeting_(key, title, startsAt, {
+        notes: doc, transcript: closest_(transcripts, startsAt), recording: video,
+        folderId: place.folder.getId(), ownFolder: !!place.dated
+      });
+    });
+
+    // Recordings without Gemini notes (notes turned off, or still being written).
+    videos.forEach(function (video) {
+      if (usedVideos[video.getId()]) return;
+      var vm = video.getName().match(ANY_DATE_RE);
+      var startsAt = vm ? toDate_([null, null].concat(vm.slice(1))) : video.getDateCreated();
+      var key = 'drive-video:' + video.getId();
+      if (known[key] || day_(startsAt) < start) return;
+      if ((Date.now() - video.getDateCreated().getTime()) / 60000 < WAIT_MINUTES) return;
+      var title = place.dated || cleanTitle_(video.getName().replace(/\s+[-(].*$/, ''));
+      sendMeeting_(key, title, startsAt, {
+        notes: null, transcript: closest_(transcripts, startsAt), recording: video,
+        folderId: place.folder.getId(), ownFolder: !!place.dated
+      });
+    });
+  });
 }
 
-function filesIn_(folder) {
-  var out = { notes: null, transcript: null, recording: null };
-  var it = folder.getFiles();
-  while (it.hasNext()) {
-    var file = it.next();
-    var name = file.getName(), type = file.getMimeType();
-    if (type === MimeType.GOOGLE_DOCS && NOTES_RE.test(name)) out.notes = file;
-    else if (type === MimeType.GOOGLE_DOCS && TRANSCRIPT_RE.test(name)) out.transcript = file;
-    else if (type.indexOf('video/') === 0) out.recording = file;
-  }
-  return out;
+/** File whose name carries the date/time closest to `when` (within MATCH_MINUTES). */
+function closest_(files, when) {
+  var best = null, bestDiff = MATCH_MINUTES + 1;
+  files.forEach(function (f) {
+    var m = f.getName().match(ANY_DATE_RE);
+    if (!m) return;
+    var diff = Math.abs(toDate_([null, null].concat(m.slice(1))).getTime() - when.getTime()) / 60000;
+    if (diff < bestDiff) { best = f; bestDiff = diff; }
+  });
+  return best;
 }
 
-function sendMeeting_(key, title, startsAt, files, folderId, created) {
-  var hasText = files.notes || files.transcript;
-  var ageMin = (Date.now() - created.getTime()) / 60000;
-  if (!hasText && ageMin < WAIT_MINUTES) return; // Gemini may still be writing
-
+function sendMeeting_(key, title, startsAt, files) {
   var text = '', attendees = [], eventId = null, endsAt = null;
   [files.notes, files.transcript].forEach(function (f) {
     if (!f) return;
@@ -123,8 +153,8 @@ function sendMeeting_(key, title, startsAt, files, folderId, created) {
     } catch (e) { console.warn('Calendar: ' + e); }
   }
 
-  var row = appendRow_([startsAt, title, '', hasText ? 'enviada' : 'sin transcripción', '',
-    folderId ? 'https://drive.google.com/drive/folders/' + folderId : '',
+  var row = appendRow_([startsAt, title, '', text ? 'enviada' : 'sin transcripción', '',
+    'https://drive.google.com/drive/folders/' + files.folderId,
     files.notes ? files.notes.getUrl() : '', files.recording ? files.recording.getUrl() : '', key, '']);
 
   var res = signedFetch_('post', '/hooks/meetings', {
@@ -134,7 +164,8 @@ function sendMeeting_(key, title, startsAt, files, folderId, created) {
     ends_at: endsAt ? endsAt.toISOString() : null,
     calendar_event_id: eventId,
     attendees: attendees,
-    drive_folder_id: folderId,
+    // Only one-off meeting folders are moved as a whole; recurring folders stay where Meet expects them.
+    drive_folder_id: files.ownFolder ? files.folderId : null,
     gemini_notes_id: files.notes ? files.notes.getId() : null,
     transcript_file_id: files.transcript ? files.transcript.getId() : null,
     recording_file_id: files.recording ? files.recording.getId() : null,
@@ -313,6 +344,9 @@ function signedFetch_(method, path, body) {
 
 /* ───────────────────────── helpers ───────────────────────── */
 
+function day_(d) { return Utilities.formatDate(d, 'Europe/Madrid', 'yyyy-MM-dd'); }
+
+/** m = [_, _, yyyy, MM, dd, HH, mm] (Madrid local time, as Meet writes it). */
 function toDate_(m) {
   // Folder/doc names use Madrid local time.
   var s = m[2] + '-' + m[3] + '-' + m[4] + ' ' + m[5] + ':' + m[6];
@@ -320,8 +354,9 @@ function toDate_(m) {
 }
 
 function cleanTitle_(t) {
-  if (/^La reuni[oó]n se inici[oó]/i.test(t)) return 'Reunión sin título';
-  return t.trim();
+  t = (t || '').replace(/\s*\(recurring\)\s*$/i, '').trim();
+  if (!t || /^La reuni[oó]n se inici[oó]/i.test(t) || /^The meeting started/i.test(t)) return 'Reunión sin título';
+  return t;
 }
 
 /** Manual helper: send meetings from the last N days that were skipped by START_DATE. */

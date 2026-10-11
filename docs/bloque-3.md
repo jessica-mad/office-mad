@@ -3,10 +3,11 @@
 ## Flujo
 
 ```
-Carpeta de reuniones (Drive)
-  └ «RF x MAD - 2026/10/07 17:57 CEST»/      ← una subcarpeta por reunión
-       ├ RF x MAD: … - Notas de Gemini        (notas + pestaña de transcripción)
-       └ grabación .mp4
+Carpeta «Google Meet» (la crea Meet)
+  ├ «RF x MAD - 2026/10/07 17:57 CEST»/          ← una subcarpeta por reunión
+  │    ├ RF x MAD: … - Notas de Gemini            (notas + pestaña de transcripción)
+  │    └ grabación .mp4
+  └ «Divano Toscano x MAD (recurring)»/          ← reuniones periódicas: varias sesiones
         │  Apps Script cada 10 min (apps-script/Code.gs)
         ▼
 POST firmado /hooks/meetings  → reunión «Recibida» → cola en segundo plano

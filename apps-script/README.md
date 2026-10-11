@@ -15,17 +15,25 @@ Este script vigila tu carpeta de Meet y hace tres cosas:
    |---|---|
    | `MAD_ENDPOINT` | Lo copias de *MAD Oficina → Reuniones → Apps Script y ajustes* |
    | `MAD_SECRET` | Lo copias de la misma pantalla |
-   | `ROOT_FOLDER_ID` | `1a9Bw6H8lLV74nzD2DJ60FTqzvvUQ5cBo` (tu carpeta de reuniones) |
+   | `ROOT_FOLDER_ID` | `1a9Bw6H8lLV74nzD2DJ60FTqzvvUQ5cBo` (tu carpeta «Google Meet») |
    | `CLIENTS_FOLDER_ID` | *(opcional)* La carpeta donde viven las carpetas de tus clientes |
 
 4. Ejecuta la función **`install`** y acepta los permisos. Pide Drive, Docs, Calendar (lectura), Hojas y conexiones externas. Crea un disparador cada 10 minutos y la hoja «Reuniones MAD» dentro de tu carpeta de reuniones.
 
 ## Qué reuniones envía
 
-- **Subcarpetas** con nombre del tipo `RF x MAD - 2026/10/07 17:57 CEST`: una subcarpeta por reunión, con las notas de Gemini y la grabación.
-- **Notas de Gemini sueltas** en la carpeta raíz con el formato `RF x MAD: 2026/10/07 17:57 CEST - Notas de Gemini`.
-- **Solo las reuniones desde el día de la instalación.** Para mandar también las de los últimos N días, ejecuta `backfill(14)`.
-- **Reuniones sin notas todavía:** el script espera hasta 3 horas a que Gemini termine. Si no llegan, la manda igual y en la web aparece como «Sin transcripción».
+Google Meet guarda cada reunión en la carpeta **«Google Meet»**:
+- una **subcarpeta por reunión**: `RF x MAD - 2026/10/07 17:57 CEST`;
+- una **carpeta fija por cada reunión periódica**: `Divano Toscano x MAD (recurring)`, donde Meet va dejando cada sesión.
+
+Cómo trabaja el script:
+- **La unidad es la nota de Gemini:** cada nota es una reunión. La grabación se empareja por fecha y hora (±20 min).
+- **Grabaciones sin nota** (porque no activaste Gemini): espera 3 horas y la envía sola. En la web aparecerá como «Sin transcripción».
+- **Al archivar una reunión aprobada:**
+  - si es una reunión única, mueve su subcarpeta entera a `Cliente/Reuniones/AAAA-MM-DD – Título`;
+  - si es periódica, **no toca la carpeta de Meet**: crea la carpeta de esa sesión en el cliente y mueve allí solo la nota y la grabación de ese día.
+- **No toca la carpeta antigua** `Meet Recordings`.
+- **Solo envía las reuniones desde el día de la instalación.** Para mandar también las de los últimos N días, ejecuta `backfill(14)`.
 
 De cada nota de Gemini lee **todas las pestañas**, también la de la transcripción, además de los invitados (enlaces mailto) y el enlace al evento de Calendar.
 
