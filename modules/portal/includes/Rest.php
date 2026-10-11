@@ -1,0 +1,155 @@
+<?php
+namespace MAD_Oficina\Portal;
+
+use MAD_Oficina\Core\Agents\Characters;
+use MAD_Oficina\Core\Agents\ClaudeClient;
+use MAD_Oficina\Core\ClientContext;
+use MAD_Oficina\Core\OfficeState;
+use MAD_Oficina\Core\Repo\Clients;
+use MAD_Oficina\Core\Repo\Portal;
+use MAD_Oficina\Core\Repo\Team;
+use MAD_Oficina\Core\Roles;
+
+if ( ! defined('ABSPATH') ) exit;
+
+/**
+ * REST API for the office/portal: /wp-json/mad-oficina/v1/...
+ * Cookie auth + X-WP-Nonce. The client is always resolved on the server.
+ */
+final class Rest {
+
+    const NS = 'mad-oficina/v1';
+
+    private $receptionist;
+
+    public function __construct(Receptionist $receptionist){
+        $this->receptionist = $receptionist;
+    }
+
+    public function register(){
+        $client_arg = ['client' => ['type' => 'integer', 'required' => false, 'minimum' => 1]];
+
+        register_rest_route(self::NS, '/me', [
+            'methods' => 'GET', 'callback' => [$this, 'me'], 'permission_callback' => [$this, 'can_portal'],
+        ]);
+        register_rest_route(self::NS, '/office/state', [
+            'methods' => 'GET', 'callback' => fn() => rest_ensure_response(['characters' => OfficeState::compute()]),
+            'permission_callback' => [$this, 'can_portal'],
+        ]);
+
+        $sections = [
+            'timeline'  => fn($id) => Portal::timeline($id),
+            'meetings'  => fn($id) => Portal::meetings($id),
+            'tasks'     => fn($id) => Portal::tasks($id),
+            'ideas'     => fn($id) => Portal::ideas($id),
+            'documents' => fn($id) => Portal::documents($id),
+        ];
+        foreach ( $sections as $route => $reader ){
+            register_rest_route(self::NS, '/portal/' . $route, [
+                'methods' => 'GET', 'args' => $client_arg, 'permission_callback' => [$this, 'can_portal'],
+                'callback' => function(\WP_REST_Request $req) use ($reader){
+                    $client_id = $this->client_or_error($req);
+                    if ( is_wp_error($client_id) ) return $client_id;
+                    return rest_ensure_response($reader($client_id));
+                },
+            ]);
+        }
+
+        register_rest_route(self::NS, '/portal/chat', [
+            [
+                'methods' => 'GET', 'args' => $client_arg, 'permission_callback' => [$this, 'can_portal'],
+                'callback' => [$this, 'chat_history'],
+            ],
+            [
+                'methods' => 'POST', 'permission_callback' => [$this, 'can_portal'],
+                'args' => $client_arg + ['message' => ['type' => 'string', 'required' => true, 'maxLength' => Receptionist::MAX_CHARS]],
+                'callback' => [$this, 'chat_send'],
+            ],
+        ]);
+
+        register_rest_route(self::NS, '/team/tasks', [
+            'methods' => 'GET', 'callback' => [$this, 'team_tasks'],
+            'permission_callback' => fn() => current_user_can(Roles::CAP_TEAM) ? true : new \WP_Error('rest_forbidden', __('Solo para el equipo.', 'mad-oficina'), ['status' => rest_authorization_required_code()]),
+        ]);
+    }
+
+    public function can_portal(){
+        if ( ! is_user_logged_in() ) return new \WP_Error('rest_not_logged_in', __('Inicia sesión para entrar en la oficina.', 'mad-oficina'), ['status' => 401]);
+        if ( ! current_user_can(Roles::CAP_PORTAL) ) return new \WP_Error('rest_forbidden', __('Tu usuario no tiene acceso a la oficina.', 'mad-oficina'), ['status' => 403]);
+        return true;
+    }
+
+    /** @return int|\WP_Error */
+    private function client_or_error(\WP_REST_Request $req){
+        $client_id = ClientContext::resolve($req->get_param('client'));
+        if ( $client_id && Clients::get($client_id) ) return $client_id;
+        if ( current_user_can(Roles::CAP_MANAGE) ) {
+            return new \WP_Error('madof_pick_client', __('Elige un cliente para ver su oficina.', 'mad-oficina'), ['status' => 400]);
+        }
+        return new \WP_Error('madof_no_client', __('Tu usuario no está vinculado a ningún cliente. Escribe a Jessica.', 'mad-oficina'), ['status' => 403]);
+    }
+
+    private function role(){
+        if ( current_user_can(Roles::CAP_MANAGE) ) return 'manager';
+        if ( current_user_can(Roles::CAP_TEAM) ) return 'team';
+        return 'client';
+    }
+
+    public function me(\WP_REST_Request $req){
+        $user = wp_get_current_user();
+        $role = $this->role();
+        $client = null;
+        if ( $role === 'client' ) {
+            $c = Clients::get((int) ClientContext::client_for_user($user->ID));
+            if ( $c ) $client = ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']];
+        }
+
+        $characters = [];
+        foreach ( Characters::all() as $slug => $c ){
+            $characters[$slug] = ['name' => $c['name'], 'role' => $c['role'], 'room' => $c['room'], 'ai' => $c['ai']];
+        }
+
+        $data = [
+            'user'       => ['name' => $user->first_name ?: $user->display_name],
+            'role'       => $role,
+            'client'     => $client,
+            'characters' => $characters,
+            'rooms'      => Characters::ROOMS,
+            'chat'       => [
+                'enabled'   => ClaudeClient::has_key() && $role !== 'team',
+                'remaining' => $client ? max(0, $this->receptionist->daily_limit() - $this->receptionist->used_today($client['id'])) : null,
+            ],
+            'links'      => [
+                'logout'  => wp_logout_url(home_url('/')),
+                'privacy' => get_privacy_policy_url() ?: null,
+            ],
+        ];
+        if ( $role === 'manager' ) {
+            $data['clients'] = array_map(fn($c) => ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']], Clients::all(['status' => 'active']));
+        }
+        return rest_ensure_response($data);
+    }
+
+    public function chat_history(\WP_REST_Request $req){
+        $client_id = $this->client_or_error($req);
+        if ( is_wp_error($client_id) ) return $client_id;
+        $rows = $this->receptionist->history($client_id, get_current_user_id());
+        return rest_ensure_response(array_map(fn($r) => [
+            'from' => $r['author_type'] === 'client' ? 'user' : 'agent',
+            'text' => $r['body'],
+            'at'   => $r['created_at'],
+        ], $rows));
+    }
+
+    public function chat_send(\WP_REST_Request $req){
+        $client_id = $this->client_or_error($req);
+        if ( is_wp_error($client_id) ) return $client_id;
+        $result = $this->receptionist->reply($client_id, get_current_user_id(), $req->get_param('message'));
+        return is_wp_error($result) ? $result : rest_ensure_response($result);
+    }
+
+    public function team_tasks(){
+        $member = Team::find_by_user(get_current_user_id());
+        return rest_ensure_response($member ? Portal::team_tasks($member['id']) : []);
+    }
+}
