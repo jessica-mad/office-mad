@@ -51,8 +51,7 @@ function run() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
   try {
-    scan();
-    processOrders();
+    try { scan(); } finally { processOrders(); }
   } finally {
     lock.releaseLock();
   }
@@ -338,7 +337,14 @@ function signedFetch_(method, path, body) {
   if (body) opts.payload = payload;
   var res = UrlFetchApp.fetch(endpoint + path, opts);
   var code = res.getResponseCode();
-  if (code >= 300) throw new Error('MAD Oficina respondió ' + code + ': ' + res.getContentText().slice(0, 300));
+  if (code >= 300) {
+    var text = res.getContentText();
+    if (/cloudflare|cf-ray|Attention Required/i.test(text + JSON.stringify(res.getAllHeaders()))) {
+      throw new Error('Cloudflare ha bloqueado la petición (' + code + ') antes de llegar a WordPress. ' +
+        'Crea en Cloudflare una regla que omita la seguridad para /wp-json/mad-oficina/v1/hooks/ (ver apps-script/README.md).');
+    }
+    throw new Error('MAD Oficina respondió ' + code + ': ' + text.slice(0, 300));
+  }
   return JSON.parse(res.getContentText() || '{}');
 }
 
