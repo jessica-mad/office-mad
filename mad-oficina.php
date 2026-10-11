@@ -56,6 +56,7 @@ final class MAD_Oficina_Core {
         add_action('admin_enqueue_scripts', [$this,'enqueue_admin_assets']);
         add_action('rest_api_init', [$this,'register_rest_routes']);
         add_action('admin_post_madof_toggle_module', [$this, 'handle_toggle_module']);
+        add_action('admin_post_madof_approval_resolve', [$this, 'handle_approval_resolve']);
         add_action('admin_notices', [$this,'admin_notices']);
 
         if ( defined('WP_CLI') && WP_CLI ) {
@@ -77,6 +78,15 @@ final class MAD_Oficina_Core {
             'dashicons-building',
             56
         );
+        $pending = \MAD_Oficina\Core\Approvals::count_pending();
+        add_submenu_page(
+            self::MENU_SLUG_ROOT,
+            __('Bandeja de gerencia','mad-oficina'),
+            __('Bandeja','mad-oficina') . ($pending ? ' <span class="awaiting-mod">' . (int) $pending . '</span>' : ''),
+            self::CAPABILITY,
+            self::MENU_SLUG_ROOT . '-bandeja',
+            [$this,'render_inbox_page']
+        );
         add_submenu_page(
             self::MENU_SLUG_ROOT,
             __('Módulos','mad-oficina'),
@@ -92,6 +102,33 @@ final class MAD_Oficina_Core {
             wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         }
         include MAD_OFICINA_DIR . 'views/modules-manager.php';
+    }
+
+    public function render_inbox_page(){
+        if ( ! current_user_can(self::CAPABILITY) ) {
+            wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        }
+        include MAD_OFICINA_DIR . 'views/inbox.php';
+    }
+
+    /** Approve/reject from the inbox form. Inputs are passed to the action's handler, which sanitises them. */
+    public function handle_approval_resolve(){
+        if ( ! current_user_can(self::CAPABILITY) ) {
+            wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        }
+        $id = isset($_POST['approval_id']) ? absint($_POST['approval_id']) : 0;
+        check_admin_referer('madof_approval_' . $id);
+        $decision = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
+        $input = isset($_POST['input']) && is_array($_POST['input']) ? wp_unslash($_POST['input']) : [];
+
+        $result = \MAD_Oficina\Core\Approvals::resolve($id, $decision, $input, get_current_user_id());
+        if ( is_wp_error($result) ) {
+            \MAD_Oficina\Core\AdminUi::flash($result->get_error_message(), 'error');
+        } else {
+            \MAD_Oficina\Core\AdminUi::flash($result['message'] ?? __('Hecho.', 'mad-oficina'));
+        }
+        wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja'));
+        exit;
     }
 
     public function init_modules_early(){

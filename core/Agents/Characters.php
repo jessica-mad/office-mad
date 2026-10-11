@@ -28,7 +28,7 @@ final class Characters {
         return [
             'recepcionista' => ['name' => 'Rita',   'role' => 'Recepcionista',       'room' => 'recepcion',      'ai' => true],
             'secretaria'    => ['name' => 'Olvido', 'role' => 'Secretaria de actas', 'room' => 'reuniones',      'ai' => true],
-            'coordinadora'  => ['name' => 'Candela','role' => 'Coordinadora',        'room' => 'proyectos',      'ai' => true],
+            'coordinadora'  => ['name' => 'Valle',  'role' => 'Coordinadora',        'room' => 'proyectos',      'ai' => true],
             'liz'           => ['name' => 'Liz',    'role' => 'Diseño y vídeo',      'room' => 'estudio',        'ai' => false],
             'archivera'     => ['name' => 'Berta',  'role' => 'Archivera',           'room' => 'archivo',        'ai' => true],
             'contable'      => ['name' => 'Amparo', 'role' => 'Contable',            'room' => 'administracion', 'ai' => true],

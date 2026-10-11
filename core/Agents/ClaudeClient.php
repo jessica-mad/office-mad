@@ -23,6 +23,8 @@ final class ClaudeClient {
         'claude-opus-5-5'   => [4.00, 20.00],
     ];
 
+    const FALLBACK_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5'];
+
     public static function has_key(){
         return defined('MAD_OFICINA_ANTHROPIC_KEY') && MAD_OFICINA_ANTHROPIC_KEY;
     }
@@ -30,21 +32,30 @@ final class ClaudeClient {
     /**
      * @param array $body  Messages API request body (model, max_tokens, system, messages, tools…)
      * @param array $ctx   ['agent' => slug, 'client_id' => int|null, 'event' => string]
+     * @param array $opts  ['timeout' => seconds]
      * @return array|\WP_Error decoded response
      */
-    public static function create(array $body, array $ctx){
+    public static function create(array $body, array $ctx, array $opts = []){
         if ( ! self::has_key() ) {
             return new \WP_Error('madof_no_key', __('Falta la clave de Claude (MAD_OFICINA_ANTHROPIC_KEY).', 'mad-oficina'));
         }
 
+        $headers = [
+            'content-type'      => 'application/json',
+            'x-api-key'         => MAD_OFICINA_ANTHROPIC_KEY,
+            'anthropic-version' => self::VERSION,
+        ];
+        // Safety classifiers can decline a request (stop_reason "refusal"). Sonnet 5.5 and Opus 5.5
+        // support a server-side retry on Anthropic's recommended fallback model; Haiku 5.5 does not.
+        if ( in_array($body['model'] ?? '', self::FALLBACK_MODELS, true) && ! isset($body['fallbacks']) ) {
+            $headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
+            $body['fallbacks'] = 'default';
+        }
+
         $res = wp_remote_post(self::ENDPOINT, [
-            'timeout' => 60,
-            'headers' => [
-                'content-type'      => 'application/json',
-                'x-api-key'         => MAD_OFICINA_ANTHROPIC_KEY,
-                'anthropic-version' => self::VERSION,
-            ],
-            'body' => wp_json_encode($body),
+            'timeout' => (int) ($opts['timeout'] ?? 60),
+            'headers' => $headers,
+            'body'    => wp_json_encode($body),
         ]);
         if ( is_wp_error($res) ) {
             self::log($ctx, $body['model'] ?? '', 0, 0, ['error' => $res->get_error_message()]);
@@ -59,6 +70,11 @@ final class ClaudeClient {
             return new \WP_Error('madof_claude_http', sprintf('Claude HTTP %d: %s', $code, $message), ['status' => $code]);
         }
 
+        if ( ($data['stop_reason'] ?? '') === 'refusal' ) {
+            self::log($ctx, $data['model'] ?? ($body['model'] ?? ''), 0, 0, ['refusal' => $data['stop_details'] ?? null]);
+            return new \WP_Error('madof_claude_refusal', __('Claude ha rechazado procesar este contenido.', 'mad-oficina'), ['status' => 422, 'details' => $data['stop_details'] ?? null]);
+        }
+
         $usage = $data['usage'] ?? [];
         $in  = (int) ($usage['input_tokens'] ?? 0) + (int) ($usage['cache_creation_input_tokens'] ?? 0) + (int) ($usage['cache_read_input_tokens'] ?? 0);
         $out = (int) ($usage['output_tokens'] ?? 0);
@@ -69,6 +85,17 @@ final class ClaudeClient {
     public static function cost($model, $in, $out){
         [$pin, $pout] = self::PRICES[$model] ?? [0, 0];
         return round(($in * $pin + $out * $pout) / 1000000, 5);
+    }
+
+    /** Parses the JSON text block of a structured-output response. @return array|\WP_Error */
+    public static function json(array $response){
+        $data = json_decode(self::text($response), true);
+        if ( ! is_array($data) ) {
+            return new \WP_Error('madof_claude_json', ($response['stop_reason'] ?? '') === 'max_tokens'
+                ? __('La respuesta de Claude se cortó (demasiado larga).', 'mad-oficina')
+                : __('La respuesta de Claude no es un JSON válido.', 'mad-oficina'));
+        }
+        return $data;
     }
 
     /** Concatenated text blocks of a response (thinking/tool blocks skipped). */

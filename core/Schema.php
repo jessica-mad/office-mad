@@ -103,6 +103,8 @@ final class Schema {
             'meetings' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   client_id bigint(20) unsigned NULL,
+  source varchar(20) NOT NULL DEFAULT 'manual',
+  source_key varchar(190) NULL,
   title varchar(255) NOT NULL,
   starts_at datetime NULL,
   ends_at datetime NULL,
@@ -124,6 +126,7 @@ final class Schema {
   created_at datetime NOT NULL,
   updated_at datetime NOT NULL,
   PRIMARY KEY  (id),
+  UNIQUE KEY source_key (source_key),
   KEY client_id (client_id),
   KEY status (status),
   KEY starts_at (starts_at)",
@@ -218,6 +221,8 @@ final class Schema {
   client_id bigint(20) unsigned NULL,
   title varchar(255) NOT NULL,
   summary text NULL,
+  object_type varchar(30) NULL,
+  object_id bigint(20) unsigned NULL,
   payload longtext NULL,
   status varchar(20) NOT NULL DEFAULT 'pending',
   resolution longtext NULL,
@@ -229,7 +234,8 @@ final class Schema {
   updated_at datetime NOT NULL,
   PRIMARY KEY  (id),
   KEY status (status),
-  KEY agent (agent)",
+  KEY agent (agent),
+  KEY object (object_type,object_id)",
 
             'agent_log' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,

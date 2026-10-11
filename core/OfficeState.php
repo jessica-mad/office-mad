@@ -40,6 +40,10 @@ final class OfficeState {
             if ( $slug ) $states[$slug] = self::WORKING;
         }
 
+        if ( $wpdb->get_var("SELECT 1 FROM " . Schema::table('meetings') . " WHERE status = 'processing' LIMIT 1") ) {
+            $states['secretaria'] = self::WORKING;
+        }
+
         $waiting = $wpdb->get_col("SELECT DISTINCT agent FROM " . Schema::table('approvals') . " WHERE status = 'pending'");
         foreach ( $waiting as $agent ){
             $slug = self::AGENT_TO_CHARACTER[$agent] ?? null;
