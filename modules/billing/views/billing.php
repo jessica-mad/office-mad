@@ -139,13 +139,41 @@ $status_pill = function($inv){
         </section>
     </form>
     <?php endif; ?>
+    <?php $suggestions = Profiles::suggestions(); $sure = count(array_filter($suggestions, fn($x) => $x['score'] >= Profiles::SURE)); $codes = array_column(Clients::all(), null, 'id'); ?>
+    <?php if ( $suggestions ) : ?>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Unir con los clientes de la oficina', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('Estas razones sociales parecen de clientes que ya tienes en la oficina (reuniones, Chat, portal). Al unirlas, son el mismo cliente: sus facturas salen en su ficha y en su oficina.', 'mad-oficina'); ?></p>
+        <table class="madof-table">
+            <thead><tr><th><?php esc_html_e('Razón social', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente de la oficina', 'mad-oficina'); ?></th><th><?php esc_html_e('Por qué', 'mad-oficina'); ?></th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ( $suggestions as $sg ) : ?>
+                <tr>
+                    <td><strong><?php echo esc_html($sg['profile']['legal_name']); ?></strong><?php if ( $sg['profile']['tax_id'] ) echo '<br><small>' . esc_html($sg['profile']['tax_id']) . '</small>'; ?></td>
+                    <td><span class="madof-code"><?php echo esc_html($sg['client']['code']); ?></span> <?php echo esc_html($sg['client']['name']); ?></td>
+                    <td><small><?php echo esc_html(implode(' · ', $sg['reasons'])); ?></small></td>
+                    <td class="madof-row-actions"><?php echo AdminUi::form_open('billing_link', 'madof-inline'); ?>
+                        <input type="hidden" name="profile_id" value="<?php echo (int) $sg['profile']['id']; ?>">
+                        <input type="hidden" name="client_id" value="<?php echo (int) $sg['client']['id']; ?>">
+                        <button class="madof-btn is-small <?php echo $sg['score'] >= Profiles::SURE ? '' : 'is-ghost'; ?>"><?php esc_html_e('Unir', 'mad-oficina'); ?></button></form></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php if ( $sure > 1 ) : ?>
+        <?php echo AdminUi::form_open('billing_link_bulk', 'madof-inline'); ?><button class="madof-btn"><?php echo esc_html(sprintf(__('Unir las %d seguras', 'mad-oficina'), $sure)); ?></button></form>
+        <?php endif; ?>
+    </section>
+    <?php endif; ?>
     <p><a class="madof-btn is-ghost" href="<?php echo esc_url($base . '&tab=clients&new=1'); ?>"><?php esc_html_e('Nuevo cliente de facturación', 'mad-oficina'); ?></a></p>
     <table class="madof-table">
-        <thead><tr><th><?php esc_html_e('Nombre fiscal', 'mad-oficina'); ?></th><th>NIF</th><th><?php esc_html_e('IVA / IRPF', 'mad-oficina'); ?></th><th><?php esc_html_e('Serie', 'mad-oficina'); ?></th><th><?php esc_html_e('Última factura', 'mad-oficina'); ?></th></tr></thead>
+        <thead><tr><th><?php esc_html_e('Nombre fiscal', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente de la oficina', 'mad-oficina'); ?></th><th>NIF</th><th><?php esc_html_e('IVA / IRPF', 'mad-oficina'); ?></th><th><?php esc_html_e('Serie', 'mad-oficina'); ?></th><th><?php esc_html_e('Última factura', 'mad-oficina'); ?></th></tr></thead>
         <tbody>
         <?php foreach ( $profiles as $p ) : ?>
             <tr>
                 <td><a href="<?php echo esc_url($base . '&tab=clients&profile=' . $p['id']); ?>"><strong><?php echo esc_html($p['legal_name']); ?></strong></a><?php if ( $p['status'] === 'inactive' ) echo ' <small>(' . esc_html__('inactivo', 'mad-oficina') . ')</small>'; ?></td>
+                <td><?php $oc = $p['client_id'] ? ($codes[$p['client_id']] ?? null) : null;
+                    echo $oc ? '<a href="' . esc_url(\MAD_Oficina\Clients\Actions::client_url($oc['id'])) . '"><span class="madof-code">' . esc_html($oc['code']) . '</span> ' . esc_html($oc['name']) . '</a>' : '<small>' . esc_html__('sin unir', 'mad-oficina') . '</small>'; ?></td>
                 <td><?php echo esc_html((string) $p['tax_id'] ?: '—'); ?></td>
                 <td><?php echo esc_html(rtrim(rtrim(number_format($p['vat_rate'], 2, ',', ''), '0'), ',') . ' % / ' . rtrim(rtrim(number_format($p['irpf_rate'], 2, ',', ''), '0'), ',') . ' %'); ?></td>
                 <td><?php echo esc_html($p['series']); ?></td>
@@ -230,11 +258,15 @@ $status_pill = function($inv){
     $unpaid_tab = $tab === 'unpaid';
     $filters = ['year' => $year, 'status' => sanitize_key($_GET['status'] ?? ''), 'series' => sanitize_key(strtoupper($_GET['series'] ?? '')) ?: '', 'q' => sanitize_text_field(wp_unslash($_GET['q'] ?? ''))];
     if ( $filters['series'] ) $filters['series'] = strtoupper($filters['series']);
+    $for_client = isset($_GET['client']) ? Clients::get(absint($_GET['client'])) : null;
+    if ( $for_client ) $filters = ['client_id' => $for_client['id'], 'year' => '', 'status' => '', 'series' => '', 'q' => '']; // every year
+    $codes = array_column(Clients::all(), 'code', 'id');
     $unpaid = Invoices::unpaid();
     $list = $unpaid_tab ? array_reverse($unpaid) : Invoices::all($filters); ?>
     <?php if ( ! $years ) : ?>
         <section class="madof-card"><p class="madof-lead"><?php esc_html_e('Aún no hay facturas.', 'mad-oficina'); ?></p><p><a class="madof-btn" href="<?php echo esc_url($base . '&tab=import'); ?>"><?php esc_html_e('Importar el histórico', 'mad-oficina'); ?></a></p></section>
     <?php else : ?>
+    <?php if ( ! $for_client ) : ?>
     <form method="get" class="madof-filters">
         <input type="hidden" name="page" value="mad-oficina-facturacion">
         <select name="year"><?php foreach ( $years as $y ) echo '<option value="' . (int) $y . '" ' . selected($y, $year, false) . '>' . (int) $y . '</option>'; ?></select>
@@ -243,6 +275,8 @@ $status_pill = function($inv){
         <input type="search" name="q" value="<?php echo esc_attr($filters['q']); ?>" placeholder="<?php esc_attr_e('Cliente o número', 'mad-oficina'); ?>">
         <button class="madof-btn is-small"><?php esc_html_e('Filtrar', 'mad-oficina'); ?></button>
     </form>
+    <?php endif; ?>
+    <?php if ( $for_client ) : ?><p class="madof-lead"><?php echo esc_html(sprintf(__('Facturas de %s, todos los años.', 'mad-oficina'), $for_client['name'])); ?> <a href="<?php echo esc_url($base); ?>"><?php esc_html_e('Ver todas', 'mad-oficina'); ?></a></p><?php endif; ?>
     <?php if ( $unpaid ) : ?><p class="madof-warn"><?php echo esc_html(sprintf(_n('Últimos 12 meses: %1$d factura sin cobrar (%2$s).', 'Últimos 12 meses: %1$d facturas sin cobrar (%2$s).', count($unpaid), 'mad-oficina'), count($unpaid), Money::format(array_sum(array_column($unpaid, 'total'))))); ?> <a href="<?php echo esc_url($base . '&tab=unpaid'); ?>"><?php esc_html_e('Ver cuáles', 'mad-oficina'); ?></a></p><?php endif; ?>
     <table class="madof-table">
         <thead><tr><th><?php esc_html_e('Número', 'mad-oficina'); ?></th><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Estado', 'mad-oficina'); ?></th></tr></thead>
@@ -251,7 +285,7 @@ $status_pill = function($inv){
             <tr>
                 <td><a href="<?php echo esc_url($base . '&invoice=' . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a></td>
                 <td><?php echo esc_html(mysql2date('j M Y', $inv['issue_date'])); ?></td>
-                <td><?php echo esc_html($inv['client_name']); ?><?php if ( $inv['notes'] ) echo ' <span title="' . esc_attr($inv['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
+                <td><?php if ( $inv['client_id'] && isset($codes[$inv['client_id']]) ) echo '<a class="madof-code" href="' . esc_url($base . '&client=' . $inv['client_id']) . '">' . esc_html($codes[$inv['client_id']]) . '</a> '; ?><?php echo esc_html($inv['client_name']); ?><?php if ( $inv['notes'] ) echo ' <span title="' . esc_attr($inv['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
                 <td><?php echo esc_html($money($inv['base'])); ?></td>
                 <td><?php echo esc_html($money($inv['total'])); ?></td>
                 <td><?php echo $status_pill($inv); ?></td>

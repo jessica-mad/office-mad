@@ -158,4 +158,38 @@ class BillingTest extends MADOF_TestCase {
         $this->assertNotEmpty(Invoices::all(['q' => '25-001']));
         $this->assertNull(Invoices::all(['q' => '25-001'])[0]['client_id']);
     }
+
+    public function test_office_client_and_fiscal_profile_are_one_client(){
+        $taz = $this->make_client('TAZ', 'Taller Azul');
+        $lua = $this->make_client('LUA', 'Lúa');
+        LegacyImport::apply(LegacyImport::analyze($this->sample()), ['Estudio Pampa']);
+        $obrador = Profiles::save(['legal_name' => 'Obrador Norte SL', 'email' => 'pagos@lua.example']);
+
+        $by_profile = [];
+        foreach ( Profiles::suggestions() as $sg ) $by_profile[$sg['profile']['legal_name']] = $sg;
+        $this->assertSame($taz, $by_profile['Taller Azul SL']['client']['id'], 'same name once «SL» is ignored');
+        $this->assertGreaterThanOrEqual(Profiles::SURE, $by_profile['Taller Azul SL']['score']);
+        $this->assertSame($lua, $by_profile['Obrador Norte SL']['client']['id'], 'legal name unlike the trade name: the email domain gives it away');
+        $this->assertLessThan(Profiles::SURE, $by_profile['Obrador Norte SL']['score'], 'a domain alone is a suggestion, not a sure link');
+        $this->assertContains('Estudio Pampa', array_column(Profiles::unlinked(), 'legal_name'), 'Argentina clients can be joined too');
+
+        $profile = $by_profile['Taller Azul SL']['profile']['id'];
+        Profiles::link($profile, $taz);
+        $this->assertSame($taz, Invoices::all(['q' => '25-001'])[0]['client_id'], 'its invoices follow');
+        $this->assertCount(4, Invoices::all(['client_id' => $taz]), 'both spellings and the rectifying invoice');
+        $this->assertSame(['Taller Azul SL'], array_column(Profiles::for_client($taz), 'legal_name'));
+        $this->assertNotContains($profile, array_column(Profiles::unlinked(), 'id'));
+        $stats = Profiles::stats($profile);
+        $this->assertSame(4, $stats['n']);
+        $this->assertSame(1, $stats['unpaid'], '25-002');
+
+        $new = Invoices::insert(['series' => 'F', 'year' => 2026, 'status' => 'draft', 'issue_date' => '2026-11-01', 'client_name' => 'Taller Azul SL', 'profile_id' => $profile, 'base' => 100, 'vat' => 21, 'irpf' => 15, 'total' => 106, 'vat_rate' => 21, 'irpf_rate' => 15], [['description' => 'Fee', 'amount' => 100]]);
+        $this->assertSame($taz, Invoices::get($new)['client_id'], 'new invoices take the client from their fiscal profile');
+
+        Profiles::link($obrador, $lua);
+        $this->assertCount(1, Profiles::for_client($lua));
+        Profiles::link($profile, null);
+        $this->assertNull(Invoices::all(['q' => '25-001'])[0]['client_id']);
+        $this->assertSame([], Invoices::all(['client_id' => $taz]));
+    }
 }

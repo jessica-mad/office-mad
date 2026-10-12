@@ -42,6 +42,8 @@ $edit_contact = isset($_GET['contact']) ? absint($_GET['contact']) : 0;
         </form>
     </section>
 
+    <?php if ( ! $is_new ) do_action('madoficina_client_edit_identity', $c); ?>
+
     <?php if ( ! $is_new ) : $contacts = Clients::contacts($c['id']); ?>
 
     <section class="madof-card">

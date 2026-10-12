@@ -43,9 +43,13 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note'] as $a ) {
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
+        // One client, two faces: the office card shows the fiscal data it invoices under.
+        add_action('madoficina_client_edit_identity', [$this, 'render_client_identity']);
+        add_action('madoficina_client_list_head', [$this, 'render_client_list_head']);
+        add_action('madoficina_client_list_cell', [$this, 'render_client_list_cell']);
     }
 
     public function admin_init(){}
@@ -111,7 +115,88 @@ return new class($core) implements MAD_Oficina_Module {
         $data = $p + ['client_id' => $client && \MAD_Oficina\Core\Repo\Clients::get($client) ? $client : null];
         if ( trim($data['legal_name'] ?? '') === '' ) $this->back(['tab' => 'clients', 'profile' => $id], __('El nombre fiscal es obligatorio.', 'mad-oficina'), 'error');
         $id = \MAD_Oficina\Billing\Profiles::save($data, $id);
+        \MAD_Oficina\Billing\Profiles::link($id, $data['client_id']); // its invoices follow
         $this->back(['tab' => 'clients', 'profile' => $id], __('Cliente de facturación guardado.', 'mad-oficina'));
+    }
+
+    /** Back to the office client's card when the action started there. */
+    private function back_to_client($client_id, $notice, $type = 'success'){
+        \MAD_Oficina\Core\AdminUi::flash($notice, $type);
+        wp_safe_redirect(\MAD_Oficina\Clients\Actions::client_url($client_id));
+        exit;
+    }
+
+    public function handle_billing_link(){
+        $this->guard('billing_link');
+        $profile = \MAD_Oficina\Billing\Profiles::get(absint($_POST['profile_id'] ?? 0));
+        $client = \MAD_Oficina\Core\Repo\Clients::get(absint($_POST['client_id'] ?? 0));
+        $from_client = ! empty($_POST['from_client']);
+        if ( ! $profile || ! $client ) {
+            $msg = __('Elige los datos fiscales y el cliente que quieres unir.', 'mad-oficina');
+            $client && $from_client ? $this->back_to_client($client['id'], $msg, 'error') : $this->back(['tab' => 'clients'], $msg, 'error');
+        }
+        \MAD_Oficina\Billing\Profiles::link($profile['id'], $client['id']);
+        $msg = sprintf(__('«%1$s» ahora es la razón social de %2$s. Sus facturas aparecen en su ficha.', 'mad-oficina'), $profile['legal_name'], $client['name']);
+        $from_client ? $this->back_to_client($client['id'], $msg) : $this->back(['tab' => 'clients'], $msg);
+    }
+
+    public function handle_billing_unlink(){
+        $this->guard('billing_unlink');
+        $profile = \MAD_Oficina\Billing\Profiles::get(absint($_POST['profile_id'] ?? 0));
+        if ( ! $profile ) $this->back(['tab' => 'clients'], __('Esos datos fiscales no existen.', 'mad-oficina'), 'error');
+        $client = $profile['client_id'];
+        \MAD_Oficina\Billing\Profiles::link($profile['id'], null);
+        $msg = sprintf(__('«%s» ya no está unido a este cliente. Sus facturas se conservan.', 'mad-oficina'), $profile['legal_name']);
+        $client && ! empty($_POST['from_client']) ? $this->back_to_client($client, $msg) : $this->back(['tab' => 'clients', 'profile' => $profile['id']], $msg);
+    }
+
+    /** New fiscal data for an office client that has never been invoiced. */
+    public function handle_billing_profile_from_client(){
+        $this->guard('billing_profile_from_client');
+        $client = \MAD_Oficina\Core\Repo\Clients::get(absint($_POST['client_id'] ?? 0));
+        if ( ! $client ) $this->back(['tab' => 'clients'], __('Ese cliente no existe.', 'mad-oficina'), 'error');
+        $id = \MAD_Oficina\Billing\Profiles::save(['legal_name' => $client['name'], 'client_id' => $client['id']]);
+        $this->back(['tab' => 'clients', 'profile' => $id], __('Completa su nombre fiscal, NIF y dirección tal como deben salir en la factura.', 'mad-oficina'));
+    }
+
+    /** Joins every suggestion that is clearly right (same name, a contact's email…). */
+    public function handle_billing_link_bulk(){
+        $this->guard('billing_link_bulk');
+        $n = 0;
+        foreach ( \MAD_Oficina\Billing\Profiles::suggestions() as $s ) {
+            if ( $s['score'] < \MAD_Oficina\Billing\Profiles::SURE ) continue;
+            \MAD_Oficina\Billing\Profiles::link($s['profile']['id'], $s['client']['id']);
+            $n++;
+        }
+        $this->back(['tab' => 'clients'], sprintf(_n('%d cliente unido.', '%d clientes unidos.', $n, 'mad-oficina'), $n));
+    }
+
+    /* ==== Client card and list ==== */
+
+    public function render_client_identity($client){
+        if ( empty($client['id']) || ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) return;
+        $linked = \MAD_Oficina\Billing\Profiles::for_client($client['id']);
+        $unlinked = \MAD_Oficina\Billing\Profiles::unlinked();
+        $suggested = [];
+        foreach ( \MAD_Oficina\Billing\Profiles::suggestions() as $s ) {
+            if ( (int) $s['client']['id'] === (int) $client['id'] ) $suggested[$s['profile']['id']] = $s;
+        }
+        include __DIR__ . '/views/client-identity.php';
+    }
+
+    private $legal_names = null;
+
+    public function render_client_list_head(){
+        echo '<th scope="col">' . esc_html__('Razón social', 'mad-oficina') . '</th>';
+    }
+
+    public function render_client_list_cell($client){
+        if ( $this->legal_names === null ) {
+            $this->legal_names = [];
+            foreach ( \MAD_Oficina\Billing\Profiles::all() as $p ) if ( $p['client_id'] ) $this->legal_names[$p['client_id']][] = $p['legal_name'];
+        }
+        $names = $this->legal_names[$client['id']] ?? [];
+        echo '<td>' . ( $names ? esc_html(implode(' · ', $names)) : '<small>' . esc_html__('sin datos fiscales', 'mad-oficina') . '</small>' ) . '</td>';
     }
 
     public function handle_billing_settings(){

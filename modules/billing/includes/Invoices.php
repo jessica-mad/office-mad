@@ -37,7 +37,7 @@ final class Invoices {
         global $wpdb;
         $where = ['1=1'];
         $args = [];
-        foreach ( ['year' => '%d', 'status' => '%s', 'series' => '%s', 'profile_id' => '%d'] as $k => $f ) {
+        foreach ( ['year' => '%d', 'status' => '%s', 'series' => '%s', 'profile_id' => '%d', 'client_id' => '%d'] as $k => $f ) {
             if ( isset($filters[$k]) && $filters[$k] !== '' && $filters[$k] !== null ) { $where[] = "{$k} = {$f}"; $args[] = $filters[$k]; }
         }
         if ( ! empty($filters['q']) ) {
@@ -112,6 +112,10 @@ final class Invoices {
     public static function insert(array $inv, array $lines){
         global $wpdb;
         $now = Time::now();
+        if ( empty($inv['client_id']) && ! empty($inv['profile_id']) ) {
+            // The invoice belongs to whichever office client its fiscal profile is linked to.
+            $inv['client_id'] = $wpdb->get_var($wpdb->prepare('SELECT client_id FROM ' . Schema::table('billing_profiles') . ' WHERE id = %d', $inv['profile_id'])) ?: null;
+        }
         $wpdb->insert(self::table(), $inv + ['created_at' => $now, 'updated_at' => $now]);
         $id = (int) $wpdb->insert_id;
         if ( ! $id ) return 0;

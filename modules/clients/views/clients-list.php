@@ -23,6 +23,7 @@ $status_labels = ['active' => __('Activo', 'mad-oficina'), 'paused' => __('En pa
             <th scope="col"><?php esc_html_e('Dominios', 'mad-oficina'); ?></th>
             <th scope="col"><?php esc_html_e('Contactos', 'mad-oficina'); ?></th>
             <th scope="col"><?php esc_html_e('Portal', 'mad-oficina'); ?></th>
+            <?php do_action('madoficina_client_list_head'); ?>
             <th scope="col"><?php esc_html_e('Estado', 'mad-oficina'); ?></th>
         </tr></thead>
         <tbody>
@@ -34,6 +35,7 @@ $status_labels = ['active' => __('Activo', 'mad-oficina'), 'paused' => __('En pa
                 <td><?php echo esc_html(implode(', ', $c['domains'])); ?></td>
                 <td><?php echo (int) count(Clients::contacts($c['id'])); ?></td>
                 <td><?php echo (int) count(Clients::users($c['id'])); ?></td>
+                <?php do_action('madoficina_client_list_cell', $c); ?>
                 <td><span class="madof-pill"><?php echo esc_html($status_labels[$c['status']] ?? $c['status']); ?></span></td>
             </tr>
         <?php endforeach; ?>
