@@ -69,6 +69,7 @@ final class Leads {
             'ip_hash'     => $data['ip_hash'] ?? null,
             'meeting_start' => $data['meeting_start'] ?? null,
             'meeting_end'   => $data['meeting_end'] ?? null,
+            'notes'         => $data['notes'] ?? null,
             'created_at'  => $now,
             'updated_at'  => $now,
         ]);

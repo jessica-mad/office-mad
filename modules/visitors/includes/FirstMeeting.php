@@ -48,6 +48,43 @@ final class FirstMeeting {
     }
 
     /**
+     * Slots for the chat: live, optionally limited to the windows the visitor
+     * mentioned («el jueves por la tarde»). When nothing matches, the nearest
+     * free slots are offered instead.
+     * @param array $windows [['date' => 'Y-m-d', 'from' => 'HH:MM', 'to' => 'HH:MM'], ...]
+     * @return array{slots: array, matched: bool}|\WP_Error
+     */
+    public static function for_chat(array $windows, $n = 4){
+        if ( ! self::available() ) return new \WP_Error('madof_fm_off', 'off');
+        $req = self::requests();
+        $slots = $req->free_slots(self::DURATION);
+        if ( is_wp_error($slots) ) return $slots;
+        $tz = wp_timezone();
+        $matched = true;
+        if ( $windows ) {
+            $hits = array_values(array_filter($slots, function($s) use ($windows, $tz){
+                $d = (new \DateTimeImmutable('@' . $s['start']))->setTimezone($tz);
+                foreach ( $windows as $w ) {
+                    if ( ($w['date'] ?? '') === $d->format('Y-m-d') && $d->format('H:i') >= ($w['from'] ?? '00:00') && $d->format('H:i') < ($w['to'] ?? '23:59') ) return true;
+                }
+                return false;
+            }));
+            if ( $hits ) {
+                // The visitor asked for specific days: several times on those days, at least an hour apart.
+                $picked = [];
+                foreach ( $hits as $h ) {
+                    if ( $picked && $h['start'] - end($picked)['start'] < HOUR_IN_SECONDS ) continue;
+                    $picked[] = $h;
+                    if ( count($picked) >= $n ) break;
+                }
+                return ['slots' => $req->present($picked), 'matched' => true];
+            }
+            $matched = false;
+        }
+        return ['slots' => $req->present(\MAD_Oficina\Scheduling\Slots::offer($slots, $n, $tz)), 'matched' => $matched];
+    }
+
+    /**
      * Visitor's request: stored as an unconfirmed lead until the email is confirmed.
      * @return array|\WP_Error ['lead' => id, 'token' => plain token, 'label' => slot label]
      */
@@ -78,6 +115,7 @@ final class FirstMeeting {
             'message' => mb_substr(sanitize_textarea_field($p['topic'] ?? ''), 0, 1000),
             'source' => 'meeting', 'meeting_start' => $slot['start'], 'meeting_end' => $slot['end'],
             'verify_hash' => hash('sha256', $token), 'consent_at' => Time::now(), 'ip_hash' => Guard::ip_hash(),
+            'notes' => ! empty($p['conversation']) ? sprintf(__('Pedida desde la charla con la recepcionista (%s).', 'mad-oficina'), wp_date('j M Y H:i')) : null,
         ]);
         return ['lead' => $id, 'token' => $token, 'label' => self::label($slot['start'])];
     }

@@ -120,3 +120,12 @@ Si la agenda no está conectada o no hay huecos, se le ofrece dejar un brief.
 3. Quita la primera línea `[BORRADOR…]`. Mientras esté, la charla no se puede activar.
 4. Marca **«Activar la charla para visitantes»** y guarda.
 5. Pruébala en una ventana privada.
+
+### La primera reunión, dentro de la charla
+La reunión se organiza en la propia conversación:
+1. Cuando el visitante muestra interés (quiere hablar con Jessica, pregunta precios o menciona días), la recepcionista responde. **Debajo de su mensaje aparecen huecos libres reales** de 30 min.
+2. Si escribe «me va mejor el jueves por la tarde», salen **varias horas de ese día**. Si ese día está lleno, salen los huecos más cercanos con un aviso.
+3. Al pulsar un hueco, la recepcionista le pide **nombre, email y consentimiento** ahí mismo. No necesita pasar otra vez Turnstile, porque la charla ya lo pasó.
+4. Le llega el email de confirmación. Al confirmar, la petición te llega a la bandeja **con el tema resumido por la recepcionista**, por ejemplo «Tienda online y anuncios para una panadería». El lead indica que vino de la charla.
+
+La recepcionista **nunca inventa horas**: los huecos salen siempre de tu calendario. El botón «Pedir una primera reunión» de recepción sigue existiendo para quien prefiera ir directo.

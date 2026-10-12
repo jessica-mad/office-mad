@@ -106,8 +106,15 @@ final class Rest {
         $p = (array) $req->get_json_params() + (array) $req->get_body_params();
         if ( Guard::is_bot($p) ) return rest_ensure_response(['ok' => true, 'verify' => true]);
         if ( empty($p['consent']) ) return new \WP_Error('madof_consent', __('Necesitamos tu consentimiento para guardar tus datos y responderte.', 'mad-oficina'), ['status' => 400]);
-        $ts = Guard::turnstile($this->secret(), $p['turnstile'] ?? '');
-        if ( is_wp_error($ts) ) return $ts;
+        // From the chat: the conversation already passed Turnstile; its token is signed and bound to this visitor.
+        $conv = ! empty($p['chat']) ? VisitorChat::check_token($p['chat']) : null;
+        if ( ! $conv ) {
+            $ts = Guard::turnstile($this->secret(), $p['turnstile'] ?? '');
+            if ( is_wp_error($ts) ) return $ts;
+        } else {
+            $p['conversation'] = $conv;
+            if ( trim((string) ($p['topic'] ?? '')) === '' ) $p['topic'] = VisitorChat::topic_for($conv);
+        }
         $r = FirstMeeting::submit($p);
         if ( is_wp_error($r) ) return $r;
         $lead = Leads::get($r['lead']);
@@ -116,6 +123,7 @@ final class Rest {
             Leads::delete($r['lead']);
             return new \WP_Error('madof_mail', __('No hemos podido enviarte el email de confirmación. Inténtalo más tarde, por favor.', 'mad-oficina'), ['status' => 500]);
         }
+        if ( $conv ) VisitorChat::note($conv, sprintf(__('[Petición de reunión enviada para el %s; pendiente de confirmar el email]', 'mad-oficina'), $r['label']));
         return rest_ensure_response(['ok' => true, 'verify' => true, 'label' => $r['label']]);
     }
 

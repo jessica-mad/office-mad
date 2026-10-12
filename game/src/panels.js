@@ -185,7 +185,7 @@ const vstore = {
 
 function visitorChatHtml(ctx) {
   return `
-    <p class="madof-meta">Pregúntame qué hacemos en MAD y cómo trabajamos. No te pediré datos personales: si quieres seguir, te paso a la reunión o al brief.</p>
+    <p class="madof-meta">Pregúntame qué hacemos en MAD y cómo trabajamos. Si quieres hablar con Jessica, te enseño aquí mismo sus huecos libres.</p>
     <ol class="madof-chat-log" aria-live="polite" aria-label="Conversación"></ol>
     <div class="madof-chat-next" hidden>${nextSteps()}</div>
     <form class="madof-chat-form">
@@ -217,6 +217,64 @@ function mountVisitorChat(el, ctx) {
   if (!state.log.length) add('agent', `¡Hola! Soy ${name}, de la recepción de MAD. ¿Qué te gustaría saber de lo que hacemos?`, false);
   state.log.forEach(([f, t]) => add(f, t, false));
 
+  // The first meeting is arranged inside the conversation: real slots → name/email → request.
+  function addSlots(res) {
+    const li = document.createElement('li');
+    li.className = 'is-agent is-slots';
+    li.innerHTML = `${res.slots_note ? `<p class="madof-meta">${esc(res.slots_note)}</p>` : ''}
+      <div class="madof-slots" role="radiogroup" aria-label="Huecos libres para una primera reunión de 30 minutos">${slotList(res.slots)}</div>
+      <p class="madof-meta">¿Ninguno te va? Escríbeme qué días u horas te vienen bien.</p>`;
+    log.appendChild(li); log.scrollTop = log.scrollHeight;
+    li.querySelector('.madof-slots').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-start]');
+      if (!b) return;
+      li.querySelectorAll('button[data-start]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+      addBooking(Number(b.dataset.start), b.textContent.trim());
+    });
+  }
+
+  function addBooking(start, label) {
+    log.querySelector('li.is-booking')?.remove();
+    const li = document.createElement('li');
+    li.className = 'is-agent is-booking';
+    const privacy = ctx.config.privacy;
+    li.innerHTML = `<span class="madof-kicker">${esc(name)}</span>
+      <p>¡Genial! <strong>${esc(label)}</strong>. ¿A qué nombre y email te mando la invitación?</p>
+      <form class="madof-brief madof-chat-booking" novalidate>
+        <div class="madof-fields">
+          <label>Tu nombre <input name="name" autocomplete="name" required maxlength="120"></label>
+          <label>Email <input name="email" type="email" autocomplete="email" required maxlength="190"></label>
+          <label>Empresa <span class="madof-meta">(opcional)</span><input name="company" autocomplete="organization" maxlength="160"></label>
+        </div>
+        <div class="madof-hp" aria-hidden="true"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></div>
+        <label class="madof-consent"><input type="checkbox" name="consent" value="1" required>
+          <span>Acepto que MAD guarde estos datos para organizar la reunión${privacy ? ` (<a href="${esc(privacy)}" target="_blank" rel="noopener">política de privacidad</a>)` : ''}.</span></label>
+        <p class="madof-meta" aria-live="polite" data-status></p>
+        <button class="madof-btn" type="submit">${icon('check')} Pedir la reunión</button>
+      </form>`;
+    log.appendChild(li); log.scrollTop = log.scrollHeight;
+    const f = li.querySelector('form');
+    const st = f.querySelector('[data-status]');
+    f.elements.name.focus();
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(f).entries());
+      if (!d.name?.trim()) { st.textContent = 'Dime tu nombre.'; return f.elements.name.focus(); }
+      if (!f.elements.email.checkValidity() || !d.email) { st.textContent = 'Revisa el email: ahí te llegará la invitación.'; return f.elements.email.focus(); }
+      if (!d.consent) { st.textContent = 'Marca la casilla para poder guardarlo.'; return f.elements.consent.focus(); }
+      f.querySelector('button').disabled = true; st.textContent = 'Enviando…';
+      try {
+        const res = await ctx.api.visitorMeeting({ ...d, start, chat: state.token, return: window.location.href.split('#')[0].split('?')[0] });
+        li.remove();
+        log.querySelectorAll('li.is-slots button').forEach((x) => { x.disabled = true; });
+        add('agent', `¡Hecho! Te he enviado un email a ${d.email}. Abre el enlace para confirmar la reunión del ${res.label || label}; cuando Jessica la apruebe, te llegará la invitación de Google Calendar con el enlace de Meet.`);
+      } catch (err) {
+        st.textContent = err.status === 409 ? 'Ese hueco se acaba de ocupar. Pídeme otros huecos y elegimos otro.' : err.message;
+        f.querySelector('button').disabled = false;
+      }
+    });
+  }
+
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -231,7 +289,8 @@ function mountVisitorChat(el, ctx) {
       typing.remove();
       state.token = res.token; vstore.set(state);
       add('agent', res.reply);
-      if (res.suggest !== 'none') next.hidden = false;
+      if (res.slots?.length) addSlots(res);
+      else if (res.suggest !== 'none') next.hidden = false;
       if (res.remaining === 0) { form.hidden = true; next.hidden = false; }
     } catch (err) {
       typing.remove(); add('agent', err.message, false);

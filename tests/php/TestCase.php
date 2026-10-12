@@ -4,6 +4,12 @@ use MAD_Oficina\Core\Roles;
 
 abstract class MADOF_TestCase extends WP_UnitTestCase {
 
+    public function tear_down(){
+        // Routes read module settings when they are registered: start every test with a fresh REST server.
+        $GLOBALS['wp_rest_server'] = null;
+        parent::tear_down();
+    }
+
     protected function make_client($code, $name = null){
         $id = Clients::save(['name' => $name ?? "Cliente {$code}", 'code' => $code, 'domains' => strtolower($code) . '.example']);
         $this->assertIsInt($id);
