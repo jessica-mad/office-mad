@@ -218,8 +218,10 @@ final class MAD_Oficina_Core {
             $this->modules[$slug] = $module;
             $module->init();
 
-            // Submenú de ajustes
+            // Submenú de ajustes (bajo «MAD Oficina», o bajo otro menú si el módulo lo pide, p. ej. «Finanzas»)
             add_action('admin_menu', function() use ($module){
+                $parent = method_exists($module, 'menu_parent') && $module->menu_parent() ? $module->menu_parent() : self::MENU_SLUG_ROOT;
+                if ( $parent !== self::MENU_SLUG_ROOT ) return; // the module registers its own entries there
                 add_submenu_page(
                     self::MENU_SLUG_ROOT,
                     $module->title(),
@@ -246,7 +248,7 @@ final class MAD_Oficina_Core {
 
     public function enqueue_admin_assets($hook){
         $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
-        if ( strpos($page, self::MENU_SLUG_ROOT) !== 0 ) return;
+        if ( strpos($page, self::MENU_SLUG_ROOT) !== 0 && $page !== 'mad-finanzas' ) return;
         wp_enqueue_style('mad-oficina-brand', MAD_OFICINA_URL.'assets/css/mad.css', [], self::asset_version('css/mad.css'));
         wp_enqueue_style('mad-oficina-admin', MAD_OFICINA_URL.'assets/css/admin.css', ['mad-oficina-brand'], self::asset_version('css/admin.css'));
     }
@@ -342,6 +344,7 @@ interface MAD_Oficina_Module {
     // public function required_plugins();  // ['Plugin Name' => 'plugin/file.php']
     // public function dependencies();      // Slugs de otros módulos de MAD Oficina que deben estar activos
     // public function rest_routes();       // Registro de rutas REST (se llama en rest_api_init)
+    // public function menu_parent();       // Slug de otro menú principal (p. ej. 'mad-finanzas'): el módulo registra allí sus entradas
 }
 
 register_activation_hook(__FILE__, ['MAD_Oficina\\Core\\Installer','activate']);

@@ -483,6 +483,9 @@ final class Schema {
   file_hash char(64) NULL,
   drive_file_id varchar(128) NULL,
   drive_url varchar(255) NULL,
+  paid_eur decimal(12,2) NULL,
+  payment_file_id varchar(128) NULL,
+  payment_url varchar(255) NULL,
   extraction longtext NULL,
   notes text NULL,
   created_at datetime NOT NULL,
@@ -493,6 +496,24 @@ final class Schema {
   KEY status (status),
   KEY client_id (client_id),
   KEY message (gmail_message_id)",
+
+            // Taxes and social security paid (IVA 303, cuota de autónomos…), entered by hand or
+            // as a monthly fixed amount. Orientative: the gestoría files the real figures.
+            'taxes' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  kind varchar(20) NOT NULL,
+  period varchar(10) NOT NULL,
+  paid_on date NULL,
+  amount decimal(12,2) NOT NULL DEFAULT 0,
+  status varchar(20) NOT NULL DEFAULT 'paid',
+  source varchar(20) NOT NULL DEFAULT 'manual',
+  file_url varchar(255) NULL,
+  notes text NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY kind_period (kind,period),
+  KEY paid_on (paid_on)",
 
             'quote_lines' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,

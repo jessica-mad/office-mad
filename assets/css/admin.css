@@ -167,3 +167,13 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-approval-quick{display:flex;gap:6px;flex:none}
 .madof-approval-body{padding:4px 18px 16px;border-top:1px dashed rgba(11,11,11,.25)}
 @media (max-width:782px){.madof-bulk{top:46px}.madof-approval-main small{white-space:normal}}
+/* Finanzas → Resumen: income vs expenses side by side */
+.madof-bar-pair{flex:1;display:flex;align-items:stretch;gap:2px}
+.madof-bar-pair .madof-bar-stack{flex:1}
+.madof-totals.madof-num{margin-left:0;width:100%}
+.madof-sw.is-expense,.madof-seg.is-expense{background:var(--g);box-shadow:inset 0 0 0 1.5px var(--k)}
+.madof-sw.is-tax,.madof-seg.is-tax{background:#9a9a8a}
+.madof-num td,.madof-num th{text-align:right}
+.madof-num td:first-child,.madof-num th:first-child{text-align:left}
+.madof-num tr.is-total td,.madof-num tr.is-total th{border-top:2px solid var(--k);background:var(--g);font-weight:600}
+.madof-neg{color:#a12a00}

@@ -11,6 +11,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     const IMPORT_TRANSIENT = 'madof_billing_import_';
     const CRON_HOOK = 'madoficina_billing_calendar';
+    const FINANCE = 'mad-finanzas';
 
     private $core;
 
@@ -31,6 +32,7 @@ return new class($core) implements MAD_Oficina_Module {
     public function title(){ return __('Facturación', 'mad-oficina'); }
     public function menu_label(){ return __('Facturación', 'mad-oficina'); }
     public function menu_slug(){ return 'mad-oficina-facturacion'; }
+    public function menu_parent(){ return self::FINANCE; }
     public function description(){
         return __('Libro de facturas emitidas, clientes de facturación y resumen por mes, trimestre y cliente. Importa el histórico de tu hoja antigua.', 'mad-oficina');
     }
@@ -46,7 +48,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
-            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip'] as $a ) {
+            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
@@ -62,9 +64,17 @@ return new class($core) implements MAD_Oficina_Module {
         // Billing calendar: prepares the month's drafts and asks on each client's day.
         add_action(self::CRON_HOOK, fn() => $this->calendar()->run());
         add_action('madoficina_tick', fn() => $this->calendar()->run());
+        // The cuota de autónomos notes itself each month.
+        add_action(self::CRON_HOOK, fn() => \MAD_Oficina\Billing\Taxes::apply_monthly($this->settings()));
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
         add_filter('madoficina_chat_approval_buttons', ['MAD_Oficina\\Billing\\Calendar', 'chat_buttons'], 10, 2);
         add_filter('madoficina_chat_action', ['MAD_Oficina\\Billing\\Calendar', 'chat_action'], 10, 5);
+        // «Finanzas»: its own menu (billing, expenses, taxes), apart from the office.
+        add_action('admin_menu', [$this, 'register_finance_menu'], 9);
+        add_action('admin_menu', [$this, 'sort_finance_menu'], 999);
+        add_filter('parent_file', fn($f) => in_array($_GET['page'] ?? '', [self::FINANCE, $this->menu_slug(), 'mad-oficina-gastos'], true) ? self::FINANCE : $f);
+        add_filter('submenu_file', [$this, 'finance_submenu_file']);
+
         // One client, two faces: the office card shows the fiscal data it invoices under.
         add_action('madoficina_client_edit_identity', [$this, 'render_client_identity']);
         add_action('madoficina_client_list_head', [$this, 'render_client_list_head']);
@@ -72,6 +82,46 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function admin_init(){}
+
+    /** Finanzas → Resumen, Facturas, Calendario… Sections of a page are direct links to its tab. */
+    public function register_finance_menu(){
+        $cap = MAD_Oficina_Core::CAPABILITY;
+        $url = fn($page, $tab) => 'admin.php?page=' . $page . '&tab=' . $tab;
+        add_menu_page(__('Finanzas', 'mad-oficina'), __('Finanzas', 'mad-oficina'), $cap, self::FINANCE, [$this, 'render_summary_page'], 'dashicons-chart-area', 57);
+        add_submenu_page(self::FINANCE, __('Resumen', 'mad-oficina'), __('Resumen', 'mad-oficina'), $cap, self::FINANCE, [$this, 'render_summary_page'], 0);
+        add_submenu_page(self::FINANCE, __('Facturas', 'mad-oficina'), __('Facturas', 'mad-oficina'), $cap, $this->menu_slug(), [$this, 'render_settings_page'], 1);
+        foreach ( [2 => ['calendar', __('Calendario', 'mad-oficina')], 3 => ['forecast', __('Previsión', 'mad-oficina')], 4 => ['agreements', __('Acuerdos', 'mad-oficina')], 5 => ['quotes', __('Presupuestos', 'mad-oficina')], 6 => ['clients', __('Clientes de facturación', 'mad-oficina')], 20 => ['taxes', __('Impuestos', 'mad-oficina')], 30 => ['settings', __('Ajustes', 'mad-oficina')]] as $pos => [$tab, $label] ) {
+            add_submenu_page(self::FINANCE, $label, $label, $cap, $url($this->menu_slug(), $tab), '', $pos);
+        }
+    }
+
+    /** Other modules add their entries later (Gastos, Proveedores): «Impuestos» and «Ajustes» stay last. */
+    public function sort_finance_menu(){
+        global $submenu;
+        if ( empty($submenu[self::FINANCE]) ) return;
+        $last = fn($item) => (int) (str_contains($item[2], '&tab=settings') ? 2 : str_contains($item[2], '&tab=taxes'));
+        $items = array_values($submenu[self::FINANCE]);
+        $keyed = [];
+        foreach ( $items as $i => $item ) $keyed[] = [$last($item), $i, $item];
+        sort($keyed);
+        $submenu[self::FINANCE] = array_column($keyed, 2);
+    }
+
+    /** Highlights the right entry of «Finanzas» for each tab. */
+    public function finance_submenu_file($file){
+        $page = $_GET['page'] ?? '';
+        $tab = sanitize_key($_GET['tab'] ?? '');
+        if ( $page === $this->menu_slug() && in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'clients', 'taxes', 'settings'], true) && ! isset($_GET['invoice']) && ! isset($_GET['edit']) ) {
+            return 'admin.php?page=' . $page . '&tab=' . $tab;
+        }
+        if ( $page === 'mad-oficina-gastos' && $tab === 'suppliers' ) return 'admin.php?page=mad-oficina-gastos&tab=suppliers';
+        return $file;
+    }
+
+    public function render_summary_page(){
+        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        include __DIR__ . '/views/finance-summary.php';
+    }
 
     public function calendar(){
         return new \MAD_Oficina\Billing\Calendar($this->settings());
@@ -423,6 +473,37 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('billing_skip');
         $r = \MAD_Oficina\Billing\Calendar::skip_invoice(absint($_POST['invoice_id'] ?? 0));
         $this->back(['tab' => 'calendar'], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
+    }
+
+    /* ==== Taxes ==== */
+
+    public function handle_billing_tax_save(){
+        $this->guard('billing_tax_save');
+        $p = wp_unslash($_POST);
+        $id = \MAD_Oficina\Billing\Taxes::save($p, absint($p['tax_id'] ?? 0));
+        $year = (int) substr((string) ($p['period'] ?? ''), 0, 4) ?: (int) current_time('Y');
+        if ( is_wp_error($id) ) $this->back(['tab' => 'taxes', 'year' => $year], $id->get_error_message(), 'error');
+        $this->back(['tab' => 'taxes', 'year' => $year], __('Apuntado.', 'mad-oficina'));
+    }
+
+    public function handle_billing_tax_delete(){
+        $this->guard('billing_tax_delete');
+        \MAD_Oficina\Billing\Taxes::delete(absint($_POST['tax_id'] ?? 0));
+        $this->back(['tab' => 'taxes', 'year' => absint($_POST['year'] ?? 0) ?: (int) current_time('Y')], __('Apunte borrado.', 'mad-oficina'));
+    }
+
+    public function handle_billing_autonomos_settings(){
+        $this->guard('billing_autonomos_settings');
+        $p = wp_unslash($_POST);
+        $s = $this->settings();
+        $s['autonomos_amount'] = (float) (\MAD_Oficina\Billing\Money::parse((string) ($p['autonomos_amount'] ?? '')) ?? 0);
+        $s['autonomos_from'] = \MAD_Oficina\Billing\Months::valid($p['autonomos_from'] ?? '') ?: \MAD_Oficina\Billing\Months::current();
+        $s['autonomos_day'] = max(1, min(31, (int) ($p['autonomos_day'] ?? 28)));
+        update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+        $n = \MAD_Oficina\Billing\Taxes::apply_monthly($s);
+        $this->back(['tab' => 'taxes'], $s['autonomos_amount'] > 0
+            ? sprintf(__('Cuota guardada: %1$s al mes desde %2$s. He apuntado %3$d meses.', 'mad-oficina'), \MAD_Oficina\Billing\Money::format($s['autonomos_amount']), \MAD_Oficina\Billing\Months::label($s['autonomos_from']), $n)
+            : __('Sin cuota: no apunto nada automático.', 'mad-oficina'));
     }
 
     /** The invoice as PDF with MAD's design (opens in the browser). */

@@ -10,7 +10,17 @@ use MAD_Oficina\Core\Repo\Clients;
 
 if ( ! defined('ABSPATH') ) exit;
 $base = admin_url('admin.php?page=mad-oficina-facturacion');
-$tabs = ['invoices' => __('Facturas', 'mad-oficina'), 'calendar' => __('Calendario', 'mad-oficina'), 'forecast' => __('Previsión', 'mad-oficina'), 'agreements' => __('Acuerdos', 'mad-oficina'), 'quotes' => __('Presupuestos', 'mad-oficina'), 'summary' => __('Resumen', 'mad-oficina'), 'clients' => __('Clientes', 'mad-oficina'), 'import' => __('Importar histórico', 'mad-oficina'), 'settings' => __('Datos del emisor', 'mad-oficina')];
+// Each section is an entry of the «Finanzas» menu; only «Facturas» keeps sub-tabs.
+$tabs = ['invoices' => __('Facturas', 'mad-oficina'), 'unpaid' => __('Sin cobrar', 'mad-oficina'), 'summary' => __('Por meses y clientes', 'mad-oficina'), 'import' => __('Importar histórico', 'mad-oficina')];
+$heads = [
+    'calendar' => [__('Calendario de facturación', 'mad-oficina'), __('Lo que toca facturar cada mes a cada cliente, según sus acuerdos.', 'mad-oficina')],
+    'forecast' => [__('Previsión', 'mad-oficina'), __('Ingresos sin IVA mes a mes: lo facturado, lo confirmado y lo posible.', 'mad-oficina')],
+    'agreements' => [__('Acuerdos', 'mad-oficina'), __('Fees mensuales y encargos puntuales de cada cliente.', 'mad-oficina')],
+    'quotes' => [__('Presupuestos', 'mad-oficina'), __('Lo que está en el aire, con su probabilidad.', 'mad-oficina')],
+    'clients' => [__('Clientes de facturación', 'mad-oficina'), __('Datos fiscales de cada cliente y con qué cliente de la oficina va.', 'mad-oficina')],
+    'taxes' => [__('Impuestos y cuotas', 'mad-oficina'), __('Lo que pagas a Hacienda y a la Seguridad Social. Las estimaciones son orientativas: la cifra buena la da la gestoría.', 'mad-oficina')],
+    'settings' => [__('Ajustes de finanzas', 'mad-oficina'), __('Tus datos de emisor, el email de las facturas, el Libro MAD y la lectura de gastos.', 'mad-oficina')],
+];
 $years = Invoices::years();
 $year = isset($_GET['year']) ? absint($_GET['year']) : ($years[0] ?? (int) current_time('Y'));
 $money = fn($n) => Money::format($n);
@@ -24,13 +34,16 @@ $status_pill = function($inv){
 };
 ?>
 <div class="wrap madof-wrap">
-    <?php AdminUi::header(__('Administración', 'mad-oficina'), __('Facturación', 'mad-oficina'), __('Tu libro de facturas emitidas. La serie Argentina se guarda aparte: no cuenta en los libros españoles ni en el paquete de la gestoría.', 'mad-oficina')); ?>
-
-    <nav class="madof-tabs" aria-label="<?php esc_attr_e('Secciones', 'mad-oficina'); ?>">
-        <?php foreach ( $tabs as $k => $l ) : ?>
-            <a href="<?php echo esc_url($base . '&tab=' . $k); ?>" class="<?php echo ($tab === $k && ! $invoice) ? 'is-active' : ''; ?>"><?php echo esc_html($l); ?></a>
-        <?php endforeach; ?>
-    </nav>
+    <?php if ( ! $invoice && isset($heads[$tab]) ) : ?>
+        <?php AdminUi::header(__('Finanzas', 'mad-oficina'), $heads[$tab][0], $heads[$tab][1]); ?>
+    <?php else : ?>
+        <?php AdminUi::header(__('Finanzas', 'mad-oficina'), __('Facturas', 'mad-oficina'), __('Tu libro de facturas emitidas. La serie Argentina se guarda aparte: no cuenta en los libros españoles ni en el paquete de la gestoría.', 'mad-oficina')); ?>
+        <nav class="madof-tabs" aria-label="<?php esc_attr_e('Secciones', 'mad-oficina'); ?>">
+            <?php foreach ( $tabs as $k => $l ) : ?>
+                <a href="<?php echo esc_url($base . '&tab=' . $k); ?>" class="<?php echo (($tab === $k || ($k === 'invoices' && ! isset($tabs[$tab]))) && ! $invoice) ? 'is-active' : ''; ?>"><?php echo esc_html($l); ?></a>
+            <?php endforeach; ?>
+        </nav>
+    <?php endif; ?>
 
 <?php if ( $invoice ) : $inv = $invoice; ?>
     <p><a href="<?php echo esc_url($base . '&year=' . $inv['year']); ?>">← <?php esc_html_e('Todas las facturas', 'mad-oficina'); ?></a></p>
@@ -87,7 +100,7 @@ $status_pill = function($inv){
         <?php endif; ?>
     </section>
 
-<?php elseif ( in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes'], true) ) :
+<?php elseif ( in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'taxes'], true) ) :
     include __DIR__ . '/' . $tab . '.php'; ?>
 
 <?php elseif ( $tab === 'summary' ) :
@@ -247,6 +260,11 @@ $status_pill = function($inv){
     </section>
 
 <?php elseif ( $tab === 'settings' ) : ?>
+    <nav class="madof-filters" aria-label="<?php esc_attr_e('Otros ajustes', 'mad-oficina'); ?>">
+        <a class="madof-pill" href="<?php echo esc_url($base . '&tab=import'); ?>"><?php esc_html_e('Importar histórico de facturas', 'mad-oficina'); ?></a>
+        <a class="madof-pill" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-gastos&tab=settings')); ?>"><?php esc_html_e('Lectura de gastos', 'mad-oficina'); ?></a>
+        <a class="madof-pill" href="<?php echo esc_url($base . '&tab=taxes'); ?>"><?php esc_html_e('Cuota de autónomos', 'mad-oficina'); ?></a>
+    </nav>
     <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form">
         <?php wp_nonce_field('madof_billing_settings'); ?>
         <input type="hidden" name="action" value="madof_billing_settings">

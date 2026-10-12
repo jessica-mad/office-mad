@@ -176,3 +176,10 @@ Para cada cliente muestra:
 - el estado: por preparar / borrador listo / esperando tu OK / emitida / enviada / este mes no.
 
 Desde aquí puedes **preparar ahora**, abrir, posponer o marcar «este mes no».
+
+## Finanzas (menú propio)
+
+- Menú **Finanzas**: Resumen · Facturas · Calendario · Previsión · Acuerdos · Presupuestos · Clientes de facturación · Gastos · Proveedores · Impuestos · Ajustes.
+- **Resumen** (`Finance::year`): ingresos sin IVA (España y Argentina por separado), gastos registrados (en euros, o lo pagado en euros si la factura va en otra moneda: `expenses.paid_eur`), cuotas e impuestos que son coste (autónomos, otros) y lo que queda. IVA por trimestre cobrado vs soportado, solo orientativo.
+- **Impuestos** (`Taxes`, tabla `taxes`, DB 13): apuntes a mano (303, 130, otros) y la cuota de autónomos se apunta sola cada mes desde el mes indicado. El IVA no cuenta como gasto: es dinero de los clientes que pasa por ti.
+- Siguiente: justificante de pago (Western Union) junto a la factura del gasto.

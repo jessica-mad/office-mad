@@ -30,6 +30,7 @@ return new class($core) implements MAD_Oficina_Module {
     public function title(){ return __('Proveedores y gastos', 'mad-oficina'); }
     public function menu_label(){ return __('Gastos', 'mad-oficina'); }
     public function menu_slug(){ return 'mad-oficina-gastos'; }
+    public function menu_parent(){ return 'mad-finanzas'; }
     public function description(){
         return __('La Contable lee las facturas de tus proveedores en Gmail, registra solo las que van a tu nombre, las archiva en la unidad compartida y te avisa de las que faltan.', 'mad-oficina');
     }
@@ -76,6 +77,12 @@ return new class($core) implements MAD_Oficina_Module {
         // Re-billable expenses ride on the client's next invoice.
         add_filter('madoficina_billing_extra_lines', [$this, 'rebill_lines'], 10, 3);
         add_filter('madoficina_billing_pending_profiles', [$this, 'rebill_profiles'], 10, 2);
+
+        add_action('admin_menu', function(){
+            $cap = MAD_Oficina_Core::CAPABILITY;
+            add_submenu_page('mad-finanzas', $this->title(), __('Gastos', 'mad-oficina'), $cap, $this->menu_slug(), [$this, 'render_settings_page'], 10);
+            add_submenu_page('mad-finanzas', __('Proveedores', 'mad-oficina'), __('Proveedores', 'mad-oficina'), $cap, 'admin.php?page=' . $this->menu_slug() . '&tab=suppliers', '', 11);
+        }, 11);
 
         foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
