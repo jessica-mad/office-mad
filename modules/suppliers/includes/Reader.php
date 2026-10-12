@@ -27,6 +27,22 @@ final class Reader {
         return strpos(substr((string) $bytes, 0, 65536), '%PDF') !== false;
     }
 
+    /** Pages of a PDF (0 when they cannot be counted, e.g. compressed object streams). */
+    public static function pages($bytes){
+        return (int) preg_match_all('#/Type\s*/Page(?![s\w])#', (string) $bytes);
+    }
+
+    /**
+     * What reading invoices has cost: this month and the last 30 days.
+     * @return array{month:array, days30:array} each {n, tokens, usd}
+     */
+    public static function spend(){
+        global $wpdb;
+        $t = \MAD_Oficina\Core\Schema::table('agent_log');
+        $q = fn($since) => $wpdb->get_row($wpdb->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS usd FROM {$t} WHERE agent = %s AND event = 'read_invoice' AND created_at >= %s", self::AGENT, $since), ARRAY_A);
+        return ['month' => $q(gmdate('Y-m-01 00:00:00')), 'days30' => $q(gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS))];
+    }
+
     /** From «%PDF» on: some files carry bytes before it (signed documents wrap the PDF). */
     public static function pdf_part($bytes){
         $p = strpos(substr((string) $bytes, 0, 65536), '%PDF');

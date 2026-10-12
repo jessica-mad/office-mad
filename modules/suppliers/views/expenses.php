@@ -30,7 +30,7 @@ $reason = function(array $e){
     return [
         'other' => __('A nombre de otra persona o empresa', 'mad-oficina'), 'jessica' => __('Lo decidiste tú', 'mad-oficina'),
         'recipient' => __('No dice a nombre de quién está', 'mad-oficina'), 'supplier' => __('Proveedor nuevo', 'mad-oficina'),
-        'unreadable' => __('No he podido leerla', 'mad-oficina'), 'not_invoice' => __('No es una factura', 'mad-oficina'),
+        'unreadable' => __('No he podido leerla', 'mad-oficina'), 'long' => __('Documento largo: no leído para no gastar', 'mad-oficina'), 'not_invoice' => __('No es una factura', 'mad-oficina'),
         'duplicate' => __('Repetida', 'mad-oficina'), 'price_up' => __('Más cara de lo habitual', 'mad-oficina'),
     ][$r] ?? '';
 };
@@ -49,7 +49,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
                 <td><?php echo esc_html((string) $e['concept']); ?>
                     <?php if ( $e['client_id'] ) echo ' <span class="madof-code" title="' . esc_attr__('Se repercute a este cliente', 'mad-oficina') . '">' . esc_html($codes[$e['client_id']] ?? '?') . '</span>'; ?>
                     <?php if ( $show_reason || $e['reason'] === 'price_up' ) echo '<br><small>' . esc_html($reason($e)) . '</small>'; ?>
-                    <?php if ( in_array($e['status'], ['queued', 'review'], true) && $e['notes'] && ( $e['status'] === 'queued' || $e['reason'] === 'unreadable' ) ) echo '<br><small class="madof-muted">' . nl2br(esc_html($e['notes'])) . '</small>'; ?>
+                    <?php if ( in_array($e['status'], ['queued', 'review'], true) && $e['notes'] && ( $e['status'] === 'queued' || in_array($e['reason'], ['unreadable', 'long'], true) ) ) echo '<br><small class="madof-muted">' . nl2br(esc_html($e['notes'])) . '</small>'; ?>
                     <?php if ( $e['status'] === 'queued' && $e['subject'] ) echo '<br><small class="madof-muted">' . esc_html($e['subject']) . '</small>'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['base'] !== null ? esc_html(Money::format($e['base'])) : '—'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['vat'] !== null ? esc_html(Money::format($e['vat'])) : '—'; ?></td>
@@ -137,6 +137,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
     <?php $bulk_bar(['aside' => __('No son mías: guardar aparte', 'mad-oficina'), 'discard' => __('No son facturas: descartar', 'mad-oficina'), 'read' => __('Volver a leer', 'mad-oficina')]); ?>
     <?php $table(Expenses::all(['status' => 'review']), true, true); ?>
     <?php else : ?>
+    <?php if ( ! empty($settings['paused']) ) : ?><p class="madof-warn"><?php esc_html_e('La lectura está en pausa (Ajustes): no se lee nada hasta que la reactives.', 'mad-oficina'); ?></p><?php endif; ?>
     <p class="description"><?php esc_html_e('PDFs que han llegado y la Contable aún no ha leído. Se leen solos en segundo plano (unos pocos cada pocos minutos); si uno falla, se reintenta hasta 3 veces y aquí ves por qué.', 'mad-oficina'); ?></p>
     <?php echo AdminUi::form_open('expense_read_now', 'madof-inline'); ?><button class="madof-btn is-small"><?php esc_html_e('Leer ahora las que pueda (1 minuto)', 'mad-oficina'); ?></button></form>
     <?php $bulk_bar(['discard' => __('Descartar (no son facturas)', 'mad-oficina'), 'aside' => __('Guardar aparte sin leer', 'mad-oficina')]); ?>
@@ -249,6 +250,11 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
                 <label><?php esc_html_e('Preguntar por una factura que falta tras', 'mad-oficina'); ?><select name="grace_days"><?php foreach ( [3, 5, 7, 10, 15] as $d ) echo '<option value="' . $d . '" ' . selected((int) ($settings['grace_days'] ?? 5), $d, false) . '>' . esc_html(sprintf(__('%d días', 'mad-oficina'), $d)) . '</option>'; ?></select></label>
                 <label><?php esc_html_e('Modelo que lee las facturas', 'mad-oficina'); ?><select name="model"><?php foreach ( ['claude-opus-5-5' => 'Claude Opus 5.5 (más fiable)', 'claude-sonnet-5-5' => 'Claude Sonnet 5.5', 'claude-haiku-5-5' => 'Claude Haiku 5.5 (más barato)'] as $k => $l ) echo '<option value="' . esc_attr($k) . '" ' . selected($settings['model'] ?? 'claude-opus-5-5', $k, false) . '>' . esc_html($l) . '</option>'; ?></select></label>
             </div>
+            <label class="madof-check"><input type="checkbox" name="paused" value="1" <?php checked(! empty($settings['paused'])); ?>> <strong><?php esc_html_e('Pausar la lectura de facturas', 'mad-oficina'); ?></strong> — <?php esc_html_e('los PDF siguen llegando y esperan en «Leyendo», sin gastar nada.', 'mad-oficina'); ?></label>
+            <label><?php esc_html_e('No leer solos los PDF de más de', 'mad-oficina'); ?> <input type="number" min="0" max="50" name="max_pages" value="<?php echo (int) ($settings['max_pages'] ?? 5); ?>" style="width:70px"> <?php esc_html_e('páginas (0 = sin límite)', 'mad-oficina'); ?></label>
+            <?php $sp = \MAD_Oficina\Suppliers\Reader::spend(); ?>
+            <p class="madof-lead"><?php echo esc_html(sprintf(__('Leer facturas este mes: %1$d lecturas, %2$s tokens, unos %3$s $. Últimos 30 días: %4$s $.', 'mad-oficina'), (int) $sp['month']['n'], number_format_i18n((int) $sp['month']['tokens']), number_format_i18n((float) $sp['month']['usd'], 2), number_format_i18n((float) $sp['days30']['usd'], 2))); ?></p>
+            <p class="description"><?php esc_html_e('Por factura: Opus 5.5 ≈ 1–3 céntimos; Haiku 5.5 ≈ 0,05 céntimos (40 veces menos). Para facturas, Haiku suele bastar; si alguna sale mal leída, la corriges a mano o la vuelves a leer.', 'mad-oficina'); ?></p>
             <label class="madof-check"><input type="checkbox" name="weekly" value="1" <?php checked($settings['weekly'] ?? true); ?>> <?php esc_html_e('Resumen de gastos los lunes por Chat', 'mad-oficina'); ?></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>

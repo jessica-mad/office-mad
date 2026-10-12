@@ -316,4 +316,18 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame(1, $this->intake()->bulk('read', [$a]));
         $this->assertSame('queued', Expenses::get($a)['status']);
     }
+
+    public function test_long_documents_are_not_read_unless_asked(){
+        $calls = $this->calls;
+        $this->next = $this->x(['number' => 'LONG']);
+        $pdf = '%PDF-1.4 ' . str_repeat('<< /Type /Page >> ', 9) . ' /Type /Pages';
+        $r = $this->intake()->receive($pdf, ['source' => 'gmail']);
+        $this->assertSame(['review', 'long'], [$r['status'], $r['reason']]);
+        $this->assertSame($calls, $this->calls, 'nothing spent');
+        $this->intake()->bulk('read', [$r['expense_id']]);
+        $this->intake()->process($r['expense_id']);
+        $this->assertSame($calls + 1, $this->calls, 'read when she asks');
+        $this->assertNotSame('queued', Expenses::get($r['expense_id'])['status']);
+        $this->assertSame(9, \MAD_Oficina\Suppliers\Reader::pages($pdf));
+    }
 }

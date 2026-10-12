@@ -141,11 +141,22 @@ final class Intake {
     public function process($id){
         $e = Expenses::get($id);
         if ( ! $e || $e['status'] !== 'queued' ) return ['expense_id' => (int) $id, 'status' => $e['status'] ?? 'gone', 'reason' => null];
+        // «Pausar la lectura» (Gastos → Ajustes): PDFs keep arriving and wait, nothing is spent.
+        if ( ! empty($this->settings['paused']) ) return ['expense_id' => (int) $id, 'status' => 'queued', 'reason' => 'paused'];
         $pdf = Uploads::read($id);
         if ( $pdf === null ) {
             Expenses::update($id, ['status' => 'ignored', 'reason' => 'no_file']);
             return ['expense_id' => (int) $id, 'status' => 'ignored', 'reason' => 'no_file'];
         }
+        // Long documents (contracts, dossiers…) are rarely invoices and cost a lot to read:
+        // they wait for Jessica unless she asked to read them anyway.
+        $max = (int) ($this->settings['max_pages'] ?? 5);
+        $pages = Reader::pages($pdf);
+        if ( $e['reason'] !== 'force' && $max > 0 && $pages > $max ) {
+            Expenses::update($id, ['status' => 'review', 'reason' => 'long', 'notes' => sprintf(__('Documento de %d páginas: no lo leo solo para no gastar. Si es una factura, márcalo y pulsa «Volver a leer».', 'mad-oficina'), $pages)]);
+            return ['expense_id' => (int) $id, 'status' => 'review', 'reason' => 'long'];
+        }
+        if ( $e['reason'] === 'force' ) $e['reason'] = null;
         // The attempt is counted (and noted) before reading: if the server cuts a slow request,
         // the next attempt knows it, and after MAX_TRIES Jessica completes it by hand.
         $tries = (int) str_replace('try:', '', (string) $e['reason']) + 1;
@@ -333,7 +344,7 @@ final class Intake {
             }
             $e = Expenses::get($id);
             if ( $action === 'read' ) {
-                Expenses::update($id, ['status' => 'queued', 'reason' => null, 'notes' => null]);
+                Expenses::update($id, ['status' => 'queued', 'reason' => 'force', 'notes' => null]); // she asked: read even if long
                 self::schedule($id);
             } elseif ( $action === 'discard' ) {
                 Expenses::update($id, ['status' => 'ignored', 'reason' => 'jessica']);

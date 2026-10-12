@@ -277,6 +277,8 @@ return new class($core) implements MAD_Oficina_Module {
         $s['my_emails'] = sanitize_text_field($p['my_emails'] ?? '');
         $s['grace_days'] = max(1, min(30, (int) ($p['grace_days'] ?? 5)));
         $s['weekly'] = ! empty($p['weekly']);
+        $s['max_pages'] = max(0, min(50, (int) ($p['max_pages'] ?? 5)));
+        $s['paused'] = ! empty($p['paused']);
         $s['model'] = in_array($p['model'] ?? '', ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], true) ? $p['model'] : 'claude-opus-5-5';
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
         $this->back(['tab' => 'settings'], __('Ajustes guardados.', 'mad-oficina'));
