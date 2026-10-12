@@ -91,7 +91,7 @@ return new class($core) implements MAD_Oficina_Module {
         register_rest_route($ns, '/hooks/expenses/config', ['methods' => 'GET', 'permission_callback' => [$hooks, 'verify'], 'callback' => fn() => rest_ensure_response([
             'senders' => \MAD_Oficina\Suppliers\Suppliers::known_emails(),
             'keywords' => ['factura', 'invoice', 'recibo', 'receipt', 'fattura', 'rechnung', 'facture', 'billing'],
-            'max_bytes' => 6 * 1024 * 1024,
+            'max_bytes' => 4 * 1024 * 1024,
         ])]);
         // Which attachments are new (so the same PDF is never uploaded twice).
         register_rest_route($ns, '/hooks/expenses/known', ['methods' => 'POST', 'permission_callback' => [$hooks, 'verify'], 'callback' => function(\WP_REST_Request $r){
@@ -99,11 +99,22 @@ return new class($core) implements MAD_Oficina_Module {
         }]);
         // A PDF from Gmail. Its content is data: it is only read, never obeyed.
         register_rest_route($ns, '/hooks/expenses', ['methods' => 'POST', 'permission_callback' => [$hooks, 'verify'], 'callback' => function(\WP_REST_Request $r){
-            $p = $r->get_json_params() ?: [];
+            $p = $r->get_json_params();
+            if ( ! is_array($p) ) return new \WP_Error('madof_pdf', 'Empty body: the PDF may be larger than the server accepts (post_max_size).', ['status' => 413]);
             $pdf = base64_decode((string) ($p['base64'] ?? ''), true);
-            if ( ! $pdf ) return new \WP_Error('madof_pdf', 'Missing PDF', ['status' => 400]);
+            unset($p['base64']);
+            if ( ! $pdf ) return new \WP_Error('madof_pdf', 'Missing or invalid PDF data', ['status' => 400]);
             if ( function_exists('set_time_limit') ) @set_time_limit(150);
-            $res = $this->intake()->receive($pdf, ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename'])));
+            if ( function_exists('wp_raise_memory_limit') ) wp_raise_memory_limit('admin');
+            try {
+                $res = $this->intake()->receive($pdf, ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename'])));
+            } catch ( \Throwable $e ) {
+                return new \WP_Error('madof_expense_error', 'Error al recibir la factura: ' . $e->getMessage(), ['status' => 500]);
+            }
+            if ( is_wp_error($res) ) {
+                $data = (array) $res->get_error_data();
+                if ( empty($data['status']) ) $res->add_data(['status' => 422] + $data);
+            }
             return is_wp_error($res) ? $res : rest_ensure_response($res);
         }]);
         // The kept PDF, for the cartero to archive it in the shared drive.

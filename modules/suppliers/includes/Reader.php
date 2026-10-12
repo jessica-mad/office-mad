@@ -22,6 +22,12 @@ final class Reader {
         $this->model = $model ?: self::DEFAULT_MODEL;
     }
 
+    /** PDF readers accept the «%PDF» header anywhere in the first 1 KB (some generators put bytes before it). */
+    public static function is_pdf($bytes){
+        $p = strpos(substr((string) $bytes, 0, 1024), '%PDF');
+        return $p !== false;
+    }
+
     public static function schema(){
         $str = ['type' => 'string'];
         $num = ['type' => 'number'];
@@ -63,7 +69,7 @@ final class Reader {
      */
     public function read($pdf, array $meta = []){
         if ( strlen($pdf) > self::MAX_BYTES ) return new \WP_Error('madof_pdf_big', __('El PDF es demasiado grande para leerlo.', 'mad-oficina'));
-        if ( strncmp($pdf, '%PDF', 4) !== 0 ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'));
+        if ( ! self::is_pdf($pdf) ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'));
         $context = trim(sprintf("Remitente del email: %s\nAsunto: %s\nArchivo: %s", $meta['from'] ?? '—', $meta['subject'] ?? '—', $meta['filename'] ?? '—'));
         $res = ClaudeClient::create([
             'model' => $this->model,

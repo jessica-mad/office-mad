@@ -94,7 +94,7 @@ final class Intake {
      * @return array{expense_id:int, status:string, reason:?string}|\WP_Error
      */
     public function receive($pdf, array $meta){
-        if ( strncmp((string) $pdf, '%PDF', 4) !== 0 ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'));
+        if ( ! Reader::is_pdf($pdf) ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'), ['status' => 422]);
         $hash = hash('sha256', $pdf);
         if ( $seen = Expenses::by_hash($hash) ) return ['expense_id' => $seen['id'], 'status' => $seen['status'], 'reason' => 'seen'];
         $id = Expenses::insert([
@@ -131,9 +131,16 @@ final class Intake {
             Expenses::update($id, ['status' => 'ignored', 'reason' => 'no_file']);
             return ['expense_id' => (int) $id, 'status' => 'ignored', 'reason' => 'no_file'];
         }
+        // The attempt is counted before reading: if the server cuts a slow request, the next
+        // tick retries it, and after 3 attempts Jessica completes it by hand.
+        $tries = (int) str_replace('try:', '', (string) $e['reason']) + 1;
+        if ( $tries > 3 ) {
+            Expenses::update($id, ['status' => 'review', 'reason' => 'unreadable', 'notes' => __('No he podido leerla (tarda demasiado o el servidor la corta). Ábrela y completa los datos a mano.', 'mad-oficina')]);
+            return ['expense_id' => (int) $id, 'status' => 'review', 'reason' => 'unreadable'];
+        }
+        Expenses::update($id, ['reason' => 'try:' . $tries]);
         $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $e['subject'], 'filename' => $e['filename']]);
         if ( is_wp_error($x) ) {
-            $tries = (int) str_replace('try:', '', (string) $e['reason']) + 1;
             Expenses::update($id, $tries >= 3
                 ? ['status' => 'review', 'reason' => 'unreadable', 'notes' => sprintf(__('No he podido leerla: %s Ábrela y completa los datos a mano.', 'mad-oficina'), $x->get_error_message())]
                 : ['reason' => 'try:' . $tries]);

@@ -423,12 +423,17 @@ function scanInvoices_() {
       var data = part.body.attachmentId ? Gmail.Users.Messages.Attachments.get('me', m.id, part.body.attachmentId).data : part.body.data;
       var bytes = gmailBytes_(data);
       return { name: part.filename, bytes: bytes, hash: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)) };
-    }).filter(function (f) { return f.bytes.length <= (cfg.max_bytes || 6291456); });
+    }).filter(function (f) { return f.bytes.length <= (cfg.max_bytes || 4194304); });
     if (files.length) {
       var unknown = signedFetch_('post', '/hooks/expenses/known', { hashes: files.map(function (f) { return f.hash; }) }).unknown || [];
       files.forEach(function (f) {
         if (unknown.indexOf(f.hash) < 0) return;
-        signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, filename: f.name, base64: Utilities.base64Encode(f.bytes) });
+        try {
+          signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, filename: f.name, base64: Utilities.base64Encode(f.bytes) });
+        } catch (e) {
+          // One bad file never stops the rest: it is logged and the scan goes on.
+          console.warn('No he podido entregar «' + f.name + '» (' + (head.subject || m.id) + '): ' + e);
+        }
       });
     }
     p.setProperty('INVOICE_CURSOR', String(Math.max(cursor, Math.floor(Number(m.internalDate) / 1000))));
@@ -621,7 +626,9 @@ function signedFetch_(method, path, body) {
   var code = res.getResponseCode();
   if (code >= 300) {
     var text = res.getContentText();
-    if (/cloudflare|cf-ray|Attention Required/i.test(text + JSON.stringify(res.getAllHeaders()))) {
+    // A real Cloudflare block is an HTML page from Cloudflare (every response carries a cf-ray
+    // header, so headers alone say nothing). Anything else is WordPress answering.
+    if (/<html/i.test(text) && /cloudflare|Attention Required|cf-error-details/i.test(text) && !/wp-json|mad-oficina|"code"\s*:/i.test(text)) {
       throw new Error('Cloudflare ha bloqueado la petición (' + code + ') antes de llegar a WordPress. ' +
         'Crea en Cloudflare una regla que omita la seguridad para /wp-json/mad-oficina/v1/hooks/ (ver apps-script/README.md).');
     }

@@ -59,7 +59,7 @@ El cartero también lee tu Gmail, **solo para leer**: no cambia, borra ni marca 
    - Con muchas facturas, puede tardar unas horas en ponerse al día.
 4. `facturas@imad.pro` entra solo si sus correos llegan a tu buzón, es decir, si es un alias tuyo o un grupo que te reenvía.
 
-Los PDF de más de 6 MB no se envían: súbelos a mano en **Gastos → Subir factura**.
+Los PDF de más de 4 MB no se envían: súbelos a mano en **Gastos → Subir factura**.
 
 ## Qué reuniones envía
 
