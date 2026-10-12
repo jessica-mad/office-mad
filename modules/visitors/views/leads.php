@@ -15,7 +15,8 @@ $labels = fn(array $keys, array $map) => implode(', ', array_map(fn($k) => $map[
     <?php AdminUi::header(__('Recepción', 'mad-oficina'), __('Visitantes y leads', 'mad-oficina'), __('Briefs y peticiones de quien todavía no es cliente, y nuevos encargos de tus clientes. Un visitante solo aparece aquí cuando confirma su email.', 'mad-oficina')); ?>
 
     <nav class="madof-tabs" aria-label="<?php esc_attr_e('Secciones', 'mad-oficina'); ?>">
-        <a href="<?php echo esc_url($base); ?>" class="<?php echo $tab !== 'settings' ? 'is-active' : ''; ?>"><?php esc_html_e('Leads', 'mad-oficina'); ?></a>
+        <a href="<?php echo esc_url($base); ?>" class="<?php echo ! in_array($tab, ['settings', 'chat'], true) ? 'is-active' : ''; ?>"><?php esc_html_e('Leads', 'mad-oficina'); ?></a>
+        <a href="<?php echo esc_url($base . '&tab=chat'); ?>" class="<?php echo $tab === 'chat' ? 'is-active' : ''; ?>"><?php esc_html_e('Recepcionista', 'mad-oficina'); ?></a>
         <a href="<?php echo esc_url($base . '&tab=settings'); ?>" class="<?php echo $tab === 'settings' ? 'is-active' : ''; ?>"><?php esc_html_e('Ajustes', 'mad-oficina'); ?></a>
     </nav>
 
@@ -61,6 +62,47 @@ $labels = fn(array $keys, array $map) => implode(', ', array_map(fn($k) => $map[
             <?php endif; ?>
             <?php echo AdminUi::form_open('lead_delete', 'madof-inline'); ?><input type="hidden" name="lead_id" value="<?php echo (int) $lead['id']; ?>"><button class="madof-btn is-ghost" onclick="return confirm('<?php echo esc_js(__('¿Borrar este lead y todos sus datos?', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar (RGPD)', 'mad-oficina'); ?></button></form>
         </div>
+    </section>
+
+    <?php elseif ( $tab === 'chat' ) :
+        $chat = new \MAD_Oficina\Visitors\VisitorChat($settings);
+        $sheet = array_key_exists('knowledge', $settings) ? $settings['knowledge'] : \MAD_Oficina\Visitors\VisitorChat::DEFAULT_SHEET;
+        $spent = \MAD_Oficina\Visitors\VisitorChat::spent_today();
+        $threads = \MAD_Oficina\Visitors\VisitorChat::recent(20); ?>
+    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form">
+        <?php wp_nonce_field('madof_visitor_chat_settings'); ?>
+        <input type="hidden" name="action" value="madof_visitor_chat_settings">
+        <section class="madof-card">
+            <span class="madof-kicker"><?php esc_html_e('«Qué hacemos» · charla con visitantes', 'mad-oficina'); ?></span>
+            <p class="description"><?php esc_html_e('La recepcionista responde a visitantes usando solo esta ficha. No da precios ni plazos, no ve datos de clientes ni la agenda, y no pide datos personales: cuando hay interés, ofrece los botones de primera reunión o brief.', 'mad-oficina'); ?></p>
+            <?php if ( ! \MAD_Oficina\Core\Agents\ClaudeClient::has_key() ) : ?><p class="madof-warn"><?php esc_html_e('Falta la clave de Claude en wp-config.php.', 'mad-oficina'); ?></p><?php endif; ?>
+            <label class="madof-check"><input type="checkbox" name="chat_enabled" value="1" <?php checked(! empty($settings['chat_enabled'])); ?>> <strong><?php esc_html_e('Activar la charla para visitantes', 'mad-oficina'); ?></strong></label>
+            <label><?php esc_html_e('Ficha de MAD', 'mad-oficina'); ?>
+                <textarea name="knowledge" rows="22" style="font-family:ui-monospace,monospace;font-size:13px"><?php echo esc_textarea($sheet); ?></textarea>
+                <small><?php esc_html_e('Servicios, forma de trabajar, casos que se puedan contar y preguntas frecuentes. Es un borrador escrito sin poder leer imad.pro: corrígelo y quita la primera línea [BORRADOR…] para poder activar la charla.', 'mad-oficina'); ?></small></label>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Tope de gasto diario (USD)', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="chat_cap" value="<?php echo esc_attr(number_format((float) $chat->cap(), 2, '.', '')); ?>">
+                    <small><?php echo esc_html(sprintf(__('Hoy: %s $. Al llegar al tope, la charla se cambia por los botones de reunión y brief.', 'mad-oficina'), number_format($spent, 3, ',', '.'))); ?></small></label>
+                <label><?php esc_html_e('Modelo', 'mad-oficina'); ?>
+                    <select name="chat_model"><?php foreach ( \MAD_Oficina\Core\Agents\ClaudeClient::PRICES as $model => $price ) : ?>
+                        <option value="<?php echo esc_attr($model); ?>" <?php selected($chat->model(), $model); ?>><?php echo esc_html($model); ?></option>
+                    <?php endforeach; ?></select></label>
+            </div>
+            <p class="description"><?php printf(esc_html__('Límites: %1$d mensajes por charla, %2$d charlas al día por visitante. Las charlas se borran a los %3$d días.', 'mad-oficina'), \MAD_Oficina\Visitors\VisitorChat::PER_CONVERSATION, \MAD_Oficina\Visitors\VisitorChat::CONVERSATIONS_PER_DAY, \MAD_Oficina\Visitors\VisitorChat::RETENTION_DAYS); ?></p>
+            <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
+        </section>
+    </form>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Últimas charlas', 'mad-oficina'); ?></span>
+        <?php if ( ! $threads ) : ?><p class="description"><?php esc_html_e('Todavía no hay charlas.', 'mad-oficina'); ?></p><?php endif; ?>
+        <?php foreach ( $threads as $th ) : ?>
+            <details class="madof-more">
+                <summary><?php echo esc_html($date($th['started']) . ' · ' . sprintf(_n('%d mensaje', '%d mensajes', (int) $th['n'], 'mad-oficina'), (int) $th['n'])); ?></summary>
+                <?php foreach ( $th['messages'] as $m ) : ?>
+                    <p><strong><?php echo $m['author_type'] === 'visitor' ? esc_html__('Visitante', 'mad-oficina') : esc_html__('Recepcionista', 'mad-oficina'); ?>:</strong> <?php echo esc_html($m['body']); ?></p>
+                <?php endforeach; ?>
+            </details>
+        <?php endforeach; ?>
     </section>
 
     <?php elseif ( $tab === 'settings' ) : ?>

@@ -40,6 +40,10 @@ final class Rest {
         register_rest_route(self::NS, '/public/meeting', [
             'methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => [$this, 'visitor_meeting'],
         ]);
+        register_rest_route(self::NS, '/public/chat', [
+            'methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => [$this, 'visitor_chat'],
+            'args' => ['message' => ['type' => 'string', 'required' => true, 'maxLength' => VisitorChat::MAX_CHARS]],
+        ]);
         register_rest_route(self::NS, '/public/verify', [
             'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => [$this, 'verify'],
             'args' => ['lead' => ['type' => 'integer', 'required' => true], 'token' => ['type' => 'string', 'required' => true]],
@@ -82,6 +86,13 @@ final class Rest {
             return new \WP_Error('madof_mail', __('No hemos podido enviarte el email de confirmación. Inténtalo más tarde, por favor.', 'mad-oficina'), ['status' => 500]);
         }
         return rest_ensure_response(['ok' => true, 'verify' => true]);
+    }
+
+    public function visitor_chat(\WP_REST_Request $req){
+        $p = (array) $req->get_json_params();
+        if ( Guard::is_bot($p) ) return new \WP_Error('madof_bot', 'No', ['status' => 400]);
+        $chat = new VisitorChat($this->settings());
+        return rest_ensure_response($chat->reply($p['token'] ?? null, (string) ($p['message'] ?? ''), $this->secret(), (string) ($p['turnstile'] ?? '')));
     }
 
     public function slots(){

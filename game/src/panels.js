@@ -45,7 +45,7 @@ export const MENU = [
 ];
 
 export const VISITOR_MENU = [
-  { panel: 'que-hacemos', label: 'Qué hacemos', icon: 'chat', soon: true },
+  { panel: 'que-hacemos', label: 'Qué hacemos', icon: 'chat' },
   { panel: 'primera-reunion', label: 'Pedir una primera reunión', icon: 'calendar' },
   { panel: 'brief', label: 'Dejar un brief', icon: 'pencil' },
 ];
@@ -170,6 +170,78 @@ function mountBrief(el, ctx, visitor) {
       ts.reset();
     }
   });
+}
+
+/* ───────────── «Qué hacemos»: visitor chat ───────────── */
+const nextSteps = () => `<p class="madof-actions-row">
+  <button type="button" class="madof-btn" data-panel="primera-reunion">${icon('calendar')} Pedir una primera reunión</button>
+  <button type="button" class="madof-btn is-ghost" data-panel="brief">${icon('pencil')} Dejar un brief</button></p>`;
+
+const VCHAT_KEY = 'madof-visitor-chat';
+const vstore = {
+  get() { try { return JSON.parse(window.sessionStorage.getItem(VCHAT_KEY) || 'null'); } catch { return null; } },
+  set(v) { try { window.sessionStorage.setItem(VCHAT_KEY, JSON.stringify(v)); } catch { /* private mode */ } },
+};
+
+function visitorChatHtml(ctx) {
+  return `
+    <p class="madof-meta">Pregúntame qué hacemos en MAD y cómo trabajamos. No te pediré datos personales: si quieres seguir, te paso a la reunión o al brief.</p>
+    <ol class="madof-chat-log" aria-live="polite" aria-label="Conversación"></ol>
+    <div class="madof-chat-next" hidden>${nextSteps()}</div>
+    <form class="madof-chat-form">
+      <div class="madof-hp" aria-hidden="true"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></div>
+      <label class="screen-reader-text" for="madof-vchat-input">Tu mensaje</label>
+      <textarea id="madof-vchat-input" rows="2" maxlength="600" placeholder="Escribe tu pregunta…" required></textarea>
+      <button class="madof-btn" type="submit">${icon('send')} Enviar</button>
+    </form>
+    ${ctx.config.turnstile ? '<div class="madof-turnstile"></div>' : ''}`;
+}
+
+function mountVisitorChat(el, ctx) {
+  const log = el.querySelector('.madof-chat-log');
+  const form = el.querySelector('form');
+  const input = form.querySelector('textarea');
+  const next = el.querySelector('.madof-chat-next');
+  const name = ctx.me.characters.recepcionista?.name || 'Recepción';
+  const state = vstore.get() || { token: null, log: [] };
+  const ts = state.token ? { needed: false, token: () => '', reset() {} } : mountTurnstile(el, ctx, { set textContent(t) { add('agent', t); } });
+
+  function add(from, text, save = true) {
+    const li = document.createElement('li');
+    li.className = 'is-' + from;
+    li.innerHTML = `<span class="madof-kicker">${from === 'user' ? 'Tú' : esc(name)}</span><p>${esc(text)}</p>`;
+    log.appendChild(li); log.scrollTop = log.scrollHeight;
+    if (save && from !== 'typing') { state.log.push([from, text]); state.log = state.log.slice(-30); vstore.set(state); }
+    return li;
+  }
+  if (!state.log.length) add('agent', `¡Hola! Soy ${name}, de la recepción de MAD. ¿Qué te gustaría saber de lo que hacemos?`, false);
+  state.log.forEach(([f, t]) => add(f, t, false));
+
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    if (!state.token && ts.needed && !ts.token()) { add('agent', 'Un segundo, estoy comprobando que no eres un robot. Vuelve a enviarlo en un momento.', false); return; }
+    input.value = ''; add('user', text);
+    const typing = add('agent', `${name} está escribiendo…`, false); typing.classList.add('is-typing');
+    form.querySelector('button').disabled = true;
+    try {
+      const res = await ctx.api.visitorChat({ message: text, token: state.token, turnstile: ts.token(), fax: form.elements.fax.value });
+      typing.remove();
+      state.token = res.token; vstore.set(state);
+      add('agent', res.reply);
+      if (res.suggest !== 'none') next.hidden = false;
+      if (res.remaining === 0) { form.hidden = true; next.hidden = false; }
+    } catch (err) {
+      typing.remove(); add('agent', err.message, false);
+      if (err.fallback) { form.hidden = true; next.hidden = false; }
+      ts.reset();
+    } finally {
+      form.querySelector('button').disabled = false; if (!form.hidden) input.focus();
+    }
+  });
+  input.focus();
 }
 
 /* ───────────── first meeting (visitors) ───────────── */
@@ -455,7 +527,11 @@ export const PANELS = {
       <p class="madof-actions-row"><a class="madof-btn" href="${esc(ctx.me.links.login)}">Ya soy cliente: entrar</a>
       <button type="button" class="madof-btn is-ghost" data-panel="brief">${icon('pencil')} Dejar un brief</button></p>`,
   },
-  'que-hacemos': { kicker: 'Recepción', title: 'Qué hacemos', render: () => soon('Muy pronto podrás charlar aquí con la recepcionista sobre lo que hacemos en MAD. Mientras tanto, déjanos un brief y te respondemos.') },
+  'que-hacemos': {
+    kicker: 'Recepción', title: (ctx) => `Habla con ${ctx.me.characters.recepcionista?.name || 'recepción'}`,
+    render: (ctx) => ctx.config.chat ? visitorChatHtml(ctx) : `<p class="madof-lead">Ahora mismo no puedo charlar, pero Jessica te responde encantada.</p>${nextSteps()}`,
+    mount: (el, ctx) => { if (ctx.config.chat) mountVisitorChat(el, ctx); },
+  },
   'primera-reunion': {
     kicker: 'Recepción', title: 'Pedir una primera reunión',
     render: (ctx) => firstMeetingForm(ctx),

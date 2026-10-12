@@ -164,3 +164,4 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
 .madof-notice{margin-bottom:16px}
 .madof-actions-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.madof-chat-next{margin:4px 0 8px}

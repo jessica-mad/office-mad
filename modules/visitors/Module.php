@@ -56,9 +56,12 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('madoficina_lead_verified', ['MAD_Oficina\\Visitors\\FirstMeeting', 'on_verified']);
         add_filter('madoficina_approval_handler_' . \MAD_Oficina\Visitors\FirstMeeting::ACTION, fn() => ['MAD_Oficina\\Visitors\\FirstMeeting', 'approve']);
         add_filter('madoficina_approval_form_' . \MAD_Oficina\Visitors\FirstMeeting::ACTION, ['MAD_Oficina\\Visitors\\FirstMeeting', 'render_form'], 10, 2);
-        add_action(self::PURGE_HOOK, fn() => \MAD_Oficina\Visitors\Leads::purge_unverified(7));
+        add_action(self::PURGE_HOOK, function(){
+            \MAD_Oficina\Visitors\Leads::purge_unverified(7);
+            \MAD_Oficina\Visitors\VisitorChat::purge();
+        });
         if ( ! wp_next_scheduled(self::PURGE_HOOK) ) wp_schedule_event(time() + 300, 'daily', self::PURGE_HOOK);
-        foreach ( ['visitors_settings', 'lead_update', 'lead_convert', 'lead_delete'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['visitors_settings', 'visitor_chat_settings', 'lead_update', 'lead_convert', 'lead_delete'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -77,6 +80,7 @@ return new class($core) implements MAD_Oficina_Module {
             'login'     => wp_login_url(get_permalink() ?: home_url('/oficina/')),
             'brief'     => $this->brief_options(),
             'first_meeting' => \MAD_Oficina\Visitors\FirstMeeting::available(),
+            'chat'      => (new \MAD_Oficina\Visitors\VisitorChat($s))->enabled(),
             'rooms'     => \MAD_Oficina\Core\Agents\Characters::ROOMS,
         ] + (array) $config;
     }
@@ -129,6 +133,23 @@ return new class($core) implements MAD_Oficina_Module {
         $s['portal_url'] = esc_url_raw($p['portal_url'] ?? '') ?: home_url('/oficina/');
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
         $this->back(['tab' => 'settings'], __('Ajustes guardados.', 'mad-oficina'));
+    }
+
+    public function handle_visitor_chat_settings(){
+        $this->guard('visitor_chat_settings');
+        $p = wp_unslash($_POST);
+        $s = $this->settings();
+        $s['chat_enabled'] = ! empty($p['chat_enabled']);
+        $s['knowledge'] = mb_substr(sanitize_textarea_field($p['knowledge'] ?? ''), 0, 20000);
+        $s['chat_cap'] = max(0.05, min(50, (float) str_replace(',', '.', (string) ($p['chat_cap'] ?? 1))));
+        $s['chat_model'] = isset(\MAD_Oficina\Core\Agents\ClaudeClient::PRICES[$p['chat_model'] ?? '']) ? $p['chat_model'] : 'claude-haiku-5-5';
+        if ( $s['chat_enabled'] && str_contains($s['knowledge'], '[BORRADOR') ) {
+            $s['chat_enabled'] = false;
+            update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+            $this->back(['tab' => 'chat'], __('Guardado, pero la charla sigue apagada: quita la línea [BORRADOR…] de la ficha cuando la hayas revisado.', 'mad-oficina'), 'error');
+        }
+        update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+        $this->back(['tab' => 'chat'], __('Recepcionista guardada.', 'mad-oficina'));
     }
 
     public function handle_lead_update(){

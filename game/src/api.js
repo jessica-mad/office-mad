@@ -17,6 +17,7 @@ export function createApi(config) {
       const error = new Error(data?.message || 'Error de conexión');
       error.status = res.status;
       error.code = data?.code;
+      error.fallback = !!data?.data?.fallback; // the visitor chat suggests the forms instead
       throw error;
     }
     return data;
@@ -36,6 +37,7 @@ export function createApi(config) {
     clientBrief: (data) => request('portal/brief', { method: 'POST', body: data, withClient: false }),
     publicSlots: () => request('public/slots', { withClient: false }),
     visitorMeeting: (data) => request('public/meeting', { method: 'POST', body: data, withClient: false }),
+    visitorChat: (data) => request('public/chat', { method: 'POST', body: data, withClient: false }),
     visitorBrief: (data) => request('public/brief', { method: 'POST', body: data, withClient: false }),
     teamTasks: () => request('team/tasks', { withClient: false }),
   };

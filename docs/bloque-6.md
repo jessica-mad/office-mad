@@ -6,14 +6,13 @@ Se entrega por partes. Cada parte se puede desplegar sola.
 |---|---|
 | 1 · Leads y brief (también «Nuevo encargo» para clientes) | **Hecha** |
 | 2 · Primera reunión con confirmación por email | **Hecha** |
-| 3 · Charla con la recepcionista («Qué hacemos») | Pendiente |
+| 3 · Charla con la recepcionista («Qué hacemos») | **Hecha** (apagada hasta que revises la ficha) |
 | 4 · Oficina con las salas cerradas (solo un velo oscuro, sin rediseñar) | **Hecha** (adelantada) |
 
 ## Parte 1 · Leads y brief
 
 ### Qué ve un visitante en `/oficina`
 Si no ha iniciado sesión, ve la **recepción abierta**: un saludo de la recepcionista, tres botones y «Ya soy cliente: entrar».
-- **Qué hacemos** pone «Pronto» hasta la parte 3.
 - **Dejar un brief** abre un formulario con estos campos:
   - nombre, email, empresa y web;
   - qué necesita (web, ads, diseño, contenidos, vídeo u otra cosa);
@@ -95,3 +94,29 @@ Si la agenda no está conectada o no hay huecos, se le ofrece dejar un brief.
 - **Límites:** 2 peticiones al día por IP y por email.
 - **La consulta de huecos públicos** tiene un límite de 60 por hora por IP.
 - **Pequeña caché de 1 minuto** en los huecos que ve el visitante, para que nadie pueda saturar tu cuenta de Google. Al enviar el formulario y al aprobar, el hueco se comprueba siempre en directo.
+
+## Parte 3 · «Qué hacemos»: charla con la recepcionista
+### Qué hace
+- El visitante charla con la recepcionista sobre lo que hace MAD y cómo trabaja.
+- Cuando muestra interés, aparecen los botones **«Pedir una primera reunión»** y **«Dejar un brief»**.
+- La conversación se mantiene mientras tenga la pestaña abierta.
+
+### Lo que sabe y lo que no
+- **Solo sabe lo que pone la ficha de MAD,** que editas en **Leads → Recepcionista**.
+- **No tiene herramientas:** no ve clientes, ni la agenda, ni nada de la base de datos.
+- **No da precios ni plazos,** no promete resultados y no pide datos personales. Para dejar datos están los formularios, con su consentimiento y su confirmación.
+- **Lo que escribe el visitante son datos, no órdenes.** Si intenta cambiarle el papel, sigue siendo la recepcionista.
+
+### Límites y coste
+- **Haiku por defecto.** Se puede cambiar en la misma pestaña.
+- **Por charla y por visitante:** 15 mensajes por charla y 3 charlas al día.
+- **Turnstile** al empezar cada charla. Después, un pase firmado que solo vale para esa conexión durante 6 horas.
+- **Tope de gasto diario:** 1 $ para todos los visitantes juntos, configurable. Al llegar al tope, la charla se sustituye por los botones de reunión y brief.
+- **Las charlas se borran a los 30 días.** Mientras tanto puedes leerlas en **Leads → Recepcionista → Últimas charlas**, para ver qué pregunta la gente.
+
+### Qué tienes que hacer
+1. Ve a **MAD Oficina → Leads → Recepcionista**.
+2. Revisa la **ficha de MAD**. Es un borrador escrito sin poder leer imad.pro, porque la red de este entorno no llega a tu web. Corrígelo: servicios, forma de trabajar, casos que se puedan contar y preguntas frecuentes.
+3. Quita la primera línea `[BORRADOR…]`. Mientras esté, la charla no se puede activar.
+4. Marca **«Activar la charla para visitantes»** y guarda.
+5. Pruébala en una ventana privada.
