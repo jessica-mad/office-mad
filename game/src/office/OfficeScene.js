@@ -26,10 +26,11 @@ export default class OfficeScene extends Phaser.Scene {
 
   preload() {
     const a = this.opts.assets;
-    this.load.tilemapTiledJSON('office', a + 'office.json');
-    this.load.image('tiles', a + 'tileset.png');
+    const v = this.opts.v ? '?v=' + encodeURIComponent(this.opts.v) : ''; // cache-busting after a deploy
+    this.load.tilemapTiledJSON('office', a + 'office.json' + v);
+    this.load.image('tiles', a + 'tileset.png' + v);
     for (const slug of Object.keys(this.opts.me.characters)) {
-      this.load.spritesheet('char-' + slug, `${a}characters/${slug}.png`, { frameWidth: 32, frameHeight: 32 });
+      this.load.spritesheet('char-' + slug, `${a}characters/${slug}.png${v}`, { frameWidth: 32, frameHeight: 32 });
     }
   }
 

@@ -5,7 +5,7 @@ import OfficeScene from './OfficeScene.js';
  * Mounts the pixel office inside `container`.
  * @returns {Promise<{setStates(states:object):void, destroy():void}>}
  */
-export async function createOffice(container, { assets, me, onRoom, onCharacter }) {
+export async function createOffice(container, { assets, v, me, onRoom, onCharacter }) {
   // Bubbles and room plates use Silkscreen: make sure it is loaded before drawing text.
   try { await document.fonts.load('8px Silkscreen'); } catch { /* falls back to monospace */ }
 
@@ -24,7 +24,7 @@ export async function createOffice(container, { assets, me, onRoom, onCharacter 
       scene: [],
     });
     game.scene.add('office', OfficeScene, true, {
-      assets, me, onRoom, onCharacter,
+      assets, v, me, onRoom, onCharacter,
       onReady: (scene) => resolve({
         setStates: (states) => scene.setStates(states),
         // While an HTML dialog is open, clicks must not reach rooms/characters underneath.

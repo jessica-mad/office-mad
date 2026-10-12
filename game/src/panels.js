@@ -210,7 +210,7 @@ export const PANELS = {
           <label for="madof-topic">¿De qué quieres hablar? <span class="madof-meta">(opcional)</span></label>
           <textarea id="madof-topic" rows="2" maxlength="500"></textarea>
           <p class="madof-meta" aria-live="polite" data-status></p>
-          <button class="madof-btn" type="submit" disabled>${icon('check')} Pedir esta reunión</button>
+          <button class="madof-btn" type="submit">${icon('check')} Pedir esta reunión</button>
         </form>`;
     },
     mount(el, ctx) {
@@ -223,7 +223,6 @@ export const PANELS = {
       const pick = (b) => {
         slots.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
         chosen = Number(b.dataset.start);
-        button.disabled = false;
         status.textContent = `Has elegido: ${b.textContent.trim()}`;
       };
       slots.addEventListener('click', (e) => { const b = e.target.closest('button[data-start]'); if (b) pick(b); });
@@ -236,14 +235,14 @@ export const PANELS = {
         try {
           const res = await ctx.api.interpretAvailability(input.value.trim());
           slots.innerHTML = slotList(res.slots);
-          chosen = null; button.disabled = true;
+          chosen = null;
           status.textContent = res.slots.length ? 'Te he encontrado estos huecos.' : 'No hay huecos libres en esas fechas. Prueba con otras o elige uno de la lista.';
         } catch (err) { status.textContent = err.message; } finally { b.disabled = false; }
       });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!chosen) return;
+        if (!chosen) { status.textContent = 'Primero elige uno de los huecos de arriba.'; slots.querySelector('button')?.focus(); return; }
         button.disabled = true; status.textContent = 'Enviando…';
         try {
           const res = await ctx.api.requestMeeting(chosen, form.querySelector('textarea').value.trim());

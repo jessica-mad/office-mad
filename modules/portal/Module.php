@@ -54,9 +54,17 @@ return new class($core) implements MAD_Oficina_Module {
         (new \MAD_Oficina\Portal\Rest($this->receptionist()))->register();
     }
 
+    /** One version for the map and sprites: changes when any of them changes (e.g. new sprites). */
+    private function game_assets_version(){
+        $files = array_merge(glob(MAD_OFICINA_DIR . 'assets/game/*.{json,png}', GLOB_BRACE) ?: [], glob(MAD_OFICINA_DIR . 'assets/game/characters/*.png') ?: []);
+        $sig = '';
+        foreach ( $files as $f ) $sig .= basename($f) . filesize($f) . filemtime($f);
+        return substr(md5($sig), 0, 10);
+    }
+
     public function render_shortcode(){
         $base = MAD_OFICINA_URL . 'assets/';
-        wp_enqueue_style('mad-oficina-brand', $base . 'css/mad.css', [], MAD_OFICINA_VERSION);
+        wp_enqueue_style('mad-oficina-brand', $base . 'css/mad.css', [], MAD_Oficina_Core::asset_version('css/mad.css'));
 
         if ( ! is_user_logged_in() ) {
             ob_start();
@@ -67,14 +75,15 @@ return new class($core) implements MAD_Oficina_Module {
             return '<div class="madof-portal-note"><p>' . esc_html__('Tu usuario no tiene acceso a la oficina. Si crees que es un error, escribe a Jessica.', 'mad-oficina') . '</p></div>';
         }
 
-        wp_enqueue_style('mad-oficina-portal', $base . 'game/portal.css', ['mad-oficina-brand'], MAD_OFICINA_VERSION);
-        wp_enqueue_script_module('mad-oficina-portal', $base . 'game/portal.js', [], MAD_OFICINA_VERSION);
+        wp_enqueue_style('mad-oficina-portal', $base . 'game/portal.css', ['mad-oficina-brand'], MAD_Oficina_Core::asset_version('game/portal.css'));
+        wp_enqueue_script_module('mad-oficina-portal', $base . 'game/portal.js', [], MAD_Oficina_Core::asset_version('game/portal.js'));
 
         $config = [
             'rest'    => esc_url_raw(rest_url('mad-oficina/v1/')),
             'nonce'   => wp_create_nonce('wp_rest'),
             'assets'  => $base . 'game/',
-            'version' => MAD_OFICINA_VERSION,
+            'version' => MAD_Oficina_Core::asset_version('game/portal.js'),
+            'assets_v' => $this->game_assets_version(),
         ];
         return '<div id="mad-oficina" class="madof-app" data-config="' . esc_attr(wp_json_encode($config)) . '">'
             . '<p class="madof-app-loading">' . esc_html__('Abriendo la oficina…', 'mad-oficina') . '</p>'

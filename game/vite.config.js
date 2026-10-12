@@ -16,7 +16,7 @@ export default defineConfig({
       input: 'src/main.js',
       output: {
         entryFileNames: 'portal.js',
-        chunkFileNames: '[name].js',
+        chunkFileNames: '[name]-[hash].js', // new name on every build: never a stale cached office
         assetFileNames: (info) => (info.names?.[0] || '').endsWith('.css') ? 'portal.css' : '[name][extname]',
         manualChunks: (id) => (id.includes('node_modules/phaser') || id.includes('node_modules/easystarjs') || id.includes('/src/office/')) ? 'office' : undefined,
       },

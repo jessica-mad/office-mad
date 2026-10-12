@@ -143,6 +143,19 @@ final class MAD_Oficina_Core {
         exit;
     }
 
+    /**
+     * Version for an asset under assets/: changes whenever the file changes, so
+     * browsers and Cloudflare never keep an old build after a deploy.
+     */
+    public static function asset_version($relative){
+        static $cache = [];
+        if ( ! isset($cache[$relative]) ) {
+            $file = MAD_OFICINA_DIR . 'assets/' . $relative;
+            $cache[$relative] = MAD_OFICINA_VERSION . (is_readable($file) ? '-' . substr(md5_file($file), 0, 10) : '');
+        }
+        return $cache[$relative];
+    }
+
     public function init_modules_early(){
         $dir = MAD_OFICINA_DIR . 'modules';
         if ( ! is_dir($dir) ) return;
@@ -209,8 +222,8 @@ final class MAD_Oficina_Core {
     public function enqueue_admin_assets($hook){
         $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
         if ( strpos($page, self::MENU_SLUG_ROOT) !== 0 ) return;
-        wp_enqueue_style('mad-oficina-brand', MAD_OFICINA_URL.'assets/css/mad.css', [], MAD_OFICINA_VERSION);
-        wp_enqueue_style('mad-oficina-admin', MAD_OFICINA_URL.'assets/css/admin.css', ['mad-oficina-brand'], MAD_OFICINA_VERSION);
+        wp_enqueue_style('mad-oficina-brand', MAD_OFICINA_URL.'assets/css/mad.css', [], self::asset_version('css/mad.css'));
+        wp_enqueue_style('mad-oficina-admin', MAD_OFICINA_URL.'assets/css/admin.css', ['mad-oficina-brand'], self::asset_version('css/admin.css'));
     }
 
     public function admin_notices(){

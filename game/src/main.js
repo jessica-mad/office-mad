@@ -54,7 +54,7 @@ async function boot(root) {
         const { createOffice } = await import('./office/index.js');
         officeEl.querySelector('.madof-canvas').innerHTML = '';
         office = await createOffice(officeEl.querySelector('.madof-canvas'), {
-          assets: config.assets, me,
+          assets: config.assets, v: config.assets_v || config.version, me,
           onRoom: (room) => openRoom(room),
           onCharacter: (slug) => openCharacter(slug),
         });
