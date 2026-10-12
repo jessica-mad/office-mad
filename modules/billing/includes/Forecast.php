@@ -52,7 +52,7 @@ final class Forecast {
         $items = Agreements::between($from, $to);
         foreach ( $items as $it ) {
             $k = $key_for($it['client_id'], $it['profile_id'], $it['concept']);
-            foreach ( $months as $m ) if ( Agreements::covers($it, $m) ) $rows[$k]['confirmed'][$m] += $it['amount'];
+            foreach ( $months as $m ) if ( Agreements::covers($it, $m) && ! Calendar::skipped($it['id'], $m) ) $rows[$k]['confirmed'][$m] += $it['amount'];
         }
 
         $quotes = Quotes::all(['sent']);

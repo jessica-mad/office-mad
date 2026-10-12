@@ -344,6 +344,7 @@ final class Schema {
   currency char(3) NOT NULL DEFAULT 'EUR',
   status varchar(20) NOT NULL DEFAULT 'draft',
   issued_at datetime NULL,
+  asked_at datetime NULL,
   issuer longtext NULL,
   sent_at datetime NULL,
   paid tinyint(1) NOT NULL DEFAULT 0,
@@ -374,8 +375,11 @@ final class Schema {
   unit_price decimal(12,2) NOT NULL DEFAULT 0,
   amount decimal(12,2) NOT NULL DEFAULT 0,
   expense_id bigint(20) unsigned NULL,
+  item_id bigint(20) unsigned NULL,
+  item_month char(7) NULL,
   PRIMARY KEY  (id),
-  KEY invoice_id (invoice_id)",
+  KEY invoice_id (invoice_id),
+  KEY item (item_id,item_month)",
 
             // What a client pays: monthly fees (start → end, or open) and one-off jobs (one month).
             // Base amounts, without VAT. The forecast and the monthly drafts come from here.

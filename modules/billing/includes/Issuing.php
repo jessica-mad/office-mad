@@ -79,7 +79,11 @@ final class Issuing {
             $price = Money::parse((string) ($l['unit_price'] ?? ''));
             if ( $desc === '' && ! $price ) continue;
             $qty = $qty === null ? 1.0 : $qty;
-            $clean[] = ['description' => $desc, 'quantity' => $qty, 'unit_price' => (float) $price, 'amount' => Money::round($qty * (float) $price), 'expense_id' => isset($l['expense_id']) ? (int) $l['expense_id'] : null];
+            $clean[] = ['description' => $desc, 'quantity' => $qty, 'unit_price' => (float) $price, 'amount' => Money::round($qty * (float) $price),
+                'expense_id' => ! empty($l['expense_id']) ? (int) $l['expense_id'] : null,
+                // The agreement and month this line bills (calendar drafts): kept so it is never billed twice.
+                'item_id' => ! empty($l['item_id']) ? (int) $l['item_id'] : null,
+                'item_month' => ! empty($l['item_id']) ? Months::valid($l['item_month'] ?? '') : null];
         }
         if ( ! $clean ) return new \WP_Error('madof_inv_lines', __('Añade al menos un concepto con su importe.', 'mad-oficina'));
 
@@ -145,7 +149,7 @@ final class Issuing {
         foreach ( Approvals::for_object('invoice', $id) as $a ) {
             if ( in_array($a['status'], [Approvals::PENDING, Approvals::PROCESSING], true) ) return (int) $a['id'];
         }
-        return Approvals::create('contable', self::ACTION,
+        return Approvals::create('accountant', self::ACTION,
             sprintf(__('¿Emito la factura de %1$s por %2$s?', 'mad-oficina'), $inv['client_name'], Money::format($inv['total'])),
             ['invoice_id' => (int) $id],
             [

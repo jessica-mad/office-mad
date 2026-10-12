@@ -127,6 +127,8 @@ final class Invoices {
                 'unit_price' => $l['unit_price'] ?? $l['amount'],
                 'amount' => $l['amount'],
                 'expense_id' => $l['expense_id'] ?? null,
+                'item_id' => $l['item_id'] ?? null,
+                'item_month' => $l['item_month'] ?? null,
             ]);
         }
         return $id;

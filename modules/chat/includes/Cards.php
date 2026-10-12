@@ -44,11 +44,12 @@ final class Cards {
         if ( $extra_lines ) $text .= '<br><br>' . implode('<br>', array_map('esc_html', $extra_lines));
         return self::card('approval-' . $a['id'], self::who($a['agent']), $a['title'], [
             ['textParagraph' => ['text' => $text]],
-            ['buttonList' => ['buttons' => [
+            // Modules may offer their own options (e.g. invoices: Enviar / Editar / Posponer / Este mes no).
+            ['buttonList' => ['buttons' => apply_filters('madoficina_chat_approval_buttons', [
                 self::button(__('Aprobar tal cual', 'mad-oficina'), 'approve', ['approval_id' => $a['id']]),
                 self::link(__('Revisar en la web', 'mad-oficina'), $inbox_url . '#approval-' . $a['id']),
                 self::button(__('Descartar', 'mad-oficina'), 'reject', ['approval_id' => $a['id']]),
-            ]]],
+            ], $a)]],
         ]);
     }
 

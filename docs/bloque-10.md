@@ -7,7 +7,7 @@ Se entrega por partes.
 | 1 · Libro de facturas, histórico importado, clientes de facturación y resumen | **Hecha** |
 | 2 · Emitir desde la oficina: borrador → número → PDF con la plantilla MAD → envío (con tu aprobación) y «Libro MAD» en la unidad compartida | **Hecha** |
 | 2b · Previsión de ingresos: acuerdos (fees y encargos), presupuestos con probabilidad y vista mes a mes | **Hecha** |
-| 3 · Calendario de facturación: borradores automáticos y «¿Envío la factura de X?» por Chat | Siguiente |
+| 3 · Calendario de facturación: borradores automáticos y «¿Envío la factura de X?» por Chat | **Hecha** |
 
 ## Parte 1 · Libro de facturas
 
@@ -146,3 +146,33 @@ De momento se apuntan para la previsión; el documento A4 y el envío llegan con
   - presupuestos enviados que han caducado.
 
 La Parte 3 usará estos acuerdos para preparar cada mes los borradores de factura.
+
+## Parte 3 · Calendario de facturación
+
+**Facturación → Calendario.**
+
+### Activarlo
+1. Marca **«Preparar los borradores…»**.
+2. Elige **Empezar en**: por defecto, el mes que viene. Los meses anteriores no se tocan, así no se duplica lo que ya hiciste con la hoja antigua.
+3. Elige **cuántos días antes** se prepara el borrador (3 por defecto) y **desde qué hora** te pregunta (9:00).
+
+### Qué hace cada mes
+- **Unos días antes del día de cada cliente** (el 28, o el suyo, como DT), prepara el borrador con sus fees y encargos de ese mes:
+  - «Mantenimiento web · noviembre 2026»;
+  - «Landing Black Friday».
+- **Cada línea recuerda qué acuerdo y qué mes cobra.** Si editas el borrador, el enlace se mantiene. Nada se factura dos veces ni se queda sin facturar.
+- **Si ese mes ya hay otra factura del cliente hecha a mano**, el borrador lleva una nota para que revises que no se cobre dos veces.
+- **Si surge un encargo después de emitir la del mes**, prepara otro borrador solo con lo nuevo.
+- **El día que toca, te pregunta** en la bandeja y en Chat: **Enviar · Editar · Posponer 7 días · Este mes no**.
+  - **Posponer:** mueve la fecha (y el vencimiento) y te vuelve a preguntar ese día.
+  - **Este mes no:** quita el borrador y lo apunta, así no lo vuelve a preparar ni cuenta en la previsión.
+- **Argentina:** prepara el borrador y te avisa por Chat de que toca hacerla en la plataforma argentina.
+
+### La vista del mes
+Para cada cliente muestra:
+- el día;
+- qué se factura (con el número de factura si ya salió);
+- la base;
+- el estado: por preparar / borrador listo / esperando tu OK / emitida / enviada / este mes no.
+
+Desde aquí puedes **preparar ahora**, abrir, posponer o marcar «este mes no».

@@ -11,6 +11,7 @@ return new class($core) implements MAD_Oficina_Module {
     const APPROVAL_HOOK = 'madoficina_chat_approval';
     const MEETING_HOOK  = 'madoficina_chat_meeting';
     const NOTICE_HOOK   = 'madoficina_chat_autonomy_notice';
+    const NOTE_HOOK     = 'madoficina_chat_note';
 
     private $core;
 
@@ -65,6 +66,9 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('madoficina_meeting_approved', fn($id, $counts = [], $ctx = []) => $this->queue(self::MEETING_HOOK, [(int) $id, ! empty($ctx['notify_team']), ! empty($ctx['send_summary'])]), 10, 3);
         add_action('madoficina_autonomous_action', fn($id, $result = []) => $this->queue(self::NOTICE_HOOK, [(int) $id]), 10, 2);
         add_action(self::APPROVAL_HOOK, [$this, 'send_approval_card']);
+        // Plain note to Jessica from any module (e.g. «today the Argentine invoice is due»).
+        add_action('madoficina_notify_manager', fn($text) => $this->queue(self::NOTE_HOOK, [(string) $text]));
+        add_action(self::NOTE_HOOK, [$this, 'send_note']);
         add_action(self::NOTICE_HOOK, [$this, 'send_autonomy_notice']);
         add_action(self::MEETING_HOOK, [$this, 'send_meeting_messages'], 10, 3);
 
@@ -108,6 +112,11 @@ return new class($core) implements MAD_Oficina_Module {
         $res = $this->messenger()->to_manager(\MAD_Oficina\Chat\Cards::approval($a, admin_url('admin.php?page=mad-oficina-bandeja'), $lines));
         if ( is_wp_error($res) ) { $this->log_error('approval_card', $res->get_error_message(), $a['client_id']); return; }
         $wpdb->update(\MAD_Oficina\Core\Schema::table('approvals'), ['chat_message_name' => $res['name'] ?? null], ['id' => $a['id']]);
+    }
+
+    public function send_note($text){
+        $res = $this->messenger()->to_manager(['text' => \MAD_Oficina\Chat\Cards::who('accountant') . ': ' . $text]);
+        if ( is_wp_error($res) ) $this->log_error('note', $res->get_error_message());
     }
 
     /** An action that ran on its own ("hacerlo y avisarme") → short note to Jessica. */

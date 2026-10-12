@@ -5,6 +5,7 @@
  */
 use MAD_Oficina\Billing\Invoices;
 use MAD_Oficina\Billing\Money;
+use MAD_Oficina\Billing\Months;
 use MAD_Oficina\Billing\Profiles;
 use MAD_Oficina\Core\AdminUi;
 use MAD_Oficina\Core\Approvals;
@@ -73,7 +74,8 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
                 <tbody>
                 <?php foreach ( array_values($lines) as $i => $l ) : ?>
                     <tr>
-                        <td><textarea name="lines[<?php echo (int) $i; ?>][description]" rows="2" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"><?php echo esc_textarea((string) $l['description']); ?></textarea></td>
+                        <td><textarea name="lines[<?php echo (int) $i; ?>][description]" rows="2" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"><?php echo esc_textarea((string) $l['description']); ?></textarea>
+                            <?php if ( $draft && ! empty($l['item_id']) ) : ?><input type="hidden" name="lines[<?php echo (int) $i; ?>][item_id]" value="<?php echo (int) $l['item_id']; ?>"><input type="hidden" name="lines[<?php echo (int) $i; ?>][item_month]" value="<?php echo esc_attr($l['item_month']); ?>"><small class="madof-muted"><?php echo esc_html(sprintf(__('Del acuerdo · %s', 'mad-oficina'), Months::label($l['item_month']))); ?></small><?php endif; ?></td>
                         <td><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][quantity]" value="<?php echo esc_attr($num($l['quantity'] ?? 1)); ?>" class="madof-qty" aria-label="<?php esc_attr_e('Cantidad', 'mad-oficina'); ?>"></td>
                         <td><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][unit_price]" value="<?php echo esc_attr($l['unit_price'] === '' ? '' : number_format((float) $l['unit_price'], 2, ',', '')); ?>" class="madof-price" aria-label="<?php esc_attr_e('Precio', 'mad-oficina'); ?>"></td>
                         <td class="madof-amount">—</td>
@@ -105,6 +107,12 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <p class="description"><?php esc_html_e('«Pedir emisión» deja la factura en tu bandeja (y en Chat). El número se le da al aprobarla, así nunca quedan huecos.', 'mad-oficina'); ?></p>
     </form>
 
+    <?php if ( $draft && array_filter(array_column($draft['lines'], 'item_id')) ) : ?>
+    <?php echo AdminUi::form_open('billing_skip', 'madof-inline'); ?>
+        <input type="hidden" name="invoice_id" value="<?php echo (int) $draft['id']; ?>">
+        <button class="madof-link" onclick="return confirm('<?php echo esc_js(__('¿No facturar estos acuerdos este mes? Queda apuntado y no te lo vuelvo a preparar.', 'mad-oficina')); ?>')"><?php esc_html_e('Este mes no se factura', 'mad-oficina'); ?></button>
+    </form> ·
+    <?php endif; ?>
     <?php if ( $draft ) : ?>
     <?php echo AdminUi::form_open('billing_draft_delete', 'madof-inline'); ?>
         <input type="hidden" name="invoice_id" value="<?php echo (int) $draft['id']; ?>">
@@ -154,6 +162,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
       form.addEventListener('input', update);
       form.querySelector('.madof-add-line').addEventListener('click', function () {
         var row = body.rows[body.rows.length - 1].cloneNode(true);
+        [].forEach.call(row.querySelectorAll('input[type=hidden], small'), function (el) { el.remove(); }); // a new line is not an agreement's
         [].forEach.call(row.querySelectorAll('textarea, input'), function (el) { el.value = el.classList.contains('madof-qty') ? '1' : ''; });
         body.appendChild(row);
         renumber(); update();

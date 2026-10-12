@@ -10,6 +10,7 @@ if ( ! defined('ABSPATH') ) exit;
 return new class($core) implements MAD_Oficina_Module {
 
     const IMPORT_TRANSIENT = 'madof_billing_import_';
+    const CRON_HOOK = 'madoficina_billing_calendar';
 
     private $core;
 
@@ -44,7 +45,8 @@ return new class($core) implements MAD_Oficina_Module {
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
-            'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept'] as $a ) {
+            'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
+            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
@@ -56,6 +58,13 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_approval_form_' . $type, fn($html, $approval) => $this->issuing()->render_form($html, $approval), 10, 2);
         add_filter('madoficina_approval_default_input_' . $type, fn($input, $approval) => $this->issuing()->default_input($approval), 10, 2);
         add_action('madoficina_order_done', ['MAD_Oficina\\Billing\\Issuing', 'order_done'], 10, 4);
+
+        // Billing calendar: prepares the month's drafts and asks on each client's day.
+        add_action(self::CRON_HOOK, fn() => $this->calendar()->run());
+        add_action('madoficina_tick', fn() => $this->calendar()->run());
+        if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
+        add_filter('madoficina_chat_approval_buttons', ['MAD_Oficina\\Billing\\Calendar', 'chat_buttons'], 10, 2);
+        add_filter('madoficina_chat_action', ['MAD_Oficina\\Billing\\Calendar', 'chat_action'], 10, 5);
         // One client, two faces: the office card shows the fiscal data it invoices under.
         add_action('madoficina_client_edit_identity', [$this, 'render_client_identity']);
         add_action('madoficina_client_list_head', [$this, 'render_client_list_head']);
@@ -63,6 +72,10 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function admin_init(){}
+
+    public function calendar(){
+        return new \MAD_Oficina\Billing\Calendar($this->settings());
+    }
 
     public function issuing(){
         return new \MAD_Oficina\Billing\Issuing($this->settings());
@@ -368,6 +381,48 @@ return new class($core) implements MAD_Oficina_Module {
         $r = \MAD_Oficina\Billing\Quotes::accept(absint($_POST['quote_id'] ?? 0), absint($_POST['profile_id'] ?? 0), sanitize_text_field(wp_unslash($_POST['start_month'] ?? '')));
         if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message(), 'error');
         $this->back(['tab' => 'agreements'], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', count($r), 'mad-oficina'), count($r)));
+    }
+
+    /* ==== Billing calendar ==== */
+
+    public function handle_billing_calendar_settings(){
+        $this->guard('billing_calendar_settings');
+        $p = wp_unslash($_POST);
+        $s = $this->settings();
+        $s['calendar_enabled'] = ! empty($p['calendar_enabled']);
+        $s['calendar_from'] = \MAD_Oficina\Billing\Months::valid($p['calendar_from'] ?? '') ?: \MAD_Oficina\Billing\Months::add(\MAD_Oficina\Billing\Months::current(), 1);
+        $s['calendar_lead_days'] = max(0, min(15, (int) ($p['calendar_lead_days'] ?? 3)));
+        $s['calendar_hour'] = max(6, min(20, (int) ($p['calendar_hour'] ?? 9)));
+        update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+        $this->back(['tab' => 'calendar'], $s['calendar_enabled']
+            ? sprintf(__('Calendario activado desde %s. Prepararé cada borrador %d días antes y te preguntaré el día que toca.', 'mad-oficina'), \MAD_Oficina\Billing\Months::label($s['calendar_from']), $s['calendar_lead_days'])
+            : __('Calendario en pausa: no preparo borradores ni pregunto.', 'mad-oficina'));
+    }
+
+    /** «Preparar ahora»: the client's draft for the month, without waiting. */
+    public function handle_billing_prepare(){
+        $this->guard('billing_prepare');
+        $profile = \MAD_Oficina\Billing\Profiles::get(absint($_POST['profile_id'] ?? 0));
+        $month = \MAD_Oficina\Billing\Months::valid($_POST['month'] ?? '');
+        if ( ! $profile || ! $month ) $this->back(['tab' => 'calendar'], __('No sé qué preparar.', 'mad-oficina'), 'error');
+        $id = $this->calendar()->prepare_one($profile, $month);
+        if ( is_wp_error($id) ) $this->back(['tab' => 'calendar', 'month' => $month], $id->get_error_message(), 'error');
+        if ( ! $id ) $this->back(['tab' => 'calendar', 'month' => $month], __('Ese mes ya estaba todo facturado.', 'mad-oficina'));
+        global $wpdb;
+        $wpdb->update(\MAD_Oficina\Billing\Invoices::table(), ['source' => \MAD_Oficina\Billing\Calendar::SOURCE], ['id' => $id]);
+        $this->back(['edit' => $id], __('Borrador preparado con los acuerdos del mes. Revísalo y pide la emisión cuando quieras (o espera: te pregunto el día que toca).', 'mad-oficina'));
+    }
+
+    public function handle_billing_postpone(){
+        $this->guard('billing_postpone');
+        $r = \MAD_Oficina\Billing\Calendar::postpone(absint($_POST['invoice_id'] ?? 0), absint($_POST['days'] ?? 7));
+        $this->back(['tab' => 'calendar'], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
+    }
+
+    public function handle_billing_skip(){
+        $this->guard('billing_skip');
+        $r = \MAD_Oficina\Billing\Calendar::skip_invoice(absint($_POST['invoice_id'] ?? 0));
+        $this->back(['tab' => 'calendar'], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
     }
 
     /** The invoice as PDF with MAD's design (opens in the browser). */
