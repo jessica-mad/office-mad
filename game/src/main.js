@@ -89,7 +89,7 @@ async function boot(root) {
   }
 
   root.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-panel],a[data-panel],[data-room],[data-action]'); // not the dialog box, which also carries data-panel
+    const btn = e.target.closest('button[data-panel],a[data-panel],button[data-room],button[data-action]');
     if (!btn || !root.contains(btn)) return;
     if (btn.dataset.panel) dialog.open(btn.dataset.panel);
     else if (btn.dataset.room) openRoom(btn.dataset.room);
@@ -191,7 +191,7 @@ function createDialog(root, ctx, onToggle = () => {}) {
     if (backdrop.hidden) returnFocus = document.activeElement;
     kicker.textContent = panel.kicker;
     title.textContent = typeof panel.title === 'function' ? panel.title(ctx) : panel.title;
-    box.dataset.panel = name;
+    box.dataset.openPanel = name;
     backdrop.hidden = false;
     onToggle(true);
     if (panel.needsClient && ctx.me.role === 'manager' && !ctx.api.getClient()) {
@@ -205,7 +205,7 @@ function createDialog(root, ctx, onToggle = () => {}) {
       const html = await panel.render(ctx);
       if (my !== token) return;
       body.innerHTML = html;
-      panel.mount?.(body, ctx);
+      try { panel.mount?.(body, ctx); } catch (err) { console.error('[MAD Oficina]', err); }
     } catch (e) {
       if (my !== token) return;
       body.innerHTML = `<p class="madof-error">${esc(e.message)}</p>`;
@@ -214,5 +214,16 @@ function createDialog(root, ctx, onToggle = () => {}) {
   return { open, close };
 }
 
-const root = document.getElementById('mad-oficina');
-if (root) boot(root);
+// Self-contained start: does not rely on window.onload or on other scripts of
+// the theme/plugins (their errors cannot stop this module).
+function start() {
+  const root = document.getElementById('mad-oficina');
+  if (!root || root.dataset.booted) return;
+  root.dataset.booted = '1';
+  boot(root).catch((err) => {
+    console.error('[MAD Oficina]', err);
+    root.innerHTML = '<div class="madof-error">No se ha podido abrir la oficina. Recarga la página.</div>';
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+else start();

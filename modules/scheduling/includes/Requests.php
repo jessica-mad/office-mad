@@ -34,7 +34,21 @@ final class Requests {
         $now = time();
         $busy = Calendar::busy($now, $now + ((int) $rules['horizon_days'] + 1) * DAY_IN_SECONDS, $this->calendars());
         if ( is_wp_error($busy) ) return $busy;
-        return Slots::compute($rules, $busy, $now, $this->tz());
+        return Slots::compute($rules, array_merge($busy, $this->pending_holds()), $now, $this->tz());
+    }
+
+    /** Slots already asked for by someone and waiting in the inbox are not offered twice. */
+    private function pending_holds(){
+        global $wpdb;
+        $rows = $wpdb->get_col($wpdb->prepare(
+            'SELECT payload FROM ' . Schema::table('approvals') . " WHERE action_type = %s AND status IN ('pending','processing')", self::ACTION
+        ));
+        $holds = [];
+        foreach ( $rows as $json ) {
+            $p = json_decode($json, true);
+            if ( ! empty($p['start']) && ! empty($p['end']) ) $holds[] = [(int) $p['start'], (int) $p['end']];
+        }
+        return $holds;
     }
 
     public function present(array $slots){
@@ -70,7 +84,11 @@ final class Requests {
     /**
      * @return array|\WP_Error the request (approval) summary
      */
-    public function request($client_id, \WP_User $user, $start, $topic){
+    /**
+     * @param bool $test true when Jessica books from the portal to try it: the
+     *                   request is labelled as a test and only invites her.
+     */
+    public function request($client_id, \WP_User $user, $start, $topic, $test = false){
         if ( $this->pending_for_client($client_id) ) {
             return new \WP_Error('madof_req_pending', __('Ya tienes una petición de reunión pendiente. Jessica te responderá pronto.', 'mad-oficina'), ['status' => 409]);
         }
@@ -82,9 +100,10 @@ final class Requests {
 
         $client = Clients::get($client_id);
         $topic = mb_substr(sanitize_textarea_field((string) $topic), 0, 500);
-        $r = Approvals::request(self::AGENT, self::ACTION,
-            sprintf(__('%1$s pide reunión: %2$s', 'mad-oficina'), $client['name'], Slots::label($slot['start'], $this->tz())),
-            ['client_id' => $client_id, 'user_id' => $user->ID, 'email' => $user->user_email, 'name' => $user->display_name, 'start' => $slot['start'], 'end' => $slot['end'], 'topic' => $topic],
+        $title = sprintf(__('%1$s pide reunión: %2$s', 'mad-oficina'), $client['name'], Slots::label($slot['start'], $this->tz()));
+        if ( $test ) $title = __('[Prueba de gerencia]', 'mad-oficina') . ' ' . $title;
+        $r = Approvals::request(self::AGENT, self::ACTION, $title,
+            ['client_id' => $client_id, 'user_id' => $user->ID, 'email' => $user->user_email, 'name' => $user->display_name, 'start' => $slot['start'], 'end' => $slot['end'], 'topic' => $topic, 'test' => (bool) $test],
             ['client_id' => $client_id, 'summary' => $topic ?: __('Sin tema indicado.', 'mad-oficina')],
             ['start' => wp_date('Y-m-d\TH:i', $slot['start']), 'duration' => (int) $this->rules()['duration'], 'attendees' => $user->user_email]
         );
@@ -195,6 +214,7 @@ final class Requests {
             <label><?php esc_html_e('Invitados', 'mad-oficina'); ?>
                 <input type="text" name="input[attendees]" value="<?php echo esc_attr($p['email']); ?>"></label>
         </div>
+        <?php if ( ! empty($p['test']) ) : ?><p class="madof-warn"><?php esc_html_e('Reserva de prueba hecha por ti desde el portal: solo te invita a ti. Si apruebas, se crea un evento real en tu calendario.', 'mad-oficina'); ?></p><?php endif; ?>
         <label><?php esc_html_e('Tema', 'mad-oficina'); ?><textarea name="input[topic]" rows="2"><?php echo esc_textarea($p['topic'] ?? ''); ?></textarea></label>
         <label class="madof-check"><input type="checkbox" name="input[invite_contacts]" value="1"> <?php esc_html_e('Invitar también a los contactos del cliente que reciben resúmenes', 'mad-oficina'); ?></label>
         <p class="description"><?php esc_html_e('Al aprobar compruebo otra vez tu calendario, creo el evento con Meet y Google envía las invitaciones.', 'mad-oficina'); ?></p>

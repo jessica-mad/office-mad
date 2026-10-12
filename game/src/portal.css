@@ -144,3 +144,4 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-request strong::first-letter{text-transform:uppercase}
 .madof-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .madof-request .madof-lead:focus{outline:none}
+.madof-request.is-test{flex-direction:row;flex-wrap:wrap;align-items:center;font-size:15px}

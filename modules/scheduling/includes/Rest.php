@@ -51,13 +51,18 @@ final class Rest {
         return true;
     }
 
+    /** Client users book for themselves; Jessica can make a test booking for the client she has picked. */
     public function can_request(){
         $ok = $this->can_portal();
         if ( is_wp_error($ok) ) return $ok;
-        if ( ! ClientContext::client_for_user(get_current_user_id()) ) {
-            return new \WP_Error('rest_forbidden', __('Solo los clientes pueden pedir reunión desde aquí. Desde gerencia, créala en Calendar.', 'mad-oficina'), ['status' => 403]);
+        if ( ! $this->is_manager() && ! ClientContext::client_for_user(get_current_user_id()) ) {
+            return new \WP_Error('rest_forbidden', __('Solo los clientes pueden pedir reunión desde aquí.', 'mad-oficina'), ['status' => 403]);
         }
         return true;
+    }
+
+    private function is_manager(){
+        return current_user_can(Roles::CAP_MANAGE);
     }
 
     /** @return int|\WP_Error */
@@ -72,7 +77,8 @@ final class Rest {
         if ( is_wp_error($client_id) ) return $client_id;
         $out = [
             'request'  => $this->requests->status_for_client($client_id),
-            'can_book' => (bool) ClientContext::client_for_user(get_current_user_id()),
+            'can_book' => $this->is_manager() || (bool) ClientContext::client_for_user(get_current_user_id()),
+            'as_manager' => $this->is_manager(),
             'slots'    => [],
         ];
         if ( $out['request'] && in_array($out['request']['status'], ['pending', 'processing'], true) ) return rest_ensure_response($out);
@@ -92,7 +98,7 @@ final class Rest {
     public function create(\WP_REST_Request $req){
         $client_id = $this->client($req);
         if ( is_wp_error($client_id) ) return $client_id;
-        $r = $this->requests->request($client_id, wp_get_current_user(), (int) $req->get_param('start'), (string) $req->get_param('topic'));
+        $r = $this->requests->request($client_id, wp_get_current_user(), (int) $req->get_param('start'), (string) $req->get_param('topic'), $this->is_manager());
         return is_wp_error($r) ? $r : rest_ensure_response($r + ['request_status' => $this->requests->status_for_client($client_id)]);
     }
 

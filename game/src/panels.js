@@ -195,8 +195,11 @@ export const PANELS = {
         last = `<div class="madof-request">${pill('No pudo ser')}<p>Jessica no pudo el ${esc(r.label)}. Elige otro hueco, por favor.</p></div>`;
       }
       if (data.error) return last + `<p class="madof-lead">${esc(data.error)}</p>`;
-      if (!data.can_book) return last + `<p class="madof-meta">Vista previa de gerencia: estos son los huecos que vería el cliente.</p>${slotList(data.slots, true)}`;
-      return `${last}
+      if (!data.can_book) return last + `<p class="madof-meta">Estos son los huecos libres que vería el cliente.</p>${slotList(data.slots, true)}`;
+      const test = data.as_manager
+        ? `<p class="madof-request is-test">${pill('Prueba de gerencia', 'is-on')} La petición irá a tu bandeja marcada como prueba y solo te invitará a ti.</p>`
+        : '';
+      return `${last}${test}
         <p class="madof-lead">Estos huecos están libres ahora mismo en la agenda de Jessica. Elige uno:</p>
         <div class="madof-slots" role="radiogroup" aria-label="Huecos libres">${slotList(data.slots)}</div>
         <details class="madof-more madof-other-times"><summary>Ninguno me va bien</summary>
@@ -220,6 +223,7 @@ export const PANELS = {
       const status = form.querySelector('[data-status]');
       const slots = el.querySelector('.madof-slots');
       let chosen = null;
+      const isTest = !!el.querySelector('.is-test');
       const pick = (b) => {
         slots.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
         chosen = Number(b.dataset.start);
@@ -248,7 +252,7 @@ export const PANELS = {
           const res = await ctx.api.requestMeeting(chosen, form.querySelector('textarea').value.trim());
           el.innerHTML = res.status === 'approved'
             ? `<div class="madof-request is-ok">${pill('Confirmada', 'is-on')}<p class="madof-lead">¡Hecho! Reunión el <strong>${esc(res.label)}</strong>. Te llega la invitación de Google Calendar con el enlace de Meet.</p></div>`
-            : `<div class="madof-request is-pending">${pill('Pendiente', 'is-on')}<p class="madof-lead">Petición enviada para el <strong>${esc(res.label)}</strong>.</p><p>Jessica la confirma en cuanto la vea y te llegará la invitación por email.</p></div>`;
+            : `<div class="madof-request is-pending">${pill('Pendiente', 'is-on')}<p class="madof-lead">Petición enviada para el <strong>${esc(res.label)}</strong>.</p><p>${isTest ? 'Ya la tienes en tu bandeja como «Prueba de gerencia». Si la apruebas, se crea un evento real en tu calendario solo contigo.' : 'Jessica la confirma en cuanto la vea y te llegará la invitación por email.'}</p></div>`;
           el.querySelector('.madof-lead')?.setAttribute('tabindex', '-1');
           el.querySelector('.madof-lead')?.focus();
         } catch (err) {

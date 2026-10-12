@@ -119,6 +119,13 @@ class SchedulingTest extends MADOF_TestCase {
         $this->assertSame('meeting_request', $approval['action_type']);
         $this->assertEmpty(array_filter($this->calls, fn($c) => strpos($c['url'], '/events?') !== false), 'nothing is created before approval');
 
+        // The slot is no longer offered to anyone while it waits in the inbox.
+        $other = $this->make_client('OTR');
+        wp_set_current_user($this->make_client_user($other));
+        $this->assertNotContains($start, array_column($this->rest('GET', '/portal/meeting-requests')->get_data()['slots'], 'start'));
+        $this->assertSame(409, $this->rest('POST', '/portal/meeting-requests', ['start' => $start])->get_status());
+        wp_set_current_user((int) Approvals::get($res->get_data()['request'])['payload']['user_id']);
+
         // Only one pending request per client.
         $this->assertSame(409, $this->rest('POST', '/portal/meeting-requests', ['start' => $data['slots'][1]['start']])->get_status());
         $this->assertSame('pending', $this->rest('GET', '/portal/meeting-requests')->get_data()['request']['status']);
@@ -139,11 +146,27 @@ class SchedulingTest extends MADOF_TestCase {
         $this->assertSame($mine, Approvals::get($res->get_data()['request'])['client_id']);
     }
 
-    public function test_managers_preview_but_cannot_request(){
+    public function test_jessica_can_make_a_test_booking_for_the_chosen_client(){
         $client = $this->make_client('MOM');
-        wp_set_current_user($this->make_admin());
+        $admin = $this->make_admin();
+        wp_set_current_user($admin);
         $data = $this->rest('GET', '/portal/meeting-requests', ['client' => $client])->get_data();
-        $this->assertFalse($data['can_book']);
+        $this->assertTrue($data['can_book']);
+        $this->assertTrue($data['as_manager']);
+        $this->assertSame(400, $this->rest('POST', '/portal/meeting-requests', ['start' => $data['slots'][0]['start']])->get_status(), 'a client must be picked');
+
+        $res = $this->rest('POST', '/portal/meeting-requests', ['start' => $data['slots'][0]['start'], 'client' => $client]);
+        $this->assertSame(200, $res->get_status());
+        $a = Approvals::get($res->get_data()['request']);
+        $this->assertSame($client, $a['client_id']);
+        $this->assertTrue($a['payload']['test']);
+        $this->assertStringStartsWith('[Prueba de gerencia]', $a['title']);
+        $this->assertSame(get_userdata($admin)->user_email, $a['payload']['email'], 'only Jessica is invited');
+    }
+
+    public function test_team_members_cannot_book(){
+        $this->make_client('MOM');
+        wp_set_current_user(self::factory()->user->create(['role' => MAD_Oficina\Core\Roles::ROLE_TEAM]));
         $this->assertSame(403, $this->rest('POST', '/portal/meeting-requests', ['start' => time() + DAY_IN_SECONDS])->get_status());
         wp_set_current_user(0);
         $this->assertSame(401, $this->rest('GET', '/portal/meeting-requests')->get_status());
