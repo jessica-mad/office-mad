@@ -99,7 +99,7 @@ final class Clients {
         global $wpdb;
         $id = (int) $id;
         // Invoices must be kept by law: they are unlinked, never erased with the client.
-        foreach ( ['invoices', 'billing_profiles'] as $table ) {
+        foreach ( ['invoices', 'billing_profiles', 'billing_items', 'quotes'] as $table ) {
             $wpdb->update(Schema::table($table), ['client_id' => null], ['client_id' => $id]);
         }
         foreach ( array_merge(self::CONTENT_TABLES, ['contact_emails', 'client_contacts', 'client_users']) as $table ){

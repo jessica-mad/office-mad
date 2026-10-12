@@ -10,7 +10,7 @@ use MAD_Oficina\Core\Repo\Clients;
 
 if ( ! defined('ABSPATH') ) exit;
 $base = admin_url('admin.php?page=mad-oficina-facturacion');
-$tabs = ['invoices' => __('Facturas', 'mad-oficina'), 'summary' => __('Resumen', 'mad-oficina'), 'clients' => __('Clientes', 'mad-oficina'), 'import' => __('Importar histórico', 'mad-oficina'), 'settings' => __('Datos del emisor', 'mad-oficina')];
+$tabs = ['invoices' => __('Facturas', 'mad-oficina'), 'forecast' => __('Previsión', 'mad-oficina'), 'agreements' => __('Acuerdos', 'mad-oficina'), 'quotes' => __('Presupuestos', 'mad-oficina'), 'summary' => __('Resumen', 'mad-oficina'), 'clients' => __('Clientes', 'mad-oficina'), 'import' => __('Importar histórico', 'mad-oficina'), 'settings' => __('Datos del emisor', 'mad-oficina')];
 $years = Invoices::years();
 $year = isset($_GET['year']) ? absint($_GET['year']) : ($years[0] ?? (int) current_time('Y'));
 $money = fn($n) => Money::format($n);
@@ -86,6 +86,9 @@ $status_pill = function($inv){
             </details>
         <?php endif; ?>
     </section>
+
+<?php elseif ( in_array($tab, ['forecast', 'agreements', 'quotes'], true) ) :
+    include __DIR__ . '/' . $tab . '.php'; ?>
 
 <?php elseif ( $tab === 'summary' ) :
     $months = Invoices::monthly($year);

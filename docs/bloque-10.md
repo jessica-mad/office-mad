@@ -6,6 +6,7 @@ Se entrega por partes.
 |---|---|
 | 1 · Libro de facturas, histórico importado, clientes de facturación y resumen | **Hecha** |
 | 2 · Emitir desde la oficina: borrador → número → PDF con la plantilla MAD → envío (con tu aprobación) y «Libro MAD» en la unidad compartida | **Hecha** |
+| 2b · Previsión de ingresos: acuerdos (fees y encargos), presupuestos con probabilidad y vista mes a mes | **Hecha** |
 | 3 · Calendario de facturación: borradores automáticos y «¿Envío la factura de X?» por Chat | Siguiente |
 
 ## Parte 1 · Libro de facturas
@@ -105,3 +106,43 @@ Los borradores de la serie Argentina no se emiten aquí: se guardan y, desde su 
 
 ### Email
 El texto se edita en **Datos del emisor**. Admite `{numero}`, `{cliente}`, `{total}`, `{mes}` y `{vencimiento}`.
+
+## Parte 2b · Previsión de ingresos
+
+Todo es interno y sin IVA: lo ves solo tú.
+
+### Acuerdos
+Lo que paga cada cliente:
+- **Fee mensual:** concepto, importe al mes, desde y hasta (vacío = sin fin). Por ejemplo, RF hasta enero.
+- **Encargo puntual:** un importe en un mes concreto. Si se cobra en dos veces, son dos encargos.
+- **Cambiar importe desde un mes:** el fee anterior termina el mes de antes y empieza uno nuevo; el historial no se pierde.
+- **Terminar:** pones el último mes. **Borrar** es solo para lo que se metió por error.
+- **Fees que veo en tu histórico:** propone un fee para cada cliente facturado al menos 3 de los últimos 4 meses que aún no tenga uno. El fee arranca cuando empezó su importe actual. Tú revisas el importe y pones la fecha de fin si la sabes.
+
+### Presupuestos
+De momento se apuntan para la previsión; el documento A4 y el envío llegan con el bloque 11.
+- Pueden ir a un cliente con datos fiscales, a un *lead* o a un nombre libre.
+- Cada línea es **al mes** (desde un mes, N meses o sin fin) o **una vez** (en un mes).
+- **Probabilidad:** 10, 25, 50, 75 o 90 %.
+- **Estados:** borrador → enviado → aceptado / rechazado / caducado. Solo los enviados cuentan como «posible».
+- **¡Aceptado!:** eliges a quién se factura y en qué mes empieza; si arranca más tarde, todo el presupuesto se mueve. Sus líneas pasan a Acuerdos.
+
+### Previsión
+- **Tres resúmenes:**
+  - este mes;
+  - lo confirmado de los próximos 3 meses;
+  - los presupuestos en el aire.
+- **Gráfica mes a mes**, de los 3 meses pasados a los 9 siguientes:
+  - **negro**, lo facturado;
+  - **mostaza**, lo confirmado;
+  - **rayado**, lo posible.
+
+  Puedes ver lo posible ponderado por su probabilidad o al 100 %.
+- **Tabla por cliente**, con «falta X» donde lo acordado no se llegó a facturar.
+- **Avisos:**
+  - fees que terminan en los próximos 3 meses, y cuánto baja el mes siguiente;
+  - lo acordado y no facturado en los últimos 3 meses;
+  - el primer mes que va más de un 25 % por debajo de tu media de los últimos 6;
+  - presupuestos enviados que han caducado.
+
+La Parte 3 usará estos acuerdos para preparar cada mes los borradores de factura.

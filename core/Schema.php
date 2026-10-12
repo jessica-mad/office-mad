@@ -376,6 +376,65 @@ final class Schema {
   expense_id bigint(20) unsigned NULL,
   PRIMARY KEY  (id),
   KEY invoice_id (invoice_id)",
+
+            // What a client pays: monthly fees (start → end, or open) and one-off jobs (one month).
+            // Base amounts, without VAT. The forecast and the monthly drafts come from here.
+            'billing_items' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  profile_id bigint(20) unsigned NOT NULL,
+  client_id bigint(20) unsigned NULL,
+  kind varchar(10) NOT NULL DEFAULT 'monthly',
+  concept varchar(255) NOT NULL,
+  amount decimal(12,2) NOT NULL DEFAULT 0,
+  start_month char(7) NOT NULL,
+  end_month char(7) NULL,
+  quote_id bigint(20) unsigned NULL,
+  replaces_id bigint(20) unsigned NULL,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  notes text NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY profile_id (profile_id),
+  KEY client_id (client_id),
+  KEY months (status,start_month,end_month)",
+
+            // Quotes, for now only recorded (amounts, months, status, probability) for the forecast.
+            'quotes' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  number varchar(30) NULL,
+  year smallint(4) NOT NULL,
+  seq int(11) NULL,
+  title varchar(255) NOT NULL,
+  profile_id bigint(20) unsigned NULL,
+  client_id bigint(20) unsigned NULL,
+  lead_id bigint(20) unsigned NULL,
+  prospect_name varchar(190) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'draft',
+  probability tinyint(3) unsigned NOT NULL DEFAULT 50,
+  sent_on date NULL,
+  valid_until date NULL,
+  decided_at datetime NULL,
+  external_id varchar(128) NULL,
+  notes text NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY number (number),
+  KEY status (status),
+  KEY client_id (client_id)",
+
+            'quote_lines' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  quote_id bigint(20) unsigned NOT NULL,
+  position smallint(5) NOT NULL DEFAULT 0,
+  kind varchar(10) NOT NULL DEFAULT 'once',
+  concept varchar(255) NOT NULL,
+  amount decimal(12,2) NOT NULL DEFAULT 0,
+  start_month char(7) NOT NULL,
+  months smallint(5) unsigned NULL,
+  PRIMARY KEY  (id),
+  KEY quote_id (quote_id)",
         ];
     }
 }

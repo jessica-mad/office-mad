@@ -43,7 +43,8 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued'] as $a ) {
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
+            'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
@@ -308,6 +309,65 @@ return new class($core) implements MAD_Oficina_Module {
         $wpdb->update(\MAD_Oficina\Billing\Invoices::table(), ['status' => 'sent', 'sent_at' => \MAD_Oficina\Core\Time::now(), 'updated_at' => \MAD_Oficina\Core\Time::now()], ['id' => $id, 'series' => 'AR', 'status' => 'draft']);
         \MAD_Oficina\Billing\Issuing::queue_libro($id);
         $this->back(['invoice' => $id], __('Apuntada como emitida en Argentina.', 'mad-oficina'));
+    }
+
+    /* ==== Agreements and quotes (forecast) ==== */
+
+    private function back_to($default_tab, $notice, $type = 'success', array $extra = []){
+        $to = sanitize_key($_POST['return'] ?? '');
+        $this->back(['tab' => in_array($to, ['forecast', 'agreements', 'quotes'], true) ? $to : $default_tab] + $extra, $notice, $type);
+    }
+
+    public function handle_billing_item_create(){
+        $this->guard('billing_item_create');
+        $r = \MAD_Oficina\Billing\Agreements::create(wp_unslash($_POST));
+        if ( is_wp_error($r) ) $this->back_to('agreements', $r->get_error_message(), 'error');
+        $this->back_to('agreements', __('Acuerdo guardado. Ya cuenta en la previsión.', 'mad-oficina'));
+    }
+
+    public function handle_billing_item_end(){
+        $this->guard('billing_item_end');
+        $month = ! empty($_POST['reopen']) ? null : sanitize_text_field(wp_unslash($_POST['end_month'] ?? ''));
+        $r = \MAD_Oficina\Billing\Agreements::end(absint($_POST['item_id'] ?? 0), $month);
+        if ( is_wp_error($r) ) $this->back_to('agreements', $r->get_error_message(), 'error');
+        $this->back_to('agreements', $month === null ? __('El fee vuelve a ser sin fecha de fin.', 'mad-oficina') : sprintf(__('El fee termina en %s.', 'mad-oficina'), \MAD_Oficina\Billing\Months::label($month)));
+    }
+
+    public function handle_billing_item_change(){
+        $this->guard('billing_item_change');
+        $r = \MAD_Oficina\Billing\Agreements::change_amount(absint($_POST['item_id'] ?? 0), sanitize_text_field(wp_unslash($_POST['from_month'] ?? '')), sanitize_text_field(wp_unslash($_POST['amount'] ?? '')));
+        if ( is_wp_error($r) ) $this->back_to('agreements', $r->get_error_message(), 'error');
+        $this->back_to('agreements', __('Importe cambiado. El anterior queda en el historial hasta el mes de antes.', 'mad-oficina'));
+    }
+
+    public function handle_billing_item_cancel(){
+        $this->guard('billing_item_cancel');
+        \MAD_Oficina\Billing\Agreements::cancel(absint($_POST['item_id'] ?? 0));
+        $this->back_to('agreements', __('Acuerdo borrado de la previsión.', 'mad-oficina'));
+    }
+
+    public function handle_billing_quote_save(){
+        $this->guard('billing_quote_save');
+        $p = wp_unslash($_POST);
+        $id = absint($p['quote_id'] ?? 0);
+        $lines = [];
+        foreach ( (array) ($p['lines'] ?? []) as $l ) if ( is_array($l) ) $lines[] = $l;
+        $r = \MAD_Oficina\Billing\Quotes::save($p, $lines, $id);
+        if ( is_wp_error($r) ) $this->back(['tab' => 'quotes', 'quote' => $id ?: 'new'], $r->get_error_message(), 'error');
+        $this->back(['tab' => 'quotes'], __('Presupuesto guardado. Si está enviado, ya suma en «posible» de la previsión.', 'mad-oficina'));
+    }
+
+    public function handle_billing_quote_status(){
+        $this->guard('billing_quote_status');
+        $r = \MAD_Oficina\Billing\Quotes::set_status(absint($_POST['quote_id'] ?? 0), sanitize_key($_POST['status'] ?? ''));
+        $this->back_to('quotes', is_wp_error($r) ? $r->get_error_message() : __('Presupuesto actualizado.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+    }
+
+    public function handle_billing_quote_accept(){
+        $this->guard('billing_quote_accept');
+        $r = \MAD_Oficina\Billing\Quotes::accept(absint($_POST['quote_id'] ?? 0), absint($_POST['profile_id'] ?? 0), sanitize_text_field(wp_unslash($_POST['start_month'] ?? '')));
+        if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message(), 'error');
+        $this->back(['tab' => 'agreements'], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', count($r), 'mad-oficina'), count($r)));
     }
 
     /** The invoice as PDF with MAD's design (opens in the browser). */
