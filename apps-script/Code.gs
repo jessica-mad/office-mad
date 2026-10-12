@@ -421,7 +421,7 @@ function scanInvoices_() {
     var m = Gmail.Users.Messages.get('me', ids[i], { format: 'full' }), head = headers_(m), pdfs = pdfParts_(m.payload, []);
     var files = pdfs.map(function (part) {
       var data = part.body.attachmentId ? Gmail.Users.Messages.Attachments.get('me', m.id, part.body.attachmentId).data : part.body.data;
-      var bytes = Utilities.base64DecodeWebSafe(data);
+      var bytes = gmailBytes_(data);
       return { name: part.filename, bytes: bytes, hash: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)) };
     }).filter(function (f) { return f.bytes.length <= (cfg.max_bytes || 6291456); });
     if (files.length) {
@@ -433,6 +433,19 @@ function scanInvoices_() {
     }
     p.setProperty('INVOICE_CURSOR', String(Math.max(cursor, Math.floor(Number(m.internalDate) / 1000))));
   }
+}
+
+/**
+ * Attachment data from the Gmail advanced service: depending on the call it comes
+ * as bytes already or as web-safe base64 without the «=» padding (which
+ * base64DecodeWebSafe rejects with «Could not decode string»).
+ */
+function gmailBytes_(data) {
+  if (!data) return [];
+  if (typeof data !== 'string') return data;
+  var b64 = data.replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+  while (b64.length % 4) b64 += '=';
+  return Utilities.base64Decode(b64);
 }
 
 function headers_(m) {
