@@ -57,6 +57,7 @@ final class MAD_Oficina_Core {
         add_action('rest_api_init', [$this,'register_rest_routes']);
         add_action('admin_post_madof_toggle_module', [$this, 'handle_toggle_module']);
         add_action('admin_post_madof_approval_resolve', [$this, 'handle_approval_resolve']);
+        add_action('admin_post_madof_approval_bulk', [$this, 'handle_approval_bulk']);
         add_action('admin_post_madof_autonomy_save', [$this, 'handle_autonomy_save']);
         add_action('admin_notices', [$this,'admin_notices']);
 
@@ -128,8 +129,32 @@ final class MAD_Oficina_Core {
         } else {
             \MAD_Oficina\Core\AdminUi::flash($result['message'] ?? __('Hecho.', 'mad-oficina'));
         }
-        wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja' . ( ! empty($_POST['type']) ? '&type=' . sanitize_key($_POST['type']) : '' )));
         exit;
+    }
+
+    /** Several at once («Aprobar tal cual» / «Descartar»), or one from its folded line. */
+    public function handle_approval_bulk(){
+        if ( ! current_user_can(self::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        check_admin_referer('madof_approval_bulk');
+        $back = admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-bandeja' . ( ! empty($_POST['type']) ? '&type=' . sanitize_key($_POST['type']) : '' ));
+        if ( ! empty($_POST['one']) && preg_match('/^(approve|reject):(\d+)$/', (string) $_POST['one'], $m) ) {
+            [$decision, $ids] = [$m[1], [(int) $m[2]]];
+        } else {
+            $decision = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
+            $ids = array_map('absint', (array) ($_POST['ids'] ?? []));
+        }
+        if ( ! $ids ) {
+            \MAD_Oficina\Core\AdminUi::flash(__('Marca al menos una.', 'mad-oficina'), 'error');
+            wp_safe_redirect($back); exit;
+        }
+        $r = \MAD_Oficina\Core\Approvals::resolve_many($ids, $decision, get_current_user_id());
+        $msg = count($ids) === 1 && $r['done'] === 1
+            ? ($decision === 'approve' ? __('Aprobada.', 'mad-oficina') : __('Descartada.', 'mad-oficina'))
+            : sprintf($decision === 'approve' ? _n('%d aprobada.', '%d aprobadas.', $r['done'], 'mad-oficina') : _n('%d descartada.', '%d descartadas.', $r['done'], 'mad-oficina'), $r['done']);
+        if ( $r['errors'] ) $msg .= ' ' . sprintf(__('No se pudieron hacer (ábrelas y revísalas): %s', 'mad-oficina'), implode(' · ', $r['errors']));
+        \MAD_Oficina\Core\AdminUi::flash($msg, $r['errors'] ? 'error' : 'success');
+        wp_safe_redirect($back); exit;
     }
 
     public function handle_autonomy_save(){

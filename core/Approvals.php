@@ -64,12 +64,56 @@ final class Approvals {
         return $row ? self::hydrate($row) : null;
     }
 
-    public static function pending($limit = 50){
+    /**
+     * Kinds of request, for the inbox filters. «external» = approving it makes something
+     * leave the office (an email, an invoice, an event): bulk approval warns first.
+     */
+    public static function types(){
+        return apply_filters('madoficina_approval_types', [
+            'meeting_draft'   => ['label' => __('Actas de reunión', 'mad-oficina'), 'external' => true],
+            'meeting_request' => ['label' => __('Reuniones pedidas', 'mad-oficina'), 'external' => true],
+            'first_meeting'   => ['label' => __('Primeras reuniones', 'mad-oficina'), 'external' => true],
+            'client_reminder' => ['label' => __('Recordatorios a clientes', 'mad-oficina'), 'external' => true],
+            'invoice_issue'   => ['label' => __('Emitir facturas', 'mad-oficina'), 'external' => true],
+            'supplier_new'    => ['label' => __('Proveedores nuevos', 'mad-oficina'), 'external' => false],
+            'expense_review'  => ['label' => __('¿Es tuya?', 'mad-oficina'), 'external' => false],
+            'missing_invoice' => ['label' => __('Facturas que faltan', 'mad-oficina'), 'external' => false],
+        ]);
+    }
+
+    public static function pending($limit = 50, $type = ''){
         global $wpdb;
+        $where = "status IN ('pending','processing')" . ( $type ? $wpdb->prepare(' AND action_type = %s', $type) : '' );
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT * FROM ' . Schema::table('approvals') . " WHERE status IN ('pending','processing') ORDER BY created_at ASC LIMIT %d", $limit
+            'SELECT * FROM ' . Schema::table('approvals') . " WHERE {$where} ORDER BY created_at ASC LIMIT %d", $limit
         ), ARRAY_A);
         return array_map([self::class, 'hydrate'], $rows);
+    }
+
+    /** @return array<string,int> pending requests per kind */
+    public static function count_by_type(){
+        global $wpdb;
+        $out = [];
+        foreach ( $wpdb->get_results('SELECT action_type, COUNT(*) AS n FROM ' . Schema::table('approvals') . " WHERE status = 'pending' GROUP BY action_type", ARRAY_A) as $r ) $out[$r['action_type']] = (int) $r['n'];
+        return $out;
+    }
+
+    /**
+     * Several at once, each «tal cual» (the same values as Chat's «Aprobar tal cual»).
+     * @param int[] $ids
+     * @return array{done:int, errors:string[]}
+     */
+    public static function resolve_many(array $ids, $decision, $user_id = 0){
+        $done = 0; $errors = [];
+        foreach ( array_unique(array_map('intval', $ids)) as $id ) {
+            $a = self::get($id);
+            if ( ! $a || $a['status'] !== self::PENDING ) continue;
+            $input = $decision === 'approve' ? (array) apply_filters('madoficina_approval_default_input_' . $a['action_type'], [], $a) : [];
+            $r = self::resolve($id, $decision, $input, $user_id, 'bulk');
+            if ( is_wp_error($r) ) $errors[] = $a['title'] . ': ' . $r->get_error_message();
+            else $done++;
+        }
+        return ['done' => $done, 'errors' => $errors];
     }
 
     public static function recent_resolved($limit = 30){

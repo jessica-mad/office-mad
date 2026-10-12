@@ -149,3 +149,21 @@
 .madof-bar.is-first:hover::after,.madof-bar.is-first:focus::after{left:0;transform:none}
 .madof-bar.is-last:hover::after,.madof-bar.is-last:focus::after{left:auto;right:0;transform:none}
 .madof-nowrap{white-space:nowrap}
+/* Inbox: folded requests and bulk actions */
+.madof-bulk{position:sticky;top:32px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--y);border:2px solid var(--k);border-radius:14px;padding:10px 16px;margin:12px 0 6px}
+.madof-bulk label.madof-check{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.madof-bulk-count{font:400 11px/1 var(--madof-pixel);text-transform:uppercase;letter-spacing:.1em}
+.madof-bulk .madof-btn[disabled]{opacity:.45;cursor:not-allowed}
+.madof-approvals{display:flex;flex-direction:column;gap:8px;margin:12px 0 24px}
+details.madof-approval{background:var(--c);border:2px solid var(--k);border-radius:16px}
+details.madof-approval[open]{box-shadow:4px 4px 0 var(--k)}
+details.madof-approval > summary{list-style:none;display:flex;align-items:center;gap:14px;padding:12px 16px;cursor:pointer}
+details.madof-approval > summary::-webkit-details-marker{display:none}
+details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outline-offset:2px}
+.madof-pick{width:18px;height:18px;flex:none}
+.madof-approval-main{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.madof-approval-main strong{font-weight:500}
+.madof-approval-main small{color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.madof-approval-quick{display:flex;gap:6px;flex:none}
+.madof-approval-body{padding:4px 18px 16px;border-top:1px dashed rgba(11,11,11,.25)}
+@media (max-width:782px){.madof-bulk{top:46px}.madof-approval-main small{white-space:normal}}

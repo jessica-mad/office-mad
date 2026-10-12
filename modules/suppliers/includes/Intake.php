@@ -347,6 +347,10 @@ final class Intake {
             $supplier = Suppliers::get((int) $input['existing']);
             if ( ! $supplier ) return new \WP_Error('madof_supplier', __('Ese proveedor no existe.', 'mad-oficina'));
             if ( $from = self::address($e['sender']) ) Suppliers::add_email($supplier['id'], $from);
+        } elseif ( $known = Suppliers::match($input['tax_id'] ?? '', self::address($e['sender']), $input['name'] ?? '') ) {
+            // Already there (e.g. another of its invoices was approved first): joined, never duplicated.
+            $supplier = $known;
+            if ( $from = self::address($e['sender']) ) Suppliers::add_email($supplier['id'], $from);
         } else {
             $sid = Suppliers::save($input + ['expected_month' => $e['issue_date'] && ($input['periodicity'] ?? '') === 'yearly' ? (int) substr($e['issue_date'], 5, 2) : null]);
             if ( is_wp_error($sid) ) return $sid;
@@ -356,6 +360,18 @@ final class Intake {
         $this->queue_archive($id);
         do_action('madoficina_expense_registered', $id);
         $msg = sprintf(__('%s dado de alta y su factura registrada.', 'mad-oficina'), $supplier['name']);
+        // Its other invoices waiting with the same question are registered too.
+        $more = 0;
+        foreach ( Approvals::pending(500, self::NEW_SUPPLIER) as $other ) {
+            if ( (int) $other['id'] === (int) $approval['id'] ) continue;
+            $oe = Expenses::get((int) ($other['payload']['expense_id'] ?? 0));
+            if ( ! $oe ) continue;
+            $match = Suppliers::match((string) $oe['supplier_tax_id'], self::address($oe['sender']), (string) $oe['supplier_name']);
+            if ( ! $match || (int) $match['id'] !== (int) $supplier['id'] ) continue;
+            $r = Approvals::resolve($other['id'], 'approve', ['mode' => 'existing', 'existing' => $supplier['id']], get_current_user_id(), 'auto');
+            if ( ! is_wp_error($r) ) $more++;
+        }
+        if ( $more ) $msg .= ' ' . sprintf(_n('Y %d factura más suya que esperaba.', 'Y %d facturas más suyas que esperaban.', $more, 'mad-oficina'), $more);
         if ( ! empty($input['filter']) && $supplier['emails'] ) {
             Orders::queue('gmail_filter', ['from' => $supplier['emails'], 'label' => 'Facturas']);
             $msg .= ' ' . __('El cartero le pondrá la etiqueta «Facturas» en Gmail.', 'mad-oficina');

@@ -248,4 +248,16 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertStringContainsString('Fecha corregida', $e['notes'], 'the note survives registration');
         $this->assertTrue(\MAD_Oficina\Suppliers\Reader::is_pdf(str_repeat('x', 3000) . '%PDF-1.7'), 'signed documents wrap the PDF');
     }
+
+    public function test_one_new_supplier_with_several_invoices_is_approved_once(){
+        $ids = [];
+        foreach ( ['B-1', 'B-2', 'B-3'] as $n ) $ids[] = $this->receive($this->x(['number' => $n, 'issue_date' => '2026-0' . substr($n, 2) . '-03']))['expense_id'];
+        $cards = Approvals::pending(50, Intake::NEW_SUPPLIER);
+        $this->assertCount(3, $cards);
+        // Approving two at once (bulk): one supplier, all three invoices registered.
+        Approvals::resolve_many([$cards[0]['id'], $cards[1]['id']], 'approve', get_current_user_id());
+        $this->assertCount(1, Suppliers::all(), 'never duplicated');
+        foreach ( $ids as $id ) $this->assertSame('registered', Expenses::get($id)['status']);
+        $this->assertSame([], Approvals::pending(50, Intake::NEW_SUPPLIER), 'the other cards closed themselves');
+    }
 }
