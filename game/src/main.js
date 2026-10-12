@@ -43,12 +43,11 @@ async function boot(root) {
   let pollTimer = null;
 
   const prefersClassic = window.matchMedia('(max-width: 760px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // Visitors only have the reception (classic view) until the office with closed rooms arrives.
-  let view = me.role === 'visitor' ? 'classic' : (store.get('madof-view') || (prefersClassic ? 'classic' : 'office'));
+  let view = store.get('madof-view') || (prefersClassic ? 'classic' : 'office');
 
   async function setView(next) {
     view = next;
-    if (me.role !== 'visitor') store.set('madof-view', next);
+    store.set('madof-view', next);
     officeEl.hidden = next !== 'office';
     classicEl.hidden = next !== 'classic';
     if (toggle) {
@@ -85,13 +84,13 @@ async function boot(root) {
   }
 
   function openRoom(room) {
-    if (me.role === 'visitor') return dialog.open('recepcion');
+    if (me.role === 'visitor') return dialog.open(room === 'recepcion' ? 'recepcion' : 'solo-clientes');
     if (me.role === 'team') return dialog.open(room === 'estudio' ? 'mis-tareas' : 'recepcion');
     if (room === 'gerencia' && me.role !== 'manager') return dialog.open('privado');
     dialog.open(ROOM_PANEL[room] || 'recepcion');
   }
   function openCharacter(slug) {
-    if (me.role === 'visitor') return dialog.open('recepcion');
+    if (me.role === 'visitor') return dialog.open(slug === 'recepcionista' ? 'recepcion' : 'solo-clientes');
     if (me.role === 'team') return dialog.open(slug === 'liz' ? 'mis-tareas' : 'recepcion');
     if (slug === 'jessica' && me.role !== 'manager') return dialog.open('privado');
     dialog.open(CHARACTER_PANEL[slug] || 'recepcion');
@@ -151,7 +150,7 @@ function shell(me, api) {
       ${me.role === 'manager' ? `<label class="madof-picker"><span class="madof-kicker">Ver como</span>
         <select id="madof-client-picker"><option value="">Elige cliente…</option>${me.clients.map((c) => `<option value="${c.id}" ${c.id === api.getClient() ? 'selected' : ''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}</select></label>` : ''}
       <div class="madof-bar-actions">
-        ${visitor ? '' : '<button type="button" class="madof-btn is-ghost is-small" data-action="toggle-view" aria-pressed="false"></button>'}
+        <button type="button" class="madof-btn is-ghost is-small" data-action="toggle-view" aria-pressed="false"></button>
         ${visitor ? `<a class="madof-btn is-small" href="${esc(me.links.login)}">Ya soy cliente: entrar</a>` : `<a class="madof-link" href="${esc(me.links.logout)}">Salir</a>`}
       </div>
     </header>

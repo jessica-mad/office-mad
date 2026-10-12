@@ -86,6 +86,7 @@ export default class OfficeScene extends Phaser.Scene {
 
   buildRooms(map) {
     const manager = this.opts.me.role === 'manager';
+    const visitor = this.opts.me.role === 'visitor';
     for (const o of map.getObjectLayer('rooms').objects) {
       const label = (o.properties || []).find((p) => p.name === 'label')?.value || o.name;
       const zone = this.add.zone(o.x, o.y, o.width, o.height).setOrigin(0).setInteractive({ useHandCursor: true });
@@ -97,6 +98,18 @@ export default class OfficeScene extends Phaser.Scene {
       zone.on('pointerover', () => plate.setBackgroundColor('#FDF8EA'));
       zone.on('pointerout', () => plate.setBackgroundColor('#FBB62F'));
 
+      if (visitor && o.name !== 'recepcion') {
+        // Visitors only have the reception: other rooms fade to a dark veil (no new art,
+        // so it keeps working after the office redesign).
+        const veil = this.add.graphics().fillStyle(COLORS.k, 1).fillRect(o.x, o.y, o.width, o.height).setDepth(2500).setAlpha(0);
+        const sign = this.add.text(o.x + o.width / 2, o.y + o.height / 2, 'SOLO CLIENTES', {
+          fontFamily: FONT, fontSize: '8px', color: '#FBB62F', backgroundColor: '#0B0B0B', padding: { x: 4, y: 2 },
+        }).setOrigin(0.5).setResolution(2).setDepth(2600).setAlpha(0);
+        this.tweens.add({ targets: veil, alpha: 0.9, duration: 900, delay: 200, ease: 'Sine.easeOut' });
+        this.tweens.add({ targets: sign, alpha: 1, duration: 600, delay: 700 });
+        plate.setDepth(2600);
+        continue;
+      }
       if (o.name === 'gerencia' && !manager) {
         this.add.rectangle(o.x, o.y + T, o.width, o.height - T, COLORS.k, 0.28).setOrigin(0).setDepth(1500);
         plate.setText('GERENCIA · PRIVADO');

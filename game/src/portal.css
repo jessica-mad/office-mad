@@ -31,7 +31,7 @@
 .madof-stage:fullscreen{display:flex;align-items:center;justify-content:center}
 .madof-office{padding:12px}
 .madof-canvas{width:100%;aspect-ratio:48/30;max-height:78vh;display:flex;justify-content:center}
-.madof-canvas canvas{border-radius:12px;image-rendering:auto!important}
+.madof-canvas canvas{border-radius:12px;image-rendering:auto!important;background:#0B0B0B} /* opaque behind the canvas: semi-transparent overlays must not show the page through */
 .madof-canvas .madof-app-loading{color:var(--y);align-self:center}
 .madof-rooms{display:flex;flex-wrap:wrap;gap:6px;padding:10px 2px 2px;justify-content:center}
 .madof-rooms button{font:400 10px/1 var(--madof-pixel);letter-spacing:.12em;text-transform:uppercase;background:transparent;color:var(--c);border:1px solid rgba(253,248,234,.35);border-radius:999px;padding:7px 10px;cursor:pointer}
@@ -163,3 +163,4 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-consent input{margin-top:4px;width:18px;height:18px;accent-color:var(--k)}
 .madof-hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
 .madof-notice{margin-bottom:16px}
+.madof-actions-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}

@@ -7,7 +7,7 @@ Se entrega por partes. Cada parte se puede desplegar sola.
 | 1 · Leads y brief (también «Nuevo encargo» para clientes) | **Hecha** |
 | 2 · Primera reunión con confirmación por email | Pendiente |
 | 3 · Charla con la recepcionista («Qué hacemos») | Pendiente |
-| 4 · Oficina con las salas cerradas (solo un velo oscuro, sin rediseñar) | Pendiente |
+| 4 · Oficina con las salas cerradas (solo un velo oscuro, sin rediseñar) | **Hecha** (adelantada) |
 
 ## Parte 1 · Leads y brief
 
@@ -21,7 +21,7 @@ Si no ha iniciado sesión, ve la **recepción abierta**: un saludo de la recepci
   - plazo y presupuesto orientativo (opcional, en rangos);
   - casilla de consentimiento con el enlace a tu política de privacidad.
 
-Por ahora el visitante solo tiene la vista clásica. La oficina con las salas cerradas llega en la parte 4.
+El visitante también puede usar la vista oficina, igual que los clientes (en móvil empieza en la vista clásica). Ver la parte 4.
 
 ### Flujo
 1. El visitante envía el brief y recibe un email: «Confirma tu mensaje a MAD».
@@ -58,3 +58,11 @@ Al borrar un cliente, también se borran sus leads.
 4. Prueba los emails de confirmación:
    - Comprueba que tu web envía emails, porque son los que llegan a los visitantes. Si usas un plugin SMTP, se envían por él.
    - Haz una prueba sin iniciar sesión, por ejemplo en una ventana privada.
+
+## Parte 4 · Oficina con las salas cerradas
+- **Lo que ve el visitante:**
+  - la oficina completa, con la recepción iluminada y la recepcionista saludando;
+  - el resto de salas se oscurecen con un fundido y muestran el cartel «SOLO CLIENTES» en el centro;
+  - los personajes siguen trabajando en penumbra.
+- **Al pulsar una sala cerrada o a su personaje,** sale el panel «Solo para clientes» con dos botones: «Ya soy cliente: entrar» y «Dejar un brief». La recepción y la recepcionista abren el menú de recepción.
+- **Sin dibujos nuevos:** el velo es un rectángulo que se dibuja por código encima de cada sala del mapa. Seguirá funcionando igual después del rediseño de la oficina.

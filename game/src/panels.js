@@ -373,6 +373,13 @@ export const PANELS = {
     render: (ctx) => briefForm(ctx, { visitor: true }),
     mount: (el, ctx) => mountBrief(el, ctx, true),
   },
+  'solo-clientes': {
+    kicker: 'Oficina', title: 'Solo para clientes',
+    render: (ctx) => `<p class="madof-lead">Esta sala es para los clientes de MAD: aquí ven sus proyectos, reuniones y tareas.</p>
+      <p>Si ya trabajas con nosotros, entra con tu usuario. Si no, pasa por recepción y cuéntanos tu proyecto.</p>
+      <p class="madof-actions-row"><a class="madof-btn" href="${esc(ctx.me.links.login)}">Ya soy cliente: entrar</a>
+      <button type="button" class="madof-btn is-ghost" data-panel="brief">${icon('pencil')} Dejar un brief</button></p>`,
+  },
   'que-hacemos': { kicker: 'Recepción', title: 'Qué hacemos', render: () => soon('Muy pronto podrás charlar aquí con la recepcionista sobre lo que hacemos en MAD. Mientras tanto, déjanos un brief y te respondemos.') },
   'primera-reunion': { kicker: 'Recepción', title: 'Pedir una primera reunión', render: () => soon('Muy pronto podrás elegir aquí un hueco de la agenda de Jessica. Mientras tanto, déjanos un brief y te proponemos fecha.') },
   bandeja: {
