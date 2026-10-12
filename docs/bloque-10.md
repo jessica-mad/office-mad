@@ -45,3 +45,25 @@ Puedes importar el mismo archivo otra vez sin que se dupliquen las facturas.
 
 ### Conservación
 Las facturas no se borran nunca. Si se borra un cliente de la oficina, sus facturas se quedan y solo se desvinculan.
+
+## El PDF con el diseño de MAD
+
+El diseño de tus facturas actuales («Work invoice» en negro y mostaza, el logo MAD en círculo negro, tus datos a la izquierda, el cliente a la derecha, la tabla de conceptos, la forma de pago y los totales con el total en amarillo) ahora se maqueta **como texto de verdad**, en vez de escribir encima de una imagen de fondo. Eso corrige:
+- las etiquetas del cliente que se pisaban con los datos;
+- los totales desplazados una fila;
+- los importes sin formato (`731.79` → `731,79 €`);
+- la segunda página en blanco;
+- una sola línea de concepto: ahora caben tantas como haga falta.
+
+**Cómo está hecho:**
+- La cabecera es la de siempre, recortada de tu plantilla (`assets/billing/invoice-header.png`).
+- La tipografía es **Montserrat**, la misma que usa tu factura.
+- Tus datos (nombre, NIE, domicilio, IBAN, teléfono) **no van en ninguna imagen**: salen de **Facturación → Datos del emisor**.
+- Si una factura no lleva IRPF, la fila de IRPF no aparece.
+- Los borradores llevan la marca de agua «BORRADOR».
+- Se genera en tu propia web con dompdf (`lib/dompdf`, licencia LGPL) en unas décimas de segundo.
+
+**Para verla:** en la ficha de cualquier factura, pulsa **«Ver con el diseño MAD»**.
+
+## Surarquia
+No es de la serie Argentina: en la vista previa de la importación, desmárcala. Sus dos facturas de 2022 se enviaron sin número, así que se importan como borradores históricos, con una nota.

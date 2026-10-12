@@ -197,6 +197,7 @@ final class LegacyImport {
             } elseif ( $number === null ) {
                 if ( ! $r['base'] && ! $r['total'] && ! $r['sent'] ) { $count['skipped_empty']++; continue; }
                 $status = 'draft';
+                if ( $r['sent'] ) $notes[] = __('En la hoja antigua consta como enviada, pero sin número: revísala (si ya la cobraste, déjala como borrador histórico).', 'mad-oficina');
                 $count['drafts']++;
             } else {
                 $status = $r['sent'] ? 'sent' : 'issued';

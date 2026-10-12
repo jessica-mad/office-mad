@@ -42,6 +42,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     /* ==== Hooks ==== */
     public function init(){
+        add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
@@ -117,10 +118,27 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('billing_settings');
         $p = wp_unslash($_POST);
         $s = $this->settings();
-        foreach ( ['issuer_name', 'issuer_tax_id', 'issuer_address', 'issuer_city', 'issuer_email', 'issuer_iban'] as $k ) $s[$k] = sanitize_text_field($p[$k] ?? '');
+        foreach ( ['issuer_name', 'issuer_tagline', 'issuer_tax_label', 'issuer_tax_id', 'issuer_address', 'issuer_city', 'issuer_email', 'issuer_phone', 'payment_method', 'issuer_bank', 'issuer_iban'] as $k ) $s[$k] = sanitize_text_field($p[$k] ?? '');
         $s['payment_terms'] = sanitize_textarea_field($p['payment_terms'] ?? '');
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
         $this->back(['tab' => 'settings'], __('Datos del emisor guardados.', 'mad-oficina'));
+    }
+
+    /** The invoice as PDF with MAD's design (opens in the browser). */
+    public function handle_billing_pdf(){
+        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        $id = absint($_GET['invoice'] ?? 0);
+        check_admin_referer('madof_billing_pdf_' . $id);
+        $inv = \MAD_Oficina\Billing\Invoices::get($id);
+        if ( ! $inv ) wp_die(esc_html__('Esa factura no existe.', 'mad-oficina'), 404);
+        $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, $this->settings());
+        if ( is_wp_error($pdf) ) wp_die(esc_html($pdf->get_error_message()));
+        nocache_headers();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . rawurlencode(\MAD_Oficina\Billing\InvoicePdf::filename($inv)) . '"');
+        header('X-Content-Type-Options: nosniff');
+        echo $pdf; // binary PDF
+        exit;
     }
 
     public function render_settings_page(){

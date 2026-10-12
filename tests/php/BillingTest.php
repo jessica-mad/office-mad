@@ -131,6 +131,24 @@ class BillingTest extends MADOF_TestCase {
         $this->assertSame('15456125X', Profiles::norm_tax_id('15456125-X'));
     }
 
+    public function test_pdf_with_mad_design(){
+        LegacyImport::apply(LegacyImport::analyze($this->sample()), ['Estudio Pampa']);
+        $inv = Invoices::get(Invoices::all(['q' => '25-001'])[0]['id']);
+        $issuer = ['issuer_name' => 'Ana Prueba', 'issuer_tax_id' => 'X0000000T', 'issuer_iban' => 'ES00 0000 0000 0000 0000 0000'];
+        $html = MAD_Oficina\Billing\InvoicePdf::html($inv, $issuer);
+        $this->assertStringContainsString('25-001', $html);
+        $this->assertStringContainsString('1.000,00 €', $html);
+        $this->assertStringContainsString('−150,00 €', $html, 'IRPF shown as a deduction');
+        $this->assertStringContainsString('Taller Azul SL', $html);
+        $this->assertStringNotContainsString('BORRADOR', $html);
+        $pdf = MAD_Oficina\Billing\InvoicePdf::render($inv, $issuer);
+        $this->assertIsString($pdf);
+        $this->assertStringStartsWith('%PDF', $pdf);
+
+        $draft = Invoices::get(Invoices::all(['status' => 'draft', 'year' => 2026])[0]['id']);
+        $this->assertStringContainsString('BORRADOR', MAD_Oficina\Billing\InvoicePdf::html($draft, $issuer));
+    }
+
     public function test_erasing_a_client_keeps_its_invoices(){
         $client = $this->make_client('TAZ', 'Taller Azul');
         LegacyImport::apply(LegacyImport::analyze($this->sample()), []);

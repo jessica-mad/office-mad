@@ -46,7 +46,10 @@ $status_pill = function($inv){
             <tr><th scope="row"><?php echo esc_html(sprintf(__('IVA (%s %%)', 'mad-oficina'), rtrim(rtrim(number_format($inv['vat_rate'], 2, ',', ''), '0'), ','))); ?></th><td><?php echo esc_html($money($inv['vat'])); ?></td></tr>
             <tr><th scope="row"><?php echo esc_html(sprintf(__('IRPF (%s %%)', 'mad-oficina'), rtrim(rtrim(number_format($inv['irpf_rate'], 2, ',', ''), '0'), ','))); ?></th><td><?php echo esc_html(($inv['irpf'] > 0 ? '−' : '') . $money($inv['irpf'])); ?></td></tr>
             <tr><th scope="row"><?php esc_html_e('Total', 'mad-oficina'); ?></th><td><strong><?php echo esc_html($money($inv['total'])); ?></strong></td></tr>
-            <?php if ( $inv['pdf_url'] ) : ?><tr><th scope="row">PDF</th><td><a href="<?php echo esc_url($inv['pdf_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('Abrir el PDF', 'mad-oficina'); ?></a></td></tr><?php endif; ?>
+            <tr><th scope="row">PDF</th><td>
+                <?php if ( $inv['series'] !== 'AR' ) : ?><a class="madof-btn is-small" href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $inv['id']), 'madof_billing_pdf_' . $inv['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver con el diseño MAD', 'mad-oficina'); ?></a><?php endif; ?>
+                <?php if ( $inv['pdf_url'] ) : ?> <a href="<?php echo esc_url($inv['pdf_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('PDF original en Drive', 'mad-oficina'); ?></a><?php endif; ?>
+            </td></tr>
             <tr><th scope="row"><?php esc_html_e('Origen', 'mad-oficina'); ?></th><td><?php echo $inv['source'] === 'import' ? esc_html__('Importada de la hoja antigua', 'mad-oficina') : esc_html__('Creada en la oficina', 'mad-oficina'); ?></td></tr>
         </tbody></table>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' ) : ?>
@@ -201,15 +204,24 @@ $status_pill = function($inv){
             <span class="madof-kicker"><?php esc_html_e('Datos que salen en tus facturas', 'mad-oficina'); ?></span>
             <div class="madof-cols">
                 <label><?php esc_html_e('Nombre fiscal', 'mad-oficina'); ?><input type="text" name="issuer_name" value="<?php echo esc_attr($settings['issuer_name'] ?? ''); ?>"></label>
-                <label><?php esc_html_e('NIF', 'mad-oficina'); ?><input type="text" name="issuer_tax_id" value="<?php echo esc_attr($settings['issuer_tax_id'] ?? ''); ?>"></label>
-                <label><?php esc_html_e('Email', 'mad-oficina'); ?><input type="text" name="issuer_email" value="<?php echo esc_attr($settings['issuer_email'] ?? ''); ?>"></label>
+                <label><?php esc_html_e('Debajo del nombre', 'mad-oficina'); ?><input type="text" name="issuer_tagline" value="<?php echo esc_attr($settings['issuer_tagline'] ?? ''); ?>" placeholder="Publicista especializada en marketing y diseño."></label>
             </div>
             <div class="madof-cols">
-                <label><?php esc_html_e('Dirección', 'mad-oficina'); ?><input type="text" name="issuer_address" value="<?php echo esc_attr($settings['issuer_address'] ?? ''); ?>"></label>
-                <label><?php esc_html_e('Localidad y CP', 'mad-oficina'); ?><input type="text" name="issuer_city" value="<?php echo esc_attr($settings['issuer_city'] ?? ''); ?>"></label>
+                <label><?php esc_html_e('Documento', 'mad-oficina'); ?><input type="text" name="issuer_tax_label" value="<?php echo esc_attr($settings['issuer_tax_label'] ?? 'N.I.E.'); ?>" placeholder="N.I.E."></label>
+                <label><?php esc_html_e('Número', 'mad-oficina'); ?><input type="text" name="issuer_tax_id" value="<?php echo esc_attr($settings['issuer_tax_id'] ?? ''); ?>"></label>
+                <label><?php esc_html_e('Domicilio fiscal', 'mad-oficina'); ?><input type="text" name="issuer_address" value="<?php echo esc_attr($settings['issuer_address'] ?? ''); ?>"></label>
+                <label><?php esc_html_e('Localidad', 'mad-oficina'); ?><input type="text" name="issuer_city" value="<?php echo esc_attr($settings['issuer_city'] ?? ''); ?>"></label>
+            </div>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Teléfono (contacto)', 'mad-oficina'); ?><input type="text" name="issuer_phone" value="<?php echo esc_attr($settings['issuer_phone'] ?? ''); ?>"></label>
+                <label><?php esc_html_e('Email (contacto)', 'mad-oficina'); ?><input type="text" name="issuer_email" value="<?php echo esc_attr($settings['issuer_email'] ?? ''); ?>"></label>
+            </div>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Forma de pago', 'mad-oficina'); ?><input type="text" name="payment_method" value="<?php echo esc_attr($settings['payment_method'] ?? 'Transferencia bancaria'); ?>"></label>
+                <label><?php esc_html_e('Banco', 'mad-oficina'); ?><input type="text" name="issuer_bank" value="<?php echo esc_attr($settings['issuer_bank'] ?? ''); ?>"></label>
                 <label><?php esc_html_e('IBAN', 'mad-oficina'); ?><input type="text" name="issuer_iban" value="<?php echo esc_attr($settings['issuer_iban'] ?? ''); ?>"></label>
             </div>
-            <label><?php esc_html_e('Forma de pago (texto al pie)', 'mad-oficina'); ?><textarea name="payment_terms" rows="2"><?php echo esc_textarea($settings['payment_terms'] ?? ''); ?></textarea></label>
+            <label><?php esc_html_e('Nota bajo el pago (opcional)', 'mad-oficina'); ?><textarea name="payment_terms" rows="2"><?php echo esc_textarea($settings['payment_terms'] ?? ''); ?></textarea></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>
     </form>
