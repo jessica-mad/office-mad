@@ -1,5 +1,6 @@
 node_modules/
-vendor/
+/vendor/
 .phpunit.result.cache
 /tests/wp-tests-config.php
 .DS_Store
+!lib/dompdf/vendor/
