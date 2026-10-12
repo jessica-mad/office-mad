@@ -265,6 +265,33 @@ final class Schema {
   created_at datetime NOT NULL,
   PRIMARY KEY  (id),
   KEY client_thread (client_id,thread)",
+
+            // Briefs and first-meeting requests from visitors (and «Nuevo encargo» from clients).
+            'leads' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  client_id bigint(20) unsigned NULL,
+  name varchar(190) NOT NULL,
+  email varchar(190) NOT NULL,
+  company varchar(190) NULL,
+  website varchar(255) NULL,
+  services text NULL,
+  message longtext NULL,
+  timeline varchar(40) NULL,
+  budget varchar(40) NULL,
+  source varchar(20) NOT NULL DEFAULT 'brief',
+  status varchar(20) NOT NULL DEFAULT 'new',
+  verify_hash char(64) NULL,
+  verified_at datetime NULL,
+  consent_at datetime NULL,
+  ip_hash char(64) NULL,
+  approval_id bigint(20) unsigned NULL,
+  notes text NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY email (email),
+  KEY status (status),
+  KEY client_id (client_id)",
         ];
     }
 }

@@ -14,11 +14,15 @@ async function boot(root) {
   const config = JSON.parse(root.dataset.config || '{}');
   const api = createApi(config);
   let me;
-  try {
-    me = await api.me();
-  } catch (e) {
-    root.innerHTML = `<div class="madof-error">${esc(e.message)}</div>`;
-    return;
+  if (config.visitor) {
+    me = visitorMe(config);
+  } else {
+    try {
+      me = await api.me();
+    } catch (e) {
+      root.innerHTML = `<div class="madof-error">${esc(e.message)}</div>`;
+      return;
+    }
   }
 
   if (me.role === 'manager') {
@@ -39,15 +43,18 @@ async function boot(root) {
   let pollTimer = null;
 
   const prefersClassic = window.matchMedia('(max-width: 760px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let view = store.get('madof-view') || (prefersClassic ? 'classic' : 'office');
+  // Visitors only have the reception (classic view) until the office with closed rooms arrives.
+  let view = me.role === 'visitor' ? 'classic' : (store.get('madof-view') || (prefersClassic ? 'classic' : 'office'));
 
   async function setView(next) {
     view = next;
-    store.set('madof-view', next);
+    if (me.role !== 'visitor') store.set('madof-view', next);
     officeEl.hidden = next !== 'office';
     classicEl.hidden = next !== 'classic';
-    toggle.innerHTML = next === 'office' ? `${icon('grid')}<span>Vista clásica</span>` : `${icon('game')}<span>Vista oficina</span>`;
-    toggle.setAttribute('aria-pressed', String(next === 'office'));
+    if (toggle) {
+      toggle.innerHTML = next === 'office' ? `${icon('grid')}<span>Vista clásica</span>` : `${icon('game')}<span>Vista oficina</span>`;
+      toggle.setAttribute('aria-pressed', String(next === 'office'));
+    }
     if (next === 'office' && !office) {
       officeEl.querySelector('.madof-canvas').innerHTML = '<p class="madof-app-loading">Encendiendo las luces de la oficina…</p>';
       try {
@@ -68,7 +75,7 @@ async function boot(root) {
 
   function schedulePoll() {
     clearInterval(pollTimer);
-    if (view !== 'office') return;
+    if (view !== 'office' || me.role === 'visitor') return;
     const tick = async () => {
       if (document.hidden || !office) return;
       try { office.setStates((await api.state()).characters); } catch { /* keep last state */ }
@@ -78,11 +85,13 @@ async function boot(root) {
   }
 
   function openRoom(room) {
+    if (me.role === 'visitor') return dialog.open('recepcion');
     if (me.role === 'team') return dialog.open(room === 'estudio' ? 'mis-tareas' : 'recepcion');
     if (room === 'gerencia' && me.role !== 'manager') return dialog.open('privado');
     dialog.open(ROOM_PANEL[room] || 'recepcion');
   }
   function openCharacter(slug) {
+    if (me.role === 'visitor') return dialog.open('recepcion');
     if (me.role === 'team') return dialog.open(slug === 'liz' ? 'mis-tareas' : 'recepcion');
     if (slug === 'jessica' && me.role !== 'manager') return dialog.open('privado');
     dialog.open(CHARACTER_PANEL[slug] || 'recepcion');
@@ -114,8 +123,25 @@ async function boot(root) {
   setView(view);
 }
 
+function visitorMe(config) {
+  return {
+    role: 'visitor', user: { name: '' }, client: null, clients: [],
+    characters: config.characters || {}, rooms: config.rooms || {},
+    chat: { enabled: false }, links: { login: config.login, privacy: config.privacy || null },
+  };
+}
+
+// Back from the confirmation email (?madof=confirmado).
+function notice() {
+  const v = new URLSearchParams(window.location.search).get('madof');
+  if (v === 'confirmado') return '<div class="madof-request is-ok madof-notice" role="status"><p class="madof-lead">¡Confirmado! Jessica ya tiene tu mensaje y te responderá pronto.</p></div>';
+  if (v === 'enlace-no-valido') return '<div class="madof-request madof-notice" role="status"><p>Ese enlace no es válido o ya se usó. Si tu mensaje no llegó, vuelve a enviarlo.</p></div>';
+  return '';
+}
+
 function shell(me, api) {
-  const who = me.role === 'client' ? me.client?.name : me.role === 'team' ? 'Equipo MAD' : (me.clients.find((c) => c.id === api.getClient())?.name || 'Gerencia');
+  const visitor = me.role === 'visitor';
+  const who = visitor ? 'Recepción abierta' : me.role === 'client' ? me.client?.name : me.role === 'team' ? 'Equipo MAD' : (me.clients.find((c) => c.id === api.getClient())?.name || 'Gerencia');
   const rooms = Object.entries(me.rooms).filter(([slug]) => slug !== 'gerencia' || me.role === 'manager');
   return `
   <div class="madof-shell">
@@ -125,8 +151,8 @@ function shell(me, api) {
       ${me.role === 'manager' ? `<label class="madof-picker"><span class="madof-kicker">Ver como</span>
         <select id="madof-client-picker"><option value="">Elige cliente…</option>${me.clients.map((c) => `<option value="${c.id}" ${c.id === api.getClient() ? 'selected' : ''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}</select></label>` : ''}
       <div class="madof-bar-actions">
-        <button type="button" class="madof-btn is-ghost is-small" data-action="toggle-view" aria-pressed="false"></button>
-        <a class="madof-link" href="${esc(me.links.logout)}">Salir</a>
+        ${visitor ? '' : '<button type="button" class="madof-btn is-ghost is-small" data-action="toggle-view" aria-pressed="false"></button>'}
+        ${visitor ? `<a class="madof-btn is-small" href="${esc(me.links.login)}">Ya soy cliente: entrar</a>` : `<a class="madof-link" href="${esc(me.links.logout)}">Salir</a>`}
       </div>
     </header>
     <div class="madof-stage">
@@ -139,6 +165,7 @@ function shell(me, api) {
       </section>
       <section class="madof-classic" hidden aria-label="Recepción">
         <div class="madof-reception">
+          ${notice()}
           <div class="madof-reception-head">
             <span class="madof-kicker">Recepción</span>
             <h2 class="madof-reception-title">${esc(greeting(me))}</h2>
@@ -148,7 +175,9 @@ function shell(me, api) {
       </section>
     </div>
     <footer class="madof-foot">
-      Las reuniones pueden grabarse y transcribirse para preparar los resúmenes y las tareas. Tratamos tus datos solo para gestionar tu proyecto${me.links.privacy ? ` (<a href="${esc(me.links.privacy)}">política de privacidad</a>)` : ''}.
+      ${visitor
+        ? `Solo guardamos lo que nos envíes, para responderte${me.links.privacy ? ` (<a href="${esc(me.links.privacy)}">política de privacidad</a>)` : ''}.`
+        : `Las reuniones pueden grabarse y transcribirse para preparar los resúmenes y las tareas. Tratamos tus datos solo para gestionar tu proyecto${me.links.privacy ? ` (<a href="${esc(me.links.privacy)}">política de privacidad</a>)` : ''}.`}
     </footer>
   </div>
   <div class="madof-backdrop" hidden>

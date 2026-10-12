@@ -40,14 +40,22 @@ export const MENU = [
   { panel: 'facturas', label: 'Mis facturas y presupuestos', icon: 'receipt', soon: true },
   { panel: 'campanas', label: 'Mis campañas', icon: 'megaphone', soon: true },
   { panel: 'reunion', label: 'Pedir una reunión', icon: 'plus' },
-  { panel: 'encargo', label: 'Nuevo encargo', icon: 'pencil', soon: true },
+  { panel: 'encargo', label: 'Nuevo encargo', icon: 'pencil' },
   { panel: 'chat', label: 'Escribir libremente', icon: 'chat', chat: true },
 ];
 
+export const VISITOR_MENU = [
+  { panel: 'que-hacemos', label: 'Qué hacemos', icon: 'chat', soon: true },
+  { panel: 'primera-reunion', label: 'Pedir una primera reunión', icon: 'calendar', soon: true },
+  { panel: 'brief', label: 'Dejar un brief', icon: 'pencil' },
+];
+
 export function menuButtons(me, { compact = false } = {}) {
-  const items = me.role === 'team'
+  const items = me.role === 'visitor' ? VISITOR_MENU
+    : me.role === 'team'
     ? [{ panel: 'mis-tareas', label: 'Mis encargos', icon: 'check' }]
-    : MENU.filter((m) => !m.chat || me.chat.enabled).concat(me.role === 'manager' ? [{ panel: 'bandeja', label: 'Bandeja de gerencia', icon: 'inbox' }] : []);
+    : MENU.map((m) => (m.panel === 'encargo' ? { ...m, soon: !me.brief } : m))
+      .filter((m) => !m.chat || me.chat.enabled).concat(me.role === 'manager' ? [{ panel: 'bandeja', label: 'Bandeja de gerencia', icon: 'inbox' }] : []);
   return `<div class="madof-menu ${compact ? 'is-compact' : ''}">${items.map((m) => `
     <button type="button" class="madof-menu-btn" data-panel="${m.panel}">
       <span class="madof-menu-icon">${icon(m.icon)}</span><span class="madof-menu-label">${esc(m.label)}${m.soon ? '<span class="madof-tag">Pronto</span>' : ''}</span>
@@ -58,7 +66,97 @@ export function greeting(me) {
   const r = me.characters.recepcionista;
   const who = me.user.name ? `, ${me.user.name}` : '';
   if (me.role === 'team') return `¡Hola${who}! Soy ${r.name}. Aquí tienes tus encargos.`;
+  if (me.role === 'visitor') return `¡Hola! Soy ${r.name}, de la recepción de MAD. ¿En qué te puedo ayudar?`;
   return `¡Hola${who}! Soy ${r.name}, de recepción. ¿Qué necesitas hoy?`;
+}
+
+/* ───────────── brief form (visitors and «Nuevo encargo») ───────────── */
+function briefForm(ctx, { visitor = false, preview = false } = {}) {
+  const o = (visitor ? ctx.config.brief : ctx.me.brief) || { services: {}, timelines: {}, budgets: {} };
+  const opts = (map, sel) => Object.entries(map).map(([k, l]) => `<option value="${esc(k)}" ${k === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const privacy = ctx.config.privacy || ctx.me.links?.privacy;
+  return `
+  <form class="madof-brief" novalidate>
+    ${visitor ? `<p class="madof-lead">Cuéntanos qué tienes entre manos. Jessica lo lee personalmente y te responde en uno o dos días laborables.</p>` : '<p class="madof-lead">¿Qué quieres que hagamos? Jessica lo revisa y te propone los siguientes pasos.</p>'}
+    ${visitor ? `<div class="madof-fields">
+      <label>Tu nombre <input name="name" autocomplete="name" required maxlength="120"></label>
+      <label>Email <input name="email" type="email" autocomplete="email" required maxlength="190"></label>
+      <label>Empresa o proyecto <span class="madof-meta">(opcional)</span><input name="company" autocomplete="organization" maxlength="160"></label>
+      <label>Web <span class="madof-meta">(opcional)</span><input name="website" inputmode="url" placeholder="tuweb.com" maxlength="250"></label>
+    </div>` : ''}
+    <fieldset class="madof-services"><legend>¿Qué necesitas?</legend>
+      ${Object.entries(o.services).map(([k, l]) => `<label class="madof-chip"><input type="checkbox" name="services" value="${esc(k)}"><span>${esc(l)}</span></label>`).join('')}
+    </fieldset>
+    <label>Cuéntanos el proyecto <textarea name="message" rows="5" required minlength="10" maxlength="4000" placeholder="Qué quieres conseguir, para quién, qué tienes ya hecho…"></textarea></label>
+    <div class="madof-fields">
+      <label>Plazo aproximado <select name="timeline">${opts(o.timelines, 'unknown')}</select></label>
+      <label>Presupuesto orientativo <span class="madof-meta">(opcional)</span><select name="budget">${opts(o.budgets, '')}</select></label>
+    </div>
+    ${visitor ? `
+    <div class="madof-hp" aria-hidden="true"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></div>
+    <label class="madof-consent"><input type="checkbox" name="consent" value="1" required>
+      <span>Acepto que MAD guarde estos datos para responderme${privacy ? ` (<a href="${esc(privacy)}" target="_blank" rel="noopener">política de privacidad</a>)` : ''}.</span></label>
+    ${ctx.config.turnstile ? '<div class="madof-turnstile"></div>' : ''}` : ''}
+    <p class="madof-meta" aria-live="polite" data-status></p>
+    <button class="madof-btn" type="submit" ${preview ? 'disabled' : ''}>${icon('send')} Enviar</button>
+  </form>`;
+}
+
+let turnstileScript = null;
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  turnstileScript ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = () => resolve(window.turnstile);
+    s.onerror = () => { turnstileScript = null; reject(new Error('Turnstile')); };
+    document.head.appendChild(s);
+  });
+  return turnstileScript;
+}
+
+function mountBrief(el, ctx, visitor) {
+  const form = el.querySelector('form.madof-brief');
+  if (!form) return;
+  const status = form.querySelector('[data-status]');
+  const button = form.querySelector('button[type=submit]');
+  let token = '';
+  let widget = null;
+  const box = form.querySelector('.madof-turnstile');
+  if (box) {
+    loadTurnstile()
+      .then((ts) => { widget = ts.render(box, { sitekey: ctx.config.turnstile, language: 'es', callback: (t) => { token = t; }, 'expired-callback': () => { token = ''; } }); })
+      .catch(() => { status.textContent = 'No se ha podido cargar la comprobación anti-robots. Recarga la página.'; });
+  }
+  form.addEventListener('input', () => { if (!button.disabled) status.textContent = ''; });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const data = Object.fromEntries([...f.entries()].filter(([k]) => k !== 'services'));
+    data.services = f.getAll('services');
+    if (visitor) {
+      if (!data.name?.trim()) { status.textContent = 'Dinos tu nombre.'; return form.elements.name.focus(); }
+      if (!form.elements.email.checkValidity() || !data.email) { status.textContent = 'Revisa el email.'; return form.elements.email.focus(); }
+      if (!data.consent) { status.textContent = 'Marca la casilla de consentimiento para poder enviarlo.'; return form.elements.consent.focus(); }
+      if (box && !token) { status.textContent = 'Espera un segundo a la comprobación anti-robots.'; return; }
+      data.turnstile = token;
+      data.return = window.location.href.split('#')[0];
+    }
+    if ((data.message || '').trim().length < 10) { status.textContent = 'Cuéntanos un poco más del proyecto.'; return form.elements.message.focus(); }
+    button.disabled = true; status.textContent = 'Enviando…';
+    try {
+      const res = await (visitor ? ctx.api.visitorBrief(data) : ctx.api.clientBrief(data));
+      el.innerHTML = res.verify
+        ? `<div class="madof-request is-ok">${pill('Casi listo', 'is-on')}<p class="madof-lead" tabindex="-1">Te hemos enviado un email a <strong>${esc(data.email)}</strong>.</p><p>Abre el enlace para confirmar que es tuyo y tu mensaje llegará a Jessica. Si no lo ves, mira en spam.</p></div>`
+        : `<div class="madof-request is-ok">${pill('Enviado', 'is-on')}<p class="madof-lead" tabindex="-1">¡Gracias! Jessica ya tiene tu encargo.</p><p>Lo revisa y te propone los siguientes pasos.</p></div>`;
+      el.querySelector('.madof-lead')?.focus();
+    } catch (err) {
+      status.textContent = err.message;
+      button.disabled = false;
+      if (widget !== null) { window.turnstile?.reset(widget); token = ''; }
+    }
+  });
 }
 
 /* ───────────── panels ───────────── */
@@ -261,7 +359,22 @@ export const PANELS = {
       });
     },
   },
-  encargo: { kicker: 'Recepción', title: 'Nuevo encargo', render: () => soon('Pronto podrás contarnos un nuevo encargo con un pequeño formulario de briefing.') },
+  encargo: {
+    kicker: 'Recepción', title: 'Nuevo encargo',
+    render: (ctx) => {
+      if (!ctx.me.brief) return soon('Pronto podrás contarnos un nuevo encargo con un pequeño formulario de briefing.');
+      if (ctx.me.role !== 'client') return `<p class="madof-meta">Este formulario es para tus clientes: lo que envíen te llega a Leads y a tu Chat.</p>${briefForm(ctx, { preview: true })}`;
+      return briefForm(ctx, { visitor: false });
+    },
+    mount: (el, ctx) => mountBrief(el, ctx, false),
+  },
+  brief: {
+    kicker: 'Recepción', title: 'Cuéntanos tu proyecto',
+    render: (ctx) => briefForm(ctx, { visitor: true }),
+    mount: (el, ctx) => mountBrief(el, ctx, true),
+  },
+  'que-hacemos': { kicker: 'Recepción', title: 'Qué hacemos', render: () => soon('Muy pronto podrás charlar aquí con la recepcionista sobre lo que hacemos en MAD. Mientras tanto, déjanos un brief y te respondemos.') },
+  'primera-reunion': { kicker: 'Recepción', title: 'Pedir una primera reunión', render: () => soon('Muy pronto podrás elegir aquí un hueco de la agenda de Jessica. Mientras tanto, déjanos un brief y te proponemos fecha.') },
   bandeja: {
     kicker: 'Despacho de gerencia', title: 'Bandeja de gerencia',
     render: ({ me }) => {

@@ -128,7 +128,7 @@ final class Rest {
             $data['inbox'] = ['pending' => \MAD_Oficina\Core\Approvals::count_pending(), 'url' => admin_url('admin.php?page=mad-oficina-bandeja')];
             $data['clients'] = array_map(fn($c) => ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']], Clients::all(['status' => 'active']));
         }
-        return rest_ensure_response($data);
+        return rest_ensure_response(apply_filters('madoficina_portal_me', $data, $user)); // other modules add their bits (e.g. the brief form)
     }
 
     public function chat_history(\WP_REST_Request $req){

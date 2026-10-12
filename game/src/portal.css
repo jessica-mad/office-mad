@@ -145,3 +145,21 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .madof-request .madof-lead:focus{outline:none}
 .madof-request.is-test{flex-direction:row;flex-wrap:wrap;align-items:center;font-size:15px}
+
+/* Brief form */
+.madof-brief{display:flex;flex-direction:column;gap:14px}
+.madof-brief label{display:flex;flex-direction:column;gap:4px;font-weight:500;font-size:15px}
+.madof-brief input:not([type=checkbox]),.madof-brief select,.madof-brief textarea{width:100%;box-sizing:border-box;font:300 16px/1.4 var(--madof-font);padding:10px 12px;border:2px solid var(--k);border-radius:12px;background:#fff;color:var(--k)}
+.madof-brief input:focus-visible,.madof-brief select:focus-visible,.madof-brief textarea:focus-visible{outline:3px solid var(--y);outline-offset:1px}
+.madof-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.madof-services{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}
+.madof-services legend{font-weight:500;font-size:15px;margin-bottom:6px;padding:0}
+.madof-chip{flex-direction:row!important;align-items:center}
+.madof-chip input{position:absolute;opacity:0;width:1px;height:1px}
+.madof-chip span{display:inline-block;padding:7px 14px;border:2px solid var(--k);border-radius:999px;background:var(--c);font-weight:400;cursor:pointer}
+.madof-chip input:checked + span{background:var(--y);box-shadow:2px 2px 0 var(--k)}
+.madof-chip input:focus-visible + span{outline:3px solid var(--y);outline-offset:2px}
+.madof-consent{flex-direction:row!important;align-items:flex-start;gap:10px!important;font-weight:300!important}
+.madof-consent input{margin-top:4px;width:18px;height:18px;accent-color:var(--k)}
+.madof-hp{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
+.madof-notice{margin-bottom:16px}

@@ -15,7 +15,7 @@ final class Clients {
     const EMAIL_KINDS = ['work', 'personal'];
 
     /** Tables holding per-client content; used when erasing a client (GDPR). */
-    const CONTENT_TABLES = ['meetings', 'action_items', 'pending_topics', 'ideas', 'processes', 'tasks', 'approvals', 'agent_log', 'messages'];
+    const CONTENT_TABLES = ['meetings', 'action_items', 'pending_topics', 'ideas', 'processes', 'tasks', 'approvals', 'agent_log', 'messages', 'leads'];
 
     /* ===== Clients ===== */
 

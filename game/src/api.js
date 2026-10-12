@@ -8,7 +8,8 @@ export function createApi(config) {
     const res = await fetch(url, {
       method,
       credentials: 'same-origin',
-      headers: { 'X-WP-Nonce': config.nonce, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      // Visitors send no nonce (see the shortcode): a cached page would carry a stale one.
+      headers: { ...(config.nonce ? { 'X-WP-Nonce': config.nonce } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => null);
@@ -32,6 +33,8 @@ export function createApi(config) {
     meetingRequests: () => request('portal/meeting-requests'),
     requestMeeting: (start, topic) => request('portal/meeting-requests', { method: 'POST', body: { start, topic } }),
     interpretAvailability: (text) => request('portal/meeting-requests/interpret', { method: 'POST', body: { text } }),
+    clientBrief: (data) => request('portal/brief', { method: 'POST', body: data, withClient: false }),
+    visitorBrief: (data) => request('public/brief', { method: 'POST', body: data, withClient: false }),
     teamTasks: () => request('team/tasks', { withClient: false }),
   };
 }

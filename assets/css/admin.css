@@ -29,7 +29,7 @@
 .madof-form{display:flex;flex-direction:column;gap:14px;max-width:880px}
 .madof-form label{display:flex;flex-direction:column;gap:4px;font-weight:500;font-size:14px}
 .madof-form small{font-weight:300;color:#555}
-.madof-form input[type=text],.madof-form input[type=email],.madof-form input[type=password],.madof-form input[type=number],.madof-form input[type=date],.madof-form input[type=time],.madof-form input[type=datetime-local],.madof-form select,.madof-form textarea{font:300 15px/1.4 var(--madof-font);border:2px solid var(--k);border-radius:12px;padding:8px 12px;background:#fff;max-width:none}
+.madof-form input[type=text],.madof-form input[type=email],.madof-form input[type=password],.madof-form input[type=number],.madof-form input[type=url],.madof-form input[type=date],.madof-form input[type=time],.madof-form input[type=datetime-local],.madof-form select,.madof-form textarea{font:300 15px/1.4 var(--madof-font);border:2px solid var(--k);border-radius:12px;padding:8px 12px;background:#fff;max-width:none}
 .madof-form input:focus,.madof-form select:focus,.madof-form textarea:focus{outline:3px solid var(--y);outline-offset:1px;box-shadow:none;border-color:var(--k)}
 .madof-form .madof-btn{align-self:flex-start}
 .madof-form label.madof-check{flex-direction:row;align-items:center;gap:8px;font-weight:300}
@@ -91,3 +91,6 @@
 .madof-checklist li{display:flex;gap:8px;align-items:center}
 .madof-checklist li.is-ok .madof-icon{color:#1f6f2a}
 .madof-steps ul{margin:6px 0 6px 18px;list-style:disc}
+.madof-quote{background:var(--g);border-radius:16px;padding:16px 18px;margin:0 0 18px;white-space:normal;font-size:15px;line-height:1.6}
+.madof-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.madof-filters .madof-pill{text-decoration:none;color:var(--k)}
