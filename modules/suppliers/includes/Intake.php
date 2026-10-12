@@ -228,8 +228,8 @@ final class Intake {
 
     private function register_fields(array $supplier, array $x){
         $notes = null;
-        if ( $supplier['usual_amount'] && $x['total'] > $supplier['usual_amount'] * 1.1 ) {
-            $notes = sprintf(__('Ojo: %1$s es más de lo habitual (%2$s).', 'mad-oficina'), \MAD_Oficina\Billing\Money::format($x['total']), \MAD_Oficina\Billing\Money::format($supplier['usual_amount']));
+        if ( $supplier['usual_amount'] && ($x['currency'] ?? 'EUR') === $supplier['currency'] && $x['total'] > $supplier['usual_amount'] * 1.1 ) {
+            $notes = sprintf(__('Ojo: %1$s es más de lo habitual (%2$s).', 'mad-oficina'), Suppliers::money($x['total'], $supplier['currency']), Suppliers::money($supplier['usual_amount'], $supplier['currency']));
         }
         return ['status' => 'registered', 'reason' => $notes ? 'price_up' : null, 'supplier_id' => $supplier['id'],
             'supplier_name' => $supplier['name'], 'category' => $supplier['category'], 'client_id' => $supplier['client_id']]
@@ -352,7 +352,7 @@ final class Intake {
             $supplier = $known;
             if ( $from = self::address($e['sender']) ) Suppliers::add_email($supplier['id'], $from);
         } else {
-            $sid = Suppliers::save($input + ['expected_month' => $e['issue_date'] && ($input['periodicity'] ?? '') === 'yearly' ? (int) substr($e['issue_date'], 5, 2) : null]);
+            $sid = Suppliers::save($input + ['currency' => $e['currency'], 'expected_month' => $e['issue_date'] && ($input['periodicity'] ?? '') === 'yearly' ? (int) substr($e['issue_date'], 5, 2) : null]);
             if ( is_wp_error($sid) ) return $sid;
             $supplier = Suppliers::get($sid);
         }
@@ -432,7 +432,7 @@ final class Intake {
         $view = admin_url('admin.php?page=mad-oficina-gastos&expense=' . $e['id']);
         return '<p>' . esc_html(implode(' · ', array_filter([
             $e['supplier_name'], $e['supplier_tax_id'], $e['number'] ? sprintf(__('nº %s', 'mad-oficina'), $e['number']) : '',
-            $e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '', \MAD_Oficina\Billing\Money::format((float) $e['total']) . ($e['currency'] !== 'EUR' ? ' ' . $e['currency'] : ''),
+            $e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '', Suppliers::money((float) $e['total'], $e['currency']),
         ]))) . '<br><small>' . esc_html(sprintf(__('A nombre de: %s', 'mad-oficina'), trim(($e['recipient_name'] ?: '—') . ' ' . ($e['recipient_tax_id'] ?: '')))) . ' · ' . esc_html(sprintf(__('De: %s', 'mad-oficina'), $e['sender'] ?: __('subida manual', 'mad-oficina'))) . '</small>'
             . ' · <a href="' . esc_url($view) . '">' . esc_html__('Ver el gasto', 'mad-oficina') . '</a></p>';
     }

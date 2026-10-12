@@ -9,7 +9,7 @@ if ( ! defined('ABSPATH') ) exit;
 final class Installer {
 
     /** Bump whenever Schema or Roles change. */
-    const DB_VERSION        = 11; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end · 5: billing_profiles, invoices, invoice_lines · 6: client_users.areas · 7: invoices.due_date/issued_at/issuer, billing_profiles.billing_day/payment_days · 8: billing_items, quotes, quote_lines · 9: invoice_lines.item_id/item_month, invoices.asked_at · 10: suppliers, expenses · 11: expenses.received_at
+    const DB_VERSION        = 12; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end · 5: billing_profiles, invoices, invoice_lines · 6: client_users.areas · 7: invoices.due_date/issued_at/issuer, billing_profiles.billing_day/payment_days · 8: billing_items, quotes, quote_lines · 9: invoice_lines.item_id/item_month, invoices.asked_at · 10: suppliers, expenses · 11: expenses.received_at · 12: suppliers.currency
     const DB_VERSION_OPTION = 'madoficina_db_version';
 
     public static function activate(){
@@ -47,6 +47,13 @@ final class Installer {
      * @return array<int,callable>
      */
     private static function migrations(){
-        return [];
+        return [
+            // Suppliers created before they had a currency take the one of their latest invoice.
+            12 => function(){
+                global $wpdb;
+                $s = Schema::table('suppliers'); $e = Schema::table('expenses');
+                $wpdb->query("UPDATE {$s} s SET s.currency = COALESCE((SELECT e.currency FROM {$e} e WHERE e.supplier_id = s.id AND e.currency <> '' ORDER BY e.issue_date DESC, e.id DESC LIMIT 1), 'EUR')");
+            },
+        ];
     }
 }

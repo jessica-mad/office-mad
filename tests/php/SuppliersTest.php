@@ -260,4 +260,35 @@ class SuppliersTest extends MADOF_TestCase {
         foreach ( $ids as $id ) $this->assertSame('registered', Expenses::get($id)['status']);
         $this->assertSame([], Approvals::pending(50, Intake::NEW_SUPPLIER), 'the other cards closed themselves');
     }
+
+    public function test_repeated_suppliers_are_joined(){
+        global $wpdb;
+        $a = Suppliers::save(['name' => 'Anthropic, PBC', 'emails' => 'billing@mail.anthropic.example', 'periodicity' => 'monthly', 'expected_day' => 25]);
+        $b = Suppliers::save(['name' => 'Anthropic PBC', 'emails' => 'invoice+statements@mail.anthropic.example', 'service' => 'Claude']);
+        $c = Suppliers::save(['name' => 'Otra Cosa SL']);
+        foreach ( [$b, $b, $a] as $sid ) Expenses::insert(['supplier_id' => $sid, 'status' => 'registered', 'issue_date' => '2026-01-25', 'total' => 21.78]);
+        $this->assertContains(Suppliers::match('', '', 'ANTHROPIC, PBC.')['id'], [$a, $b], 'same name, legal form and punctuation aside');
+
+        $d = Suppliers::duplicates();
+        $this->assertCount(1, $d);
+        $this->assertSame($b, $d[0][0]['id'], 'the one with more invoices stays');
+        $this->assertTrue(Suppliers::merge($b, $a));
+        $kept = Suppliers::get($b);
+        $this->assertNull(Suppliers::get($a));
+        $this->assertEqualsCanonicalizing(['invoice+statements@mail.anthropic.example', 'billing@mail.anthropic.example'], $kept['emails']);
+        $this->assertSame(['monthly', 25, 'Claude'], [$kept['periodicity'], $kept['expected_day'], $kept['service']], 'details it lacked are kept');
+        $this->assertCount(3, Expenses::all(['supplier_id' => $b]));
+        $this->assertSame([], Suppliers::duplicates());
+        $this->assertWPError(Suppliers::merge($b, $b));
+    }
+
+    public function test_foreign_currency_supplier(){
+        $this->assertSame('1.650.000,00 COP', Suppliers::money(1650000, 'COP'));
+        $this->assertSame('21,78 €', Suppliers::money(21.78, 'EUR'));
+        $r = $this->receive($this->x(['supplier_name' => 'Diseño Andino', 'supplier_tax_id' => '', 'currency' => 'COP', 'base' => 1650000, 'vat' => 0, 'total' => 1650000]), 'Liz <liz@studio.example>');
+        $a = Approvals::for_object('expense', $r['expense_id'])[0];
+        Approvals::resolve($a['id'], 'approve', apply_filters('madoficina_approval_default_input_' . Intake::NEW_SUPPLIER, [], $a), get_current_user_id());
+        $s = Suppliers::match('', 'liz@studio.example', '');
+        $this->assertSame('COP', $s['currency']);
+    }
 }

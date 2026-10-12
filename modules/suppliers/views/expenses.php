@@ -115,7 +115,7 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
 <?php elseif ( $tab === 'suppliers' ) :
     $edit = $_GET['supplier'] ?? null;
     $s = $edit && $edit !== 'new' ? Suppliers::get(absint($edit)) : null;
-    if ( $edit ) : $s = $s ?: ['id' => 0, 'name' => '', 'tax_id' => '', 'emails' => [], 'service' => '', 'category' => 'software', 'periodicity' => 'monthly', 'expected_day' => null, 'expected_month' => null, 'usual_amount' => null, 'delivery' => 'email', 'panel_url' => '', 'client_id' => null, 'status' => 'active', 'notes' => '']; ?>
+    if ( $edit ) : $s = $s ?: ['id' => 0, 'name' => '', 'tax_id' => '', 'emails' => [], 'service' => '', 'category' => 'software', 'periodicity' => 'monthly', 'expected_day' => null, 'expected_month' => null, 'usual_amount' => null, 'currency' => 'EUR', 'delivery' => 'email', 'panel_url' => '', 'client_id' => null, 'status' => 'active', 'notes' => '']; ?>
     <?php echo AdminUi::form_open('supplier_save'); ?>
         <input type="hidden" name="supplier_id" value="<?php echo (int) $s['id']; ?>">
         <section class="madof-card">
@@ -132,6 +132,7 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
                 <label><?php esc_html_e('Día esperado', 'mad-oficina'); ?><input type="number" min="1" max="31" name="expected_day" value="<?php echo esc_attr((string) $s['expected_day']); ?>"></label>
                 <label><?php esc_html_e('Mes (anual / trimestral)', 'mad-oficina'); ?><input type="number" min="1" max="12" name="expected_month" value="<?php echo esc_attr((string) $s['expected_month']); ?>"></label>
                 <label><?php esc_html_e('Importe habitual', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="usual_amount" value="<?php echo $s['usual_amount'] ? esc_attr(number_format($s['usual_amount'], 2, ',', '')) : ''; ?>"></label>
+                <label><?php esc_html_e('Moneda', 'mad-oficina'); ?><input type="text" name="currency" maxlength="3" value="<?php echo esc_attr($s['currency'] ?? 'EUR'); ?>" style="width:80px"></label>
             </div>
             <div class="madof-cols">
                 <label><?php esc_html_e('Cómo llega la factura', 'mad-oficina'); ?><select name="delivery"><?php foreach ( Suppliers::DELIVERIES as $k => $l ) echo '<option value="' . esc_attr($k) . '" ' . selected($s['delivery'], $k, false) . '>' . esc_html__($l, 'mad-oficina') . '</option>'; ?></select></label>
@@ -143,7 +144,28 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>
     </form>
-    <?php else : $list = Suppliers::all(); ?>
+    <?php if ( $s['id'] && count($sup_names) > 1 ) : echo AdminUi::form_open('supplier_merge', 'madof-form madof-card'); ?>
+        <input type="hidden" name="keep" value="<?php echo (int) $s['id']; ?>">
+        <span class="madof-kicker"><?php esc_html_e('¿Está repetido?', 'mad-oficina'); ?></span>
+        <label><?php echo esc_html(sprintf(__('Unir con %s (sus facturas y emails pasan a esta ficha y la otra desaparece)', 'mad-oficina'), $s['name'])); ?>
+            <select name="remove[]" required><option value=""></option><?php foreach ( $sup_names as $id => $n ) if ( (int) $id !== (int) $s['id'] ) echo '<option value="' . (int) $id . '">' . esc_html($n) . '</option>'; ?></select></label>
+        <button class="madof-btn is-small is-ghost"><?php esc_html_e('Unir', 'mad-oficina'); ?></button>
+    </form><?php endif; ?>
+    <?php else : $list = Suppliers::all(); $dups = Suppliers::duplicates(); ?>
+    <?php if ( $dups ) : ?>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Parecen el mismo proveedor', 'mad-oficina'); ?></span>
+        <?php foreach ( $dups as $g ) : $keep = array_shift($g); ?>
+            <?php echo AdminUi::form_open('supplier_merge', 'madof-form madof-suggest'); ?>
+                <input type="hidden" name="keep" value="<?php echo (int) $keep['id']; ?>">
+                <?php foreach ( $g as $d ) echo '<input type="hidden" name="remove[]" value="' . (int) $d['id'] . '">'; ?>
+                <p><strong><?php echo esc_html($keep['name']); ?></strong> ×<?php echo count($g) + 1; ?>
+                    <small><?php echo esc_html(sprintf(__('%d facturas en total. Se queda la ficha con más facturas y se le suman las demás y sus emails.', 'mad-oficina'), $keep['invoices'] + array_sum(array_column($g, 'invoices')))); ?></small></p>
+                <button class="madof-btn is-small"><?php esc_html_e('Unir en uno', 'mad-oficina'); ?></button>
+            </form>
+        <?php endforeach; ?>
+    </section>
+    <?php endif; ?>
     <p><a class="madof-btn" href="<?php echo esc_url($base . '&tab=suppliers&supplier=new'); ?>"><?php esc_html_e('Nuevo proveedor', 'mad-oficina'); ?></a></p>
     <?php if ( ! $list ) : ?><p class="madof-empty"><?php esc_html_e('Aún no hay proveedores. Se dan de alta solos cuando apruebas sus facturas (o aquí, a mano).', 'mad-oficina'); ?></p><?php else : ?>
     <table class="madof-table">
@@ -156,7 +178,7 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
                     <?php if ( $s['emails'] ) echo '<br><small>' . esc_html(implode(', ', $s['emails'])) . '</small>'; ?></td>
                 <td><?php echo esc_html__(Suppliers::CATEGORIES[$s['category']] ?? $s['category'], 'mad-oficina'); ?></td>
                 <td><?php echo esc_html__(Suppliers::PERIODICITIES[$s['periodicity']] ?? '', 'mad-oficina'); ?><?php if ( $s['expected_day'] ) echo ' · ' . esc_html(sprintf(__('día %d', 'mad-oficina'), $s['expected_day'])); ?></td>
-                <td class="madof-nowrap"><?php echo $s['usual_amount'] ? esc_html(Money::format($s['usual_amount'])) : '—'; ?></td>
+                <td class="madof-nowrap"><?php echo $s['usual_amount'] ? esc_html(Suppliers::money($s['usual_amount'], $s['currency'])) : '—'; ?></td>
                 <td><?php echo $last ? esc_html(date_i18n('j M Y', strtotime($last))) : '—'; ?></td>
             </tr>
         <?php endforeach; ?>

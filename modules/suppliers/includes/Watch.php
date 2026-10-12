@@ -99,7 +99,7 @@ final class Watch {
                 Approvals::create(Reader::AGENT, self::ACTION,
                     sprintf(__('No me ha llegado la factura de %1$s (%2$s)', 'mad-oficina'), $s['name'], self::period_label($s, $exp)),
                     ['supplier_id' => $s['id'], 'expected' => $exp],
-                    ['object_type' => 'supplier', 'object_id' => $s['id'], 'summary' => trim(sprintf(__('La esperaba hacia el %s.', 'mad-oficina'), date_i18n('j/m', strtotime($exp))) . ($s['usual_amount'] ? ' ' . sprintf(__('Suele ser de %s.', 'mad-oficina'), Money::format($s['usual_amount'])) : '') . ' ' . __('La he buscado en tu Gmail y no está.', 'mad-oficina'))]);
+                    ['object_type' => 'supplier', 'object_id' => $s['id'], 'summary' => trim(sprintf(__('La esperaba hacia el %s.', 'mad-oficina'), date_i18n('j/m', strtotime($exp))) . ($s['usual_amount'] ? ' ' . sprintf(__('Suele ser de %s.', 'mad-oficina'), Suppliers::money($s['usual_amount'], $s['currency'])) : '') . ' ' . __('La he buscado en tu Gmail y no está.', 'mad-oficina'))]);
                 $n++;
             }
         }
@@ -158,7 +158,7 @@ final class Watch {
             $key = 'notice|' . $s['id'] . '|' . $exp;
             if ( $days < 0 || $days > 7 || isset(self::state()[$key]) ) continue;
             self::set_state($key, ['state' => 'sent']);
-            do_action('madoficina_notify_manager', sprintf(__('Esta semana debería llegarte la factura anual de %1$s%2$s.', 'mad-oficina'), $s['name'], $s['usual_amount'] ? ' (' . sprintf(__('el año pasado, %s', 'mad-oficina'), Money::format($s['usual_amount'])) . ')' : ''));
+            do_action('madoficina_notify_manager', sprintf(__('Esta semana debería llegarte la factura anual de %1$s%2$s.', 'mad-oficina'), $s['name'], $s['usual_amount'] ? ' (' . sprintf(__('el año pasado, %s', 'mad-oficina'), Suppliers::money($s['usual_amount'], $s['currency'])) . ')' : ''));
             $n++;
         }
         return $n;

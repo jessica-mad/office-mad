@@ -54,6 +54,7 @@ final class Suppliers {
             'expected_day' => ($v = (int) ($d['expected_day'] ?? 0)) >= 1 && $v <= 31 ? $v : null,
             'expected_month' => ($v = (int) ($d['expected_month'] ?? 0)) >= 1 && $v <= 12 ? $v : null,
             'usual_amount' => ($v = \MAD_Oficina\Billing\Money::parse((string) ($d['usual_amount'] ?? ''))) ? $v : null,
+            'currency' => preg_match('/^[A-Z]{3}$/', strtoupper((string) ($d['currency'] ?? ''))) ? strtoupper($d['currency']) : 'EUR',
             'delivery' => isset(self::DELIVERIES[$d['delivery'] ?? '']) ? $d['delivery'] : 'email',
             'panel_url' => esc_url_raw($d['panel_url'] ?? '') ?: null,
             'client_id' => ! empty($d['client_id']) ? (int) $d['client_id'] : null,
@@ -93,11 +94,63 @@ final class Suppliers {
                 if ( in_array($email, explode(',', (string) $r['emails']), true) ) return self::hydrate($r);
             }
         }
-        $n = Profiles::norm_name($name);
+        $n = self::key_name($name);
         if ( strlen($n) >= 3 ) {
-            foreach ( self::all() as $s ) if ( Profiles::norm_name($s['name']) === $n ) return $s;
+            foreach ( self::all() as $s ) if ( self::key_name($s['name']) === $n ) return $s;
         }
         return null;
+    }
+
+    /** «21,78 €», or «1.650.000,00 COP» for other currencies. */
+    public static function money($amount, $currency = 'EUR'){
+        return $currency === 'EUR' || ! $currency ? \MAD_Oficina\Billing\Money::format((float) $amount) : number_format((float) $amount, 2, ',', '.') . ' ' . $currency;
+    }
+
+    /**
+     * Suppliers that look like the same one (same NIF, or same name once «S.L.», «PBC»,
+     * commas… are ignored). @return array<int, array> groups of 2 or more, the one to keep first
+     */
+    public static function duplicates(){
+        global $wpdb;
+        $count = [];
+        foreach ( $wpdb->get_results('SELECT supplier_id, COUNT(*) AS n FROM ' . Expenses::table() . ' WHERE supplier_id IS NOT NULL GROUP BY supplier_id', ARRAY_A) as $r ) $count[(int) $r['supplier_id']] = (int) $r['n'];
+        $groups = [];
+        foreach ( self::all() as $s ) {
+            $key = $s['tax_id'] ?: 'n:' . self::key_name($s['name']);
+            $groups[$key][] = $s + ['invoices' => $count[$s['id']] ?? 0];
+        }
+        $out = [];
+        foreach ( $groups as $g ) {
+            if ( count($g) < 2 ) continue;
+            usort($g, fn($a, $b) => ($a['status'] === 'active' ? 0 : 1) <=> ($b['status'] === 'active' ? 0 : 1) ?: $b['invoices'] <=> $a['invoices'] ?: $a['id'] <=> $b['id']);
+            $out[] = $g;
+        }
+        return $out;
+    }
+
+    /** «Anthropic, PBC» → «anthropic»: the name without legal forms or punctuation. */
+    public static function key_name($name){
+        $n = Profiles::norm_name($name);
+        return trim(preg_replace('/\b(pbc|inc|llc|ltd|limited|gmbh|bv|sas|sarl|corp|co)\b/', ' ', $n));
+    }
+
+    /**
+     * Joins $remove into $keep: its invoices, emails and the details $keep lacks.
+     * The duplicate row goes (nothing else points to it). @return true|\WP_Error
+     */
+    public static function merge($keep_id, $remove_id){
+        global $wpdb;
+        $keep = self::get($keep_id); $remove = self::get($remove_id);
+        if ( ! $keep || ! $remove || $keep_id == $remove_id ) return new \WP_Error('madof_supplier', __('Elige dos proveedores distintos.', 'mad-oficina'));
+        $wpdb->update(Expenses::table(), ['supplier_id' => $keep['id']], ['supplier_id' => $remove['id']]);
+        $fill = ['emails' => implode(',', array_values(array_unique(array_merge($keep['emails'], $remove['emails'])))) ?: null, 'updated_at' => \MAD_Oficina\Core\Time::now()];
+        foreach ( ['tax_id', 'service', 'panel_url', 'notes', 'expected_day', 'expected_month', 'usual_amount', 'client_id'] as $k ) {
+            if ( ($keep[$k] === null || $keep[$k] === '') && $remove[$k] !== null && $remove[$k] !== '' ) $fill[$k] = $remove[$k];
+        }
+        if ( $keep['periodicity'] === 'irregular' && $remove['periodicity'] !== 'irregular' ) $fill['periodicity'] = $remove['periodicity'];
+        $wpdb->update(self::table(), $fill, ['id' => $keep['id']]);
+        $wpdb->delete(self::table(), ['id' => $remove['id']]);
+        return true;
     }
 
     /** Every address the cartero should treat as an invoice sender. */
@@ -110,6 +163,7 @@ final class Suppliers {
     private static function hydrate($r){
         foreach ( ['id', 'expected_day', 'expected_month', 'client_id'] as $k ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
         $r['usual_amount'] = $r['usual_amount'] === null ? null : (float) $r['usual_amount'];
+        $r['currency'] = $r['currency'] ?? 'EUR';
         $r['emails'] = $r['emails'] ? explode(',', $r['emails']) : [];
         return $r;
     }

@@ -76,7 +76,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_billing_extra_lines', [$this, 'rebill_lines'], 10, 3);
         add_filter('madoficina_billing_pending_profiles', [$this, 'rebill_profiles'], 10, 2);
 
-        foreach ( ['supplier_save', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['supplier_save', 'supplier_merge', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -173,6 +173,20 @@ return new class($core) implements MAD_Oficina_Module {
         $r = \MAD_Oficina\Suppliers\Suppliers::save(wp_unslash($_POST), $id);
         if ( is_wp_error($r) ) $this->back(['tab' => 'suppliers', 'supplier' => $id ?: 'new'], $r->get_error_message(), 'error');
         $this->back(['tab' => 'suppliers'], __('Proveedor guardado.', 'mad-oficina'));
+    }
+
+    /** Duplicates joined into one (its invoices and emails follow). */
+    public function handle_supplier_merge(){
+        $this->guard('supplier_merge');
+        $keep = absint($_POST['keep'] ?? 0);
+        $n = 0; $err = null;
+        foreach ( array_map('absint', (array) ($_POST['remove'] ?? [])) as $rm ) {
+            $r = \MAD_Oficina\Suppliers\Suppliers::merge($keep, $rm);
+            if ( is_wp_error($r) ) $err = $r->get_error_message(); else $n++;
+        }
+        if ( ! $n ) $this->back(['tab' => 'suppliers'], $err ?: __('Elige con cuál unirlo.', 'mad-oficina'), 'error');
+        $s = \MAD_Oficina\Suppliers\Suppliers::get($keep);
+        $this->back(['tab' => 'suppliers'], sprintf(_n('Unido: %2$s ahora es un solo proveedor (%1$d repetido menos).', 'Unido: %2$s ahora es un solo proveedor (%1$d repetidos menos).', $n, 'mad-oficina'), $n, $s['name']));
     }
 
     /** Corrections by hand (amounts, date, category, client to re-bill to). */

@@ -440,6 +440,7 @@ final class Schema {
   expected_day tinyint(2) unsigned NULL,
   expected_month tinyint(2) unsigned NULL,
   usual_amount decimal(12,2) NULL,
+  currency char(3) NOT NULL DEFAULT 'EUR',
   delivery varchar(20) NOT NULL DEFAULT 'email',
   panel_url varchar(255) NULL,
   client_id bigint(20) unsigned NULL,
