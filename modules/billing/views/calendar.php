@@ -63,7 +63,8 @@ $done = array_sum(array_map(fn($r) => in_array($r['state'], ['issued', 'sent'], 
                 if ( $it['skipped'] ) echo ' <small>(' . esc_html__('este mes no', 'mad-oficina') . ')</small>';
                 elseif ( $it['billed'] && $it['billed']['number'] ) echo ' <small>(' . esc_html($it['billed']['number']) . ')</small>';
                 echo '</div>';
-            } ?></td>
+            }
+            foreach ( $r['extras'] as $x ) echo '<div>' . esc_html($x['description'] . ' · ' . Money::format(Money::parse((string) $x['unit_price']))) . '</div>'; ?></td>
             <td class="madof-nowrap"><strong><?php echo esc_html(Money::format($r['total'])); ?></strong></td>
             <td><span class="madof-pill <?php echo in_array($r['state'], ['issued', 'sent'], true) ? 'is-on' : ''; ?>"><?php echo esc_html($states[$r['state']] ?? $r['state']); ?></span>
                 <?php if ( $r['state'] === 'to_prepare' && $cal->enabled() && $month >= ($settings['calendar_from'] ?? '9999') ) echo '<br><small>' . esc_html(sprintf(__('lo preparo el %s', 'mad-oficina'), date_i18n('j/m', strtotime($r['date'] . ' -' . $cal->lead_days() . ' days')))) . '</small>'; ?>

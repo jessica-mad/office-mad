@@ -42,6 +42,25 @@ Nunca envía una factura dos veces, aunque se reintente la orden.
 3. Ejecuta **`install`** otra vez y acepta el permiso nuevo: **enviar correo en tu nombre** (`script.send_mail`).
 4. En **MAD Oficina → Facturación → Datos del emisor**, pulsa **«Sincronizar todo el Libro MAD»** para volcar el histórico.
 
+## Facturas de proveedores (Gmail → Recibidas)
+
+El cartero también lee tu Gmail, **solo para leer**: no cambia, borra ni marca nada. Busca correos con PDF que parezcan facturas: palabras como factura, invoice o recibo, o remitentes de proveedores conocidos.
+- Cada PDF nuevo se lo pasa a la web. La Contable lo lee y **solo cuenta las facturas a tu nombre**.
+- Las facturas a nombre de clientes u otros quedan guardadas aparte, en `Recibidas/No son mías/`.
+- Las tuyas van a `Recibidas/AAAA/Tn/AAAA-MM-DD_Proveedor_Importe.pdf`.
+- El mismo PDF nunca se manda dos veces.
+- Si apruebas el filtro de un proveedor nuevo, crea en Gmail el filtro que pone la etiqueta «Facturas» a sus correos.
+
+**Para activarlo (una vez):**
+1. Pega el `Code.gs` y el `appsscript.json` nuevos. Activan el servicio avanzado de **Gmail**.
+2. Ejecuta **`install`** y acepta los permisos nuevos de Gmail: leer, etiquetas y filtros.
+3. Para repasar **los últimos 12 meses**, ejecuta una vez **`backfillInvoices(365)`**.
+   - Cada vuelta procesa lo que le da tiempo (unos 4 minutos) y la siguiente continúa.
+   - Con muchas facturas, puede tardar unas horas en ponerse al día.
+4. `facturas@imad.pro` entra solo si sus correos llegan a tu buzón, es decir, si es un alias tuyo o un grupo que te reenvía.
+
+Los PDF de más de 6 MB no se envían: súbelos a mano en **Gastos → Subir factura**.
+
 ## Qué reuniones envía
 
 Google Meet guarda cada reunión en la carpeta **«Google Meet»**:

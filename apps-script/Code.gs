@@ -16,9 +16,11 @@
  *                  moved to the clients' shared document folders (the team can see those).
  *   SHEET_ID       (optional) created automatically on first run
  *   START_DATE     (optional, YYYY-MM-DD) ignore meetings before this date; set by install()
- *   ACCOUNTING_DRIVE_ID  shared drive «Contabilidad MAD» (billing): «Emitidas/AAAA/Tn/» and «Libro MAD» live there
+ *   ACCOUNTING_DRIVE_ID  shared drive «Contabilidad MAD»: «Emitidas/», «Recibidas/» and «Libro MAD» live there
  *   EMITIDAS_FOLDER_ID   (optional) found or created as «Emitidas» in ACCOUNTING_DRIVE_ID
  *   LIBRO_SHEET_ID       (optional) created automatically on first use
+ *   INVOICE_CURSOR       (expenses) Gmail is read from this moment on (epoch seconds); set by install(),
+ *                        or 12 months back with backfillInvoices(365)
  *
  * Run install() once: it asks for permissions and creates the 10-minute trigger.
  */
@@ -48,6 +50,7 @@ function install() {
     if (!p.getProperty(k)) throw new Error('Falta la propiedad del script ' + k);
   });
   if (!p.getProperty('START_DATE')) p.setProperty('START_DATE', Utilities.formatDate(new Date(), 'Europe/Madrid', 'yyyy-MM-dd'));
+  if (!p.getProperty('INVOICE_CURSOR')) p.setProperty('INVOICE_CURSOR', String(Math.floor(Date.now() / 1000)));
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('run').timeBased().everyMinutes(10).create();
   sheet_();
@@ -59,7 +62,9 @@ function run() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
   try {
-    try { scan(); } finally { processOrders(); tick_(); }
+    try { scan(); } catch (e) { console.error(e); }
+    try { scanInvoices_(); } catch (e) { console.error('facturas: ' + e); }
+    processOrders(); tick_();
   } finally {
     lock.releaseLock();
   }
@@ -253,6 +258,9 @@ function processOrders() {
         invoice_archive: archiveInvoice_,
         invoice_test: testInvoice_,
         libro_upsert: function (p) { upsertLibro_(p.rows || []); return { rows: (p.rows || []).length }; },
+        expense_archive: archiveExpense_,
+        expense_move: moveExpense_,
+        gmail_filter: gmailFilter_,
         libro_sync: function (p) { syncLibro_(p.rows || []); return { rows: (p.rows || []).length }; },
       };
       var result = handlers[order.type] ? handlers[order.type](order.payload) : null;
@@ -375,6 +383,112 @@ function archiveInvoice_(p) {
 function testInvoice_(p) {
   MailApp.sendEmail({ to: p.email.to, subject: p.email.subject, body: p.email.body, attachments: [invoicePdf_(p.invoice_id)] });
   return { sent: true };
+}
+
+/* ───────────────────────── supplier invoices (Gmail) ───────────────────────── */
+
+var INVOICE_BUDGET_MS = 4 * 60 * 1000; // leave time for the orders in the same run
+
+/** Reads Gmail from this many days back (run once by hand: backfillInvoices(365)). */
+function backfillInvoices(days) {
+  props_().setProperty('INVOICE_CURSOR', String(Math.floor(Date.now() / 1000) - (days || 365) * 86400));
+  scanInvoices_();
+}
+
+/**
+ * New emails with a PDF that look like an invoice (keywords or a known supplier)
+ * since the cursor, oldest first. Each new PDF goes to the website, which reads
+ * it and decides; the same file is never sent twice. Read-only: nothing in
+ * Gmail is changed.
+ */
+function scanInvoices_() {
+  var p = props_(), started = Date.now();
+  var cursor = Number(p.getProperty('INVOICE_CURSOR') || 0);
+  if (!cursor) return;
+  var cfg = signedFetch_('get', '/hooks/expenses/config', null);
+  var terms = (cfg.keywords || []).concat((cfg.senders || []).map(function (e) { return 'from:' + e; }));
+  var q = 'has:attachment filename:pdf after:' + cursor + ' -in:sent -in:chats -in:trash -in:spam (' + terms.join(' OR ') + ')';
+  var ids = [], token = null;
+  do {
+    var page = Gmail.Users.Messages.list('me', { q: q, maxResults: 100, pageToken: token });
+    (page.messages || []).forEach(function (m) { ids.push(m.id); });
+    token = page.nextPageToken;
+  } while (token && ids.length < 1000);
+  ids.reverse(); // Gmail lists newest first: oldest first, so the cursor only moves forward
+
+  for (var i = 0; i < ids.length; i++) {
+    if (Date.now() - started > INVOICE_BUDGET_MS) break; // the next run carries on
+    var m = Gmail.Users.Messages.get('me', ids[i], { format: 'full' }), head = headers_(m), pdfs = pdfParts_(m.payload, []);
+    var files = pdfs.map(function (part) {
+      var data = part.body.attachmentId ? Gmail.Users.Messages.Attachments.get('me', m.id, part.body.attachmentId).data : part.body.data;
+      var bytes = Utilities.base64DecodeWebSafe(data);
+      return { name: part.filename, bytes: bytes, hash: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)) };
+    }).filter(function (f) { return f.bytes.length <= (cfg.max_bytes || 6291456); });
+    if (files.length) {
+      var unknown = signedFetch_('post', '/hooks/expenses/known', { hashes: files.map(function (f) { return f.hash; }) }).unknown || [];
+      files.forEach(function (f) {
+        if (unknown.indexOf(f.hash) < 0) return;
+        signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, filename: f.name, base64: Utilities.base64Encode(f.bytes) });
+      });
+    }
+    p.setProperty('INVOICE_CURSOR', String(Math.max(cursor, Math.floor(Number(m.internalDate) / 1000))));
+  }
+}
+
+function headers_(m) {
+  var out = {};
+  (m.payload.headers || []).forEach(function (h) { out[h.name.toLowerCase()] = h.value; });
+  return out;
+}
+
+function pdfParts_(part, out) {
+  if (!part) return out;
+  if (part.filename && /\.pdf$/i.test(part.filename) && part.body && (part.body.attachmentId || part.body.data)) out.push(part);
+  (part.parts || []).forEach(function (child) { pdfParts_(child, out); });
+  return out;
+}
+
+function hex_(raw) {
+  return raw.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+
+function recibidasRoot_() {
+  var p = props_(), id = p.getProperty('RECIBIDAS_FOLDER_ID');
+  if (id) return DriveApp.getFolderById(id);
+  var drive = p.getProperty('ACCOUNTING_DRIVE_ID');
+  if (!drive) throw new Error('Falta la propiedad del script ACCOUNTING_DRIVE_ID (la unidad compartida de contabilidad).');
+  var folder = childFolder_(DriveApp.getFolderById(drive), 'Recibidas');
+  p.setProperty('RECIBIDAS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function folderPath_(root, parts) {
+  return parts.reduce(function (f, name) { return childFolder_(f, name); }, root);
+}
+
+/** A received invoice → «Recibidas/AAAA/Tn/» (or «Recibidas/No son mías/AAAA/»). */
+function archiveExpense_(p) {
+  var res = signedFetch_('get', '/hooks/expenses/' + p.expense_id + '/file', null);
+  var folder = folderPath_(recibidasRoot_(), p.folder);
+  var existing = folder.getFilesByName(p.name);
+  var file = existing.hasNext() ? existing.next() : folder.createFile(Utilities.newBlob(Utilities.base64Decode(res.base64), 'application/pdf', p.name));
+  return { file_id: file.getId(), url: file.getUrl() };
+}
+
+/** Jessica changed her mind (or the data): the file follows. */
+function moveExpense_(p) {
+  var file = DriveApp.getFileById(p.file_id);
+  file.moveTo(folderPath_(recibidasRoot_(), p.folder));
+  file.setName(p.name);
+  return { file_id: file.getId(), url: file.getUrl() };
+}
+
+/** Approved by Jessica: a Gmail filter that labels a supplier's emails «Facturas». */
+function gmailFilter_(p) {
+  var labels = Gmail.Users.Labels.list('me').labels || [];
+  var label = labels.filter(function (l) { return l.name === p.label; })[0] || Gmail.Users.Labels.create({ name: p.label }, 'me');
+  Gmail.Users.Settings.Filters.create({ criteria: { from: p.from.join(' OR ') }, action: { addLabelIds: [label.id] } }, 'me');
+  return { label: label.id };
 }
 
 /* ───────────────────────── Libro MAD ───────────────────────── */

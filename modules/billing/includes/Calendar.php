@@ -86,11 +86,15 @@ final class Calendar {
             if ( ! Agreements::covers($it, $month) ) continue;
             $by[$it['profile_id']][] = $it;
         }
+        // Clients with something else to bill this month (e.g. re-billable expenses).
+        foreach ( (array) apply_filters('madoficina_billing_pending_profiles', [], $month) as $pid ) $by[(int) $pid] = $by[(int) $pid] ?? [];
         $out = [];
         foreach ( $by as $pid => $items ) {
             $profile = Profiles::get($pid);
             if ( ! $profile ) continue;
-            $invoice = null; $pending = 0; $total = 0.0; $rows = [];
+            $extras = (array) apply_filters('madoficina_billing_extra_lines', [], $profile, $month);
+            $invoice = null; $pending = count($extras); $total = 0.0; $rows = [];
+            foreach ( $extras as $x ) $total += Money::parse((string) $x['unit_price']) * (Money::parse((string) ($x['quantity'] ?? '1')) ?? 1);
             foreach ( $items as $it ) {
                 $billed = self::billed_in($it['id'], $month);
                 $skipped = ! $billed && self::skipped($it['id'], $month);
@@ -99,6 +103,7 @@ final class Calendar {
                 if ( ! $skipped ) $total += $it['amount'];
                 $rows[] = $it + ['billed' => $billed, 'skipped' => $skipped];
             }
+            if ( ! $invoice && ( $draft = $this->draft_for($profile['id'], $month) ) ) $invoice = Invoices::get($draft);
             $date = $invoice['issue_date'] ?? $this->date_for($profile, $month);
             if ( ! $invoice && ! $pending ) $state = 'skipped';
             elseif ( ! $invoice ) $state = 'to_prepare';
@@ -106,7 +111,7 @@ final class Calendar {
                 $state = 'draft';
                 foreach ( Approvals::for_object('invoice', $invoice['id']) as $a ) if ( in_array($a['status'], [Approvals::PENDING, Approvals::PROCESSING], true) ) $state = 'asked';
             } else $state = $invoice['status']; // issued | sent
-            $out[] = ['profile' => $profile, 'date' => $date, 'items' => $rows, 'total' => $total, 'invoice' => $invoice, 'state' => $state, 'pending' => $pending];
+            $out[] = ['profile' => $profile, 'date' => $date, 'items' => $rows, 'extras' => $extras, 'total' => $total, 'invoice' => $invoice, 'state' => $state, 'pending' => $pending];
         }
         usort($out, fn($a, $b) => strcmp($a['date'], $b['date']) ?: strcasecmp($a['profile']['legal_name'], $b['profile']['legal_name']));
         return $out;
@@ -143,13 +148,10 @@ final class Calendar {
             $lines[] = ['description' => $it['kind'] === 'monthly' ? $it['concept'] . ' · ' . Issuing::month($month . '-01') . ' ' . substr($month, 0, 4) : $it['concept'],
                 'quantity' => '1', 'unit_price' => number_format($it['amount'], 2, ',', ''), 'item_id' => $it['id'], 'item_month' => $month];
         }
+        $lines = array_merge($lines, (array) apply_filters('madoficina_billing_extra_lines', [], $profile, $month));
         if ( ! $lines ) return 0;
 
-        // Its calendar draft for this month, if there is one already.
-        $draft = $wpdb->get_var($wpdb->prepare(
-            'SELECT DISTINCT i.id FROM ' . Invoices::table() . ' i JOIN ' . Schema::table('invoice_lines') . " l ON l.invoice_id = i.id WHERE i.profile_id = %d AND i.status = 'draft' AND l.item_month = %s LIMIT 1",
-            $profile['id'], $month
-        ));
+        $draft = $this->draft_for($profile['id'], $month);
         if ( $draft ) {
             $inv = Invoices::get((int) $draft);
             $keep = array_map(fn($l) => ['description' => $l['description'], 'quantity' => (string) $l['quantity'], 'unit_price' => number_format((float) $l['unit_price'], 2, ',', ''), 'item_id' => $l['item_id'], 'item_month' => $l['item_month'], 'expense_id' => $l['expense_id']], $inv['lines']);
@@ -168,6 +170,15 @@ final class Calendar {
         ], $lines);
         if ( ! is_wp_error($id) ) $wpdb->update(Invoices::table(), ['source' => self::SOURCE], ['id' => $id]);
         return $id;
+    }
+
+    /** The client's calendar draft for this month, if there is one already. */
+    public function draft_for($profile_id, $month){
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare(
+            'SELECT DISTINCT i.id FROM ' . Invoices::table() . ' i LEFT JOIN ' . Schema::table('invoice_lines') . " l ON l.invoice_id = i.id WHERE i.profile_id = %d AND i.status = 'draft' AND (l.item_month = %s OR (i.source = %s AND LEFT(i.issue_date, 7) = %s)) ORDER BY i.id LIMIT 1",
+            $profile_id, $month, self::SOURCE, $month
+        ));
     }
 
     /* ==== Ask on the day ==== */

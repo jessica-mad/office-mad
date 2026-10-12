@@ -37,7 +37,11 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
     if ( ! $draft ) {
         // Monthly fees repeat: start from the last invoice of this client.
         $last = Invoices::all(['profile_id' => $profile['id'], 'series' => $is_ar ? 'AR' : 'F'], 1)[0] ?? null;
-        if ( $last ) { $lines = Invoices::get($last['id'])['lines']; $copied = $last; }
+        // (lines that re-billed an expense belong to that invoice only)
+        if ( $last ) { $lines = array_values(array_filter(Invoices::get($last['id'])['lines'], fn($l) => empty($l['expense_id']))); $copied = $lines ? $last : false; }
+        // Re-billable expenses of this client still waiting for an invoice.
+        $extras = (array) apply_filters('madoficina_billing_extra_lines', [], $profile, Months::current());
+        $lines = array_merge($lines, $extras);
     }
     if ( ! $lines ) $lines = [['description' => '', 'quantity' => 1, 'unit_price' => '']];
     $issue = $draft['issue_date'] ?? $issuing->default_issue_date($profile);
@@ -75,6 +79,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
                 <?php foreach ( array_values($lines) as $i => $l ) : ?>
                     <tr>
                         <td><textarea name="lines[<?php echo (int) $i; ?>][description]" rows="2" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"><?php echo esc_textarea((string) $l['description']); ?></textarea>
+                            <?php if ( ! empty($l['expense_id']) ) : ?><input type="hidden" name="lines[<?php echo (int) $i; ?>][expense_id]" value="<?php echo (int) $l['expense_id']; ?>"><small class="madof-muted"><?php esc_html_e('Gasto repercutido', 'mad-oficina'); ?></small><?php endif; ?>
                             <?php if ( $draft && ! empty($l['item_id']) ) : ?><input type="hidden" name="lines[<?php echo (int) $i; ?>][item_id]" value="<?php echo (int) $l['item_id']; ?>"><input type="hidden" name="lines[<?php echo (int) $i; ?>][item_month]" value="<?php echo esc_attr($l['item_month']); ?>"><small class="madof-muted"><?php echo esc_html(sprintf(__('Del acuerdo · %s', 'mad-oficina'), Months::label($l['item_month']))); ?></small><?php endif; ?></td>
                         <td><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][quantity]" value="<?php echo esc_attr($num($l['quantity'] ?? 1)); ?>" class="madof-qty" aria-label="<?php esc_attr_e('Cantidad', 'mad-oficina'); ?>"></td>
                         <td><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][unit_price]" value="<?php echo esc_attr($l['unit_price'] === '' ? '' : number_format((float) $l['unit_price'], 2, ',', '')); ?>" class="madof-price" aria-label="<?php esc_attr_e('Precio', 'mad-oficina'); ?>"></td>
