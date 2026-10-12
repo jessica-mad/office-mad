@@ -9,7 +9,7 @@ if ( ! defined('ABSPATH') ) exit;
 final class Installer {
 
     /** Bump whenever Schema or Roles change. */
-    const DB_VERSION        = 4; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end
+    const DB_VERSION        = 5; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end · 5: billing_profiles, invoices, invoice_lines
     const DB_VERSION_OPTION = 'madoficina_db_version';
 
     public static function activate(){

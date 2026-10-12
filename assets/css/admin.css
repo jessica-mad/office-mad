@@ -94,3 +94,6 @@
 .madof-quote{background:var(--g);border-radius:16px;padding:16px 18px;margin:0 0 18px;white-space:normal;font-size:15px;line-height:1.6}
 .madof-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
 .madof-filters .madof-pill{text-decoration:none;color:var(--k)}
+.madof-scroll{overflow-x:auto;max-width:100%}
+.madof-scroll .madof-table{min-width:1100px}
+.madof-scroll .madof-table td,.madof-scroll .madof-table th{white-space:nowrap}
