@@ -224,7 +224,9 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame([$hash], $this->hook('POST', '/hooks/expenses/known', ['hashes' => [$hash]])->get_data()['unknown']);
         $this->next = $this->x();
         $res = $this->hook('POST', '/hooks/expenses', ['message_id' => 'abc', 'from' => 'Nube <facturas@nube.example>', 'subject' => 'Factura', 'filename' => 'f.pdf', 'base64' => base64_encode($pdf)]);
-        $this->assertSame('registered', $res->get_data()['status']);
+        $this->assertSame('queued', $res->get_data()['status'], 'answered at once; read in the background');
+        $this->intake()->process($res->get_data()['expense_id']);
+        $this->assertSame('registered', Expenses::get($res->get_data()['expense_id'])['status']);
         $other = str_repeat('a', 64);
         $this->assertSame([$other], $this->hook('POST', '/hooks/expenses/known', ['hashes' => [$hash, $other]])->get_data()['unknown'], 'only the new one');
         $file = $this->hook('GET', '/hooks/expenses/' . $res->get_data()['expense_id'] . '/file')->get_data();
@@ -290,5 +292,28 @@ class SuppliersTest extends MADOF_TestCase {
         Approvals::resolve($a['id'], 'approve', apply_filters('madoficina_approval_default_input_' . Intake::NEW_SUPPLIER, [], $a), get_current_user_id());
         $s = Suppliers::match('', 'liz@studio.example', '');
         $this->assertSame('COP', $s['currency']);
+    }
+
+    public function test_reading_log_and_bulk_decisions(){
+        $r = $this->receive('error');
+        $e = Expenses::get($r['expense_id']);
+        $this->assertSame('queued', $e['status']);
+        $this->assertStringContainsString('Intento 1: Claude HTTP 529', $e['notes'], 'why it failed');
+        // A reading cut by the server (no answer recorded) is noted by the next attempt.
+        Expenses::update($r['expense_id'], ['notes' => 'Intento 1: Claude HTTP 529' . "\n" . 'Intento 2…', 'reason' => 'try:2']);
+        $this->intake()->process($r['expense_id']);
+        $e = Expenses::get($r['expense_id']);
+        $this->assertStringContainsString('Intento 2: se cortó', $e['notes']);
+        $this->assertSame('review', $e['status']);
+
+        $a = $this->receive($this->x(['number' => 'K1']))['expense_id']; // new supplier → review + card
+        $b = $this->receive($this->x(['number' => 'K2', 'recipient_name' => '', 'recipient_tax_id' => '']))['expense_id'];
+        $this->assertSame(2, $this->intake()->bulk('aside', [$a, $b]));
+        foreach ( [$a, $b] as $id ) $this->assertSame('not_mine', Expenses::get($id)['status']);
+        $this->assertSame([], Approvals::pending(50, Intake::NEW_SUPPLIER), 'their cards are closed');
+        $this->assertSame(1, $this->intake()->bulk('discard', [$r['expense_id']]));
+        $this->assertSame('ignored', Expenses::get($r['expense_id'])['status']);
+        $this->assertSame(1, $this->intake()->bulk('read', [$a]));
+        $this->assertSame('queued', Expenses::get($a)['status']);
     }
 }

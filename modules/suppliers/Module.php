@@ -50,6 +50,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('madoficina_expense_registered', ['MAD_Oficina\\Suppliers\\Watch', 'on_registered']);
 
         // Daily watch and leftovers to read (the cartero's tick every 10 min is the reliable clock).
+        add_action(\MAD_Oficina\Suppliers\Intake::READ_HOOK, fn($id) => $this->intake()->process((int) $id));
         $tick = function(){ $this->intake()->process_queued(); $this->watch()->run(); };
         add_action(self::CRON_HOOK, $tick);
         add_action('madoficina_tick', $tick);
@@ -76,7 +77,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_billing_extra_lines', [$this, 'rebill_lines'], 10, 3);
         add_filter('madoficina_billing_pending_profiles', [$this, 'rebill_profiles'], 10, 2);
 
-        foreach ( ['supplier_save', 'supplier_merge', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -107,7 +108,7 @@ return new class($core) implements MAD_Oficina_Module {
             if ( function_exists('set_time_limit') ) @set_time_limit(150);
             if ( function_exists('wp_raise_memory_limit') ) wp_raise_memory_limit('admin');
             try {
-                $res = $this->intake()->receive($pdf, ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename', 'date'])));
+                $res = $this->intake()->receive($pdf, ['source' => 'gmail', 'later' => true] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename', 'date'])));
             } catch ( \Throwable $e ) {
                 return new \WP_Error('madof_expense_error', 'Error al recibir la factura: ' . $e->getMessage(), ['status' => 500]);
             }
@@ -173,6 +174,31 @@ return new class($core) implements MAD_Oficina_Module {
         $r = \MAD_Oficina\Suppliers\Suppliers::save(wp_unslash($_POST), $id);
         if ( is_wp_error($r) ) $this->back(['tab' => 'suppliers', 'supplier' => $id ?: 'new'], $r->get_error_message(), 'error');
         $this->back(['tab' => 'suppliers'], __('Proveedor guardado.', 'mad-oficina'));
+    }
+
+    /** «Guardar aparte» / «Descartar» / «Volver a leer» several at once. */
+    public function handle_expense_bulk(){
+        $this->guard('expense_bulk');
+        $tab = sanitize_key($_POST['tab'] ?? 'review');
+        $do = sanitize_key($_POST['do'] ?? '');
+        if ( ! in_array($do, ['aside', 'discard', 'read'], true) ) $this->back(['tab' => $tab], __('Elige qué hacer.', 'mad-oficina'), 'error');
+        $n = $this->intake()->bulk($do, (array) ($_POST['ids'] ?? []));
+        $msg = ['aside' => _n('%d guardada aparte, en «No son mías».', '%d guardadas aparte, en «No son mías».', $n, 'mad-oficina'),
+            'discard' => _n('%d descartada.', '%d descartadas.', $n, 'mad-oficina'),
+            'read' => _n('%d vuelve a la cola de lectura.', '%d vuelven a la cola de lectura.', $n, 'mad-oficina')][$do];
+        $this->back(['tab' => $tab], sprintf($msg, $n), $n ? 'success' : 'error');
+    }
+
+    /** «Leer ahora»: the waiting ones, in this request (about a minute at most). */
+    public function handle_expense_read_now(){
+        $this->guard('expense_read_now');
+        if ( function_exists('set_time_limit') ) @set_time_limit(180);
+        $id = absint($_POST['expense_id'] ?? 0);
+        if ( $id ) { $this->intake()->process($id); $n = 1; }
+        else $n = $this->intake()->process_queued(20, 60);
+        global $wpdb;
+        $left = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . \MAD_Oficina\Suppliers\Expenses::table() . " WHERE status = 'queued'");
+        $this->back($id ? ['expense' => $id] : ['tab' => 'reading'], sprintf(__('Leídas %1$d. Quedan %2$d en cola (se siguen leyendo solas).', 'mad-oficina'), $n, $left));
     }
 
     /** Duplicates joined into one (its invoices and emails follow). */

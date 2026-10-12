@@ -15,7 +15,8 @@ global $wpdb;
 $count = fn($status) => (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . Expenses::table() . ' WHERE status = %s', $status));
 $tabs = [
     'expenses' => __('Gastos', 'mad-oficina'),
-    'review' => sprintf(__('Por revisar (%d)', 'mad-oficina'), $count('review') + $count('queued')),
+    'review' => sprintf(__('Por revisar (%d)', 'mad-oficina'), $count('review')),
+    'reading' => sprintf(__('Leyendo (%d)', 'mad-oficina'), $count('queued')),
     'aside' => sprintf(__('No son mías (%d)', 'mad-oficina'), $count('not_mine')),
     'suppliers' => __('Proveedores', 'mad-oficina'),
     'upload' => __('Subir factura', 'mad-oficina'),
@@ -33,20 +34,23 @@ $reason = function(array $e){
         'duplicate' => __('Repetida', 'mad-oficina'), 'price_up' => __('Más cara de lo habitual', 'mad-oficina'),
     ][$r] ?? '';
 };
-$table = function(array $list, $show_reason = false) use ($base, $codes, $reason){
+$table = function(array $list, $show_reason = false, $pick = false) use ($base, $codes, $reason){
     if ( ! $list ) { echo '<p class="madof-empty">' . esc_html__('Nada por aquí.', 'mad-oficina') . '</p>'; return; } ?>
     <table class="madof-table">
-        <thead><tr><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Proveedor', 'mad-oficina'); ?></th><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('IVA', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th></th></tr></thead>
+        <thead><tr><?php if ( $pick ) : ?><th><input type="checkbox" class="madof-select-all" aria-label="<?php esc_attr_e('Seleccionar todas', 'mad-oficina'); ?>"></th><?php endif; ?><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Proveedor', 'mad-oficina'); ?></th><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('IVA', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th></th></tr></thead>
         <tbody>
         <?php foreach ( $list as $e ) : ?>
             <tr>
+                <?php if ( $pick ) : ?><td><input type="checkbox" form="madof-exp-bulk" name="ids[]" value="<?php echo (int) $e['id']; ?>" class="madof-pick" aria-label="<?php echo esc_attr($e['supplier_name'] ?: $e['sender']); ?>"></td><?php endif; ?>
                 <td class="madof-nowrap"><a href="<?php echo esc_url($base . '&expense=' . $e['id']); ?>"><?php echo esc_html($e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '—'); ?></a>
                     <?php if ( $e['received_at'] && $e['received_at'] !== $e['issue_date'] ) echo '<br><small class="madof-muted">' . esc_html(sprintf(__('llegó %s', 'mad-oficina'), date_i18n('j M Y', strtotime($e['received_at'])))) . '</small>'; ?>
                     <?php if ( $e['notes'] && str_contains((string) $e['notes'], __('Fecha', 'mad-oficina')) ) echo ' <span title="' . esc_attr($e['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
                 <td><?php echo esc_html($e['supplier_name'] ?: ($e['sender'] ?: '—')); ?><?php if ( $e['number'] ) echo '<br><small>' . esc_html($e['number']) . '</small>'; ?></td>
                 <td><?php echo esc_html((string) $e['concept']); ?>
                     <?php if ( $e['client_id'] ) echo ' <span class="madof-code" title="' . esc_attr__('Se repercute a este cliente', 'mad-oficina') . '">' . esc_html($codes[$e['client_id']] ?? '?') . '</span>'; ?>
-                    <?php if ( $show_reason || $e['reason'] === 'price_up' ) echo '<br><small>' . esc_html($reason($e)) . '</small>'; ?></td>
+                    <?php if ( $show_reason || $e['reason'] === 'price_up' ) echo '<br><small>' . esc_html($reason($e)) . '</small>'; ?>
+                    <?php if ( in_array($e['status'], ['queued', 'review'], true) && $e['notes'] && ( $e['status'] === 'queued' || $e['reason'] === 'unreadable' ) ) echo '<br><small class="madof-muted">' . nl2br(esc_html($e['notes'])) . '</small>'; ?>
+                    <?php if ( $e['status'] === 'queued' && $e['subject'] ) echo '<br><small class="madof-muted">' . esc_html($e['subject']) . '</small>'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['base'] !== null ? esc_html(Money::format($e['base'])) : '—'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['vat'] !== null ? esc_html(Money::format($e['vat'])) : '—'; ?></td>
                 <td class="madof-nowrap"><strong><?php echo $e['total'] !== null ? esc_html(Money::format($e['total']) . ($e['currency'] !== 'EUR' ? ' ' . $e['currency'] : '')) : '—'; ?></strong></td>
@@ -104,9 +108,40 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
         </section>
     </form>
 
-<?php elseif ( $tab === 'review' ) : ?>
-    <p class="description"><?php esc_html_e('Facturas que esperan tu decisión (también están en la bandeja y en Chat): proveedores nuevos, facturas sin destinatario claro o que no he podido leer.', 'mad-oficina'); ?></p>
-    <?php $table(array_merge(Expenses::all(['status' => 'queued']), Expenses::all(['status' => 'review'])), true); ?>
+<?php elseif ( $tab === 'review' || $tab === 'reading' ) :
+    $bulk_bar = function(array $actions) use ($tab){ ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="madof-exp-bulk" class="madof-bulk">
+            <?php wp_nonce_field('madof_expense_bulk'); ?><input type="hidden" name="action" value="madof_expense_bulk"><input type="hidden" name="tab" value="<?php echo esc_attr($tab); ?>">
+            <span class="madof-bulk-count" aria-live="polite"></span>
+            <?php foreach ( $actions as $do => $label ) : ?><button class="madof-btn is-small <?php echo $do === 'aside' ? '' : 'is-ghost'; ?>" name="do" value="<?php echo esc_attr($do); ?>" disabled><?php echo esc_html($label); ?></button><?php endforeach; ?>
+        </form>
+        <script>
+        (function () {
+          var bulk = document.getElementById('madof-exp-bulk');
+          var picks = function () { return [].slice.call(document.querySelectorAll('.madof-pick')); };
+          var update = function () {
+            var n = picks().filter(function (c) { return c.checked; }).length;
+            bulk.querySelector('.madof-bulk-count').textContent = n ? n + ' <?php echo esc_js(__('marcadas', 'mad-oficina')); ?>' : '<?php echo esc_js(__('Marca las que quieras', 'mad-oficina')); ?>';
+            [].forEach.call(bulk.querySelectorAll('button'), function (b) { b.disabled = !n; });
+          };
+          document.addEventListener('change', function (e) {
+            if (e.target.classList.contains('madof-select-all')) picks().forEach(function (c) { c.checked = e.target.checked; });
+            update();
+          });
+          update();
+        })();
+        </script>
+    <?php };
+    if ( $tab === 'review' ) : ?>
+    <p class="description"><?php esc_html_e('Facturas que esperan tu decisión (también están en la bandeja): proveedores nuevos, facturas sin destinatario claro o que no he podido leer. Ábrelas para decidir una a una, o márcalas y apártalas.', 'mad-oficina'); ?></p>
+    <?php $bulk_bar(['aside' => __('No son mías: guardar aparte', 'mad-oficina'), 'discard' => __('No son facturas: descartar', 'mad-oficina'), 'read' => __('Volver a leer', 'mad-oficina')]); ?>
+    <?php $table(Expenses::all(['status' => 'review']), true, true); ?>
+    <?php else : ?>
+    <p class="description"><?php esc_html_e('PDFs que han llegado y la Contable aún no ha leído. Se leen solos en segundo plano (unos pocos cada pocos minutos); si uno falla, se reintenta hasta 3 veces y aquí ves por qué.', 'mad-oficina'); ?></p>
+    <?php echo AdminUi::form_open('expense_read_now', 'madof-inline'); ?><button class="madof-btn is-small"><?php esc_html_e('Leer ahora las que pueda (1 minuto)', 'mad-oficina'); ?></button></form>
+    <?php $bulk_bar(['discard' => __('Descartar (no son facturas)', 'mad-oficina'), 'aside' => __('Guardar aparte sin leer', 'mad-oficina')]); ?>
+    <?php $table(Expenses::all(['status' => 'queued']), false, true); ?>
+    <?php endif; ?>
 
 <?php elseif ( $tab === 'aside' ) : ?>
     <p class="description"><?php esc_html_e('Facturas a nombre de tus clientes u otras personas: no cuentan como gasto tuyo. Están en «Recibidas/No son mías» por si alguna fuera tuya: ábrela y pulsa «Es mía».', 'mad-oficina'); ?></p>

@@ -21,6 +21,8 @@ if ( ! defined('ABSPATH') ) exit;
 final class Intake {
 
     const NEW_SUPPLIER = 'supplier_new';
+    const READ_HOOK = 'madoficina_expense_read';
+    const MAX_TRIES = 3;
     const REVIEW = 'expense_review';
 
     private $settings;
@@ -109,14 +111,26 @@ final class Intake {
         ]);
         if ( ! $id ) return new \WP_Error('madof_expense', __('No he podido guardar la factura.', 'mad-oficina'));
         Uploads::store($id, $pdf);
+        if ( ! empty($meta['later']) ) {
+            // From the cartero: answered at once, read in the background (a slow reading
+            // must never be cut together with the cartero's request).
+            self::schedule($id);
+            return ['expense_id' => (int) $id, 'status' => 'queued', 'reason' => null];
+        }
         return $this->process($id);
     }
 
+    public static function schedule($id){
+        if ( function_exists('as_enqueue_async_action') ) as_enqueue_async_action(self::READ_HOOK, [(int) $id], 'mad-oficina');
+        else wp_schedule_single_event(time(), self::READ_HOOK, [(int) $id]);
+    }
+
     /** Invoices still waiting to be read (a slow answer or a Claude hiccup). */
-    public function process_queued($limit = 3){
+    public function process_queued($limit = 10, $seconds = 45){
         global $wpdb;
-        $n = 0;
+        $n = 0; $start = time();
         foreach ( $wpdb->get_col($wpdb->prepare('SELECT id FROM ' . Expenses::table() . " WHERE status = 'queued' ORDER BY id LIMIT %d", $limit)) as $id ) {
+            if ( time() - $start > $seconds ) break; // the next tick carries on
             $this->process((int) $id);
             $n++;
         }
@@ -132,21 +146,30 @@ final class Intake {
             Expenses::update($id, ['status' => 'ignored', 'reason' => 'no_file']);
             return ['expense_id' => (int) $id, 'status' => 'ignored', 'reason' => 'no_file'];
         }
-        // The attempt is counted before reading: if the server cuts a slow request, the next
-        // tick retries it, and after 3 attempts Jessica completes it by hand.
+        // The attempt is counted (and noted) before reading: if the server cuts a slow request,
+        // the next attempt knows it, and after MAX_TRIES Jessica completes it by hand.
         $tries = (int) str_replace('try:', '', (string) $e['reason']) + 1;
-        if ( $tries > 3 ) {
-            Expenses::update($id, ['status' => 'review', 'reason' => 'unreadable', 'notes' => __('No he podido leerla (tarda demasiado o el servidor la corta). Ábrela y completa los datos a mano.', 'mad-oficina')]);
+        $log = trim((string) $e['notes']);
+        if ( $tries > 1 && str_ends_with($log, '…') ) {
+            $log = preg_replace('/…$/u', ': ' . __('se cortó (tardó demasiado)', 'mad-oficina'), $log);
+        }
+        if ( $tries > self::MAX_TRIES ) {
+            Expenses::update($id, ['status' => 'review', 'reason' => 'unreadable', 'notes' => trim($log . "\n" . __('No he podido leerla. Ábrela y completa los datos a mano, o descártala.', 'mad-oficina'))]);
             return ['expense_id' => (int) $id, 'status' => 'review', 'reason' => 'unreadable'];
         }
-        Expenses::update($id, ['reason' => 'try:' . $tries]);
+        $log = trim($log . "\n" . sprintf(__('Intento %d', 'mad-oficina'), $tries) . '…');
+        Expenses::update($id, ['reason' => 'try:' . $tries, 'notes' => $log]);
+        if ( function_exists('set_time_limit') ) @set_time_limit(150);
         $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $e['subject'], 'filename' => $e['filename'], 'received' => $e['received_at']]);
         if ( is_wp_error($x) ) {
-            Expenses::update($id, $tries >= 3
-                ? ['status' => 'review', 'reason' => 'unreadable', 'notes' => sprintf(__('No he podido leerla: %s Ábrela y completa los datos a mano.', 'mad-oficina'), $x->get_error_message())]
-                : ['reason' => 'try:' . $tries]);
-            return ['expense_id' => (int) $id, 'status' => $tries >= 3 ? 'review' : 'queued', 'reason' => 'unreadable'];
+            $log = preg_replace('/…$/u', ': ' . $x->get_error_message(), $log);
+            Expenses::update($id, $tries >= self::MAX_TRIES
+                ? ['status' => 'review', 'reason' => 'unreadable', 'notes' => trim($log . "\n" . __('No he podido leerla. Ábrela y completa los datos a mano, o descártala.', 'mad-oficina'))]
+                : ['notes' => $log]);
+            if ( $tries < self::MAX_TRIES ) self::schedule($id);
+            return ['expense_id' => (int) $id, 'status' => $tries >= self::MAX_TRIES ? 'review' : 'queued', 'reason' => 'unreadable'];
         }
+        Expenses::update($id, ['notes' => null]); // the reading log is no longer needed
         return $this->decide($id, $x);
     }
 
@@ -293,6 +316,35 @@ final class Intake {
             return ['message' => __('Guardada aparte, en «No son mías». No cuenta como gasto.', 'mad-oficina')];
         }
         return $this->reclassify_without_approvals($id, true);
+    }
+
+    /**
+     * Several at once from the lists: «aside» (not mine, kept in «No son mías»),
+     * «discard» (not an invoice: forgotten) or «read» (read again now).
+     * @return int how many
+     */
+    public function bulk($action, array $ids){
+        $n = 0;
+        foreach ( array_unique(array_map('intval', $ids)) as $id ) {
+            $e = Expenses::get($id);
+            if ( ! $e || $e['status'] === 'registered' ) continue;
+            foreach ( Approvals::for_object('expense', $id) as $a ) {
+                if ( $a['status'] === Approvals::PENDING ) Approvals::resolve($a['id'], 'reject', [], get_current_user_id());
+            }
+            $e = Expenses::get($id);
+            if ( $action === 'read' ) {
+                Expenses::update($id, ['status' => 'queued', 'reason' => null, 'notes' => null]);
+                self::schedule($id);
+            } elseif ( $action === 'discard' ) {
+                Expenses::update($id, ['status' => 'ignored', 'reason' => 'jessica']);
+                Uploads::delete($id);
+            } else {
+                if ( $e['status'] !== 'not_mine' ) Expenses::update($id, ['status' => 'not_mine', 'reason' => 'jessica']);
+                $this->queue_archive($id);
+            }
+            $n++;
+        }
+        return $n;
     }
 
     /** Inbox: «¿Es tuya?» — approve = mine. */
