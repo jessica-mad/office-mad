@@ -34,6 +34,8 @@ export function createApi(config) {
     requestMeeting: (start, topic) => request('portal/meeting-requests', { method: 'POST', body: { start, topic } }),
     interpretAvailability: (text) => request('portal/meeting-requests/interpret', { method: 'POST', body: { text } }),
     clientBrief: (data) => request('portal/brief', { method: 'POST', body: data, withClient: false }),
+    publicSlots: () => request('public/slots', { withClient: false }),
+    visitorMeeting: (data) => request('public/meeting', { method: 'POST', body: data, withClient: false }),
     visitorBrief: (data) => request('public/brief', { method: 'POST', body: data, withClient: false }),
     teamTasks: () => request('team/tasks', { withClient: false }),
   };

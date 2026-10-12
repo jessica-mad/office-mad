@@ -52,6 +52,10 @@ return new class($core) implements MAD_Oficina_Module {
             else wp_schedule_single_event(time(), self::NOTIFY_HOOK, [(int) $id]);
         });
         add_action(self::NOTIFY_HOOK, [$this, 'notify']);
+        // First meetings: inbox request once the email is confirmed (always asks).
+        add_action('madoficina_lead_verified', ['MAD_Oficina\\Visitors\\FirstMeeting', 'on_verified']);
+        add_filter('madoficina_approval_handler_' . \MAD_Oficina\Visitors\FirstMeeting::ACTION, fn() => ['MAD_Oficina\\Visitors\\FirstMeeting', 'approve']);
+        add_filter('madoficina_approval_form_' . \MAD_Oficina\Visitors\FirstMeeting::ACTION, ['MAD_Oficina\\Visitors\\FirstMeeting', 'render_form'], 10, 2);
         add_action(self::PURGE_HOOK, fn() => \MAD_Oficina\Visitors\Leads::purge_unverified(7));
         if ( ! wp_next_scheduled(self::PURGE_HOOK) ) wp_schedule_event(time() + 300, 'daily', self::PURGE_HOOK);
         foreach ( ['visitors_settings', 'lead_update', 'lead_convert', 'lead_delete'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -72,6 +76,7 @@ return new class($core) implements MAD_Oficina_Module {
             'privacy'   => ($s['privacy_url'] ?? '') ?: (get_privacy_policy_url() ?: ''),
             'login'     => wp_login_url(get_permalink() ?: home_url('/oficina/')),
             'brief'     => $this->brief_options(),
+            'first_meeting' => \MAD_Oficina\Visitors\FirstMeeting::available(),
             'rooms'     => \MAD_Oficina\Core\Agents\Characters::ROOMS,
         ] + (array) $config;
     }
@@ -91,6 +96,7 @@ return new class($core) implements MAD_Oficina_Module {
         $lead = \MAD_Oficina\Visitors\Leads::get($lead_id);
         $chat = MAD_Oficina_Core::instance()->get_module('chat');
         if ( ! $lead || ! $chat ) return;
+        if ( $lead['source'] === 'meeting' ) return; // the inbox card for the meeting already tells Jessica
         $labels = \MAD_Oficina\Visitors\Leads::SERVICES;
         $services = implode(', ', array_map(fn($k) => $labels[$k] ?? $k, $lead['services']));
         $title = $lead['client_id'] ? sprintf(__('Nuevo encargo de %s', 'mad-oficina'), $lead['company']) : sprintf(__('Nuevo brief de %1$s%2$s', 'mad-oficina'), $lead['name'], $lead['company'] ? ' (' . $lead['company'] . ')' : '');

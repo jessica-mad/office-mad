@@ -28,13 +28,21 @@ $labels = fn(array $keys, array $map) => implode(', ', array_map(fn($k) => $map[
             <tr><th scope="row"><?php esc_html_e('Email', 'mad-oficina'); ?></th><td><a href="mailto:<?php echo esc_attr($lead['email']); ?>"><?php echo esc_html($lead['email']); ?></a>
                 <?php echo $lead['verified_at'] ? ' <span class="madof-pill is-on">' . esc_html__('Confirmado', 'mad-oficina') . '</span>' : ' <span class="madof-pill">' . esc_html__('Sin confirmar', 'mad-oficina') . '</span>'; ?></td></tr>
             <?php if ( $lead['website'] ) : ?><tr><th scope="row"><?php esc_html_e('Web', 'mad-oficina'); ?></th><td><a href="<?php echo esc_url($lead['website']); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($lead['website']); ?></a></td></tr><?php endif; ?>
+            <?php if ( $lead['meeting_start'] ) : $ap = $lead['approval_id'] ? \MAD_Oficina\Core\Approvals::get($lead['approval_id']) : null; ?>
+            <tr><th scope="row"><?php esc_html_e('Reunión pedida', 'mad-oficina'); ?></th><td><?php echo esc_html(\MAD_Oficina\Visitors\FirstMeeting::label($lead['meeting_start'])); ?>
+                <?php if ( $ap ) : ?> · <?php echo esc_html(['pending' => __('en tu bandeja', 'mad-oficina'), 'processing' => __('creándose', 'mad-oficina'), 'approved' => __('aprobada', 'mad-oficina'), 'rejected' => __('descartada', 'mad-oficina')][$ap['status']] ?? $ap['status']); ?>
+                    <?php if ( $ap['status'] === 'pending' ) : ?> <a href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-bandeja#approval-' . $ap['id'])); ?>"><?php esc_html_e('Abrir la bandeja', 'mad-oficina'); ?></a><?php endif; ?>
+                <?php elseif ( ! $lead['verified_at'] ) : ?> · <?php esc_html_e('esperando a que confirme su email', 'mad-oficina'); ?><?php endif; ?></td></tr>
+            <?php endif; ?>
             <tr><th scope="row"><?php esc_html_e('Necesita', 'mad-oficina'); ?></th><td><?php echo esc_html($labels($lead['services'], Leads::SERVICES) ?: '—'); ?></td></tr>
             <tr><th scope="row"><?php esc_html_e('Plazo', 'mad-oficina'); ?></th><td><?php echo esc_html(Leads::TIMELINES[$lead['timeline']] ?? '—'); ?></td></tr>
             <tr><th scope="row"><?php esc_html_e('Presupuesto', 'mad-oficina'); ?></th><td><?php echo esc_html(Leads::BUDGETS[$lead['budget'] ?? ''] ?? '—'); ?></td></tr>
             <tr><th scope="row"><?php esc_html_e('Consentimiento', 'mad-oficina'); ?></th><td><?php echo esc_html($lead['client_id'] && ! $lead['consent_at'] ? __('Cliente (contrato)', 'mad-oficina') : $date($lead['consent_at'])); ?></td></tr>
         </tbody></table>
+        <?php if ( trim((string) $lead['message']) !== '' ) : ?>
         <h3><?php esc_html_e('Lo que nos cuenta', 'mad-oficina'); ?></h3>
         <div class="madof-quote"><?php echo nl2br(esc_html((string) $lead['message'])); ?></div>
+        <?php endif; ?>
 
         <?php echo AdminUi::form_open('lead_update'); ?>
             <input type="hidden" name="lead_id" value="<?php echo (int) $lead['id']; ?>">

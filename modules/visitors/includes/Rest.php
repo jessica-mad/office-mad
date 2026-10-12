@@ -34,6 +34,12 @@ final class Rest {
         register_rest_route(self::NS, '/public/brief', [
             'methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => [$this, 'visitor_brief'],
         ]);
+        register_rest_route(self::NS, '/public/slots', [
+            'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => [$this, 'slots'],
+        ]);
+        register_rest_route(self::NS, '/public/meeting', [
+            'methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => [$this, 'visitor_meeting'],
+        ]);
         register_rest_route(self::NS, '/public/verify', [
             'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => [$this, 'verify'],
             'args' => ['lead' => ['type' => 'integer', 'required' => true], 'token' => ['type' => 'string', 'required' => true]],
@@ -78,11 +84,40 @@ final class Rest {
         return rest_ensure_response(['ok' => true, 'verify' => true]);
     }
 
-    private function send_confirmation($id, $token, array $brief, $return){
+    public function slots(){
+        if ( ! Guard::allow('public-slots', 60, HOUR_IN_SECONDS) ) return new \WP_Error('madof_limit', __('Demasiadas consultas. Inténtalo en un rato.', 'mad-oficina'), ['status' => 429]);
+        $slots = FirstMeeting::offer();
+        if ( is_wp_error($slots) ) return rest_ensure_response(['slots' => [], 'error' => $slots->get_error_message()]);
+        return rest_ensure_response(['slots' => $slots, 'duration' => FirstMeeting::DURATION]);
+    }
+
+    public function visitor_meeting(\WP_REST_Request $req){
+        $p = (array) $req->get_json_params() + (array) $req->get_body_params();
+        if ( Guard::is_bot($p) ) return rest_ensure_response(['ok' => true, 'verify' => true]);
+        if ( empty($p['consent']) ) return new \WP_Error('madof_consent', __('Necesitamos tu consentimiento para guardar tus datos y responderte.', 'mad-oficina'), ['status' => 400]);
+        $ts = Guard::turnstile($this->secret(), $p['turnstile'] ?? '');
+        if ( is_wp_error($ts) ) return $ts;
+        $r = FirstMeeting::submit($p);
+        if ( is_wp_error($r) ) return $r;
+        $lead = Leads::get($r['lead']);
+        $sent = $this->send_confirmation($r['lead'], $r['token'], $lead, $p['return'] ?? '', $r['label']);
+        if ( ! $sent ) {
+            Leads::delete($r['lead']);
+            return new \WP_Error('madof_mail', __('No hemos podido enviarte el email de confirmación. Inténtalo más tarde, por favor.', 'mad-oficina'), ['status' => 500]);
+        }
+        return rest_ensure_response(['ok' => true, 'verify' => true, 'label' => $r['label']]);
+    }
+
+    private function send_confirmation($id, $token, array $brief, $return, $meeting_label = null){
         $return = wp_validate_redirect(esc_url_raw((string) $return), '') ?: ($this->settings()['portal_url'] ?? home_url('/oficina/'));
         $link = add_query_arg(['lead' => $id, 'token' => $token, 'return' => rawurlencode($return)], rest_url(self::NS . '/public/verify'));
-        $subject = __('Confirma tu mensaje a MAD', 'mad-oficina');
-        $body = sprintf(__("Hola, %s:\n\nGracias por escribirnos. Para que tu mensaje llegue a Jessica, confirma que este email es tuyo:\n\n%s\n\nEl enlace caduca en 3 días. Si no has sido tú, ignora este email y borraremos los datos.\n\nMAD · Marketing & Ads\nhttps://imad.pro", 'mad-oficina'), $brief['name'], $link);
+        if ( $meeting_label ) {
+            $subject = __('Confirma tu petición de reunión con MAD', 'mad-oficina');
+            $body = sprintf(__("Hola, %1\$s:\n\nHas pedido una primera reunión con Jessica para el %2\$s. Confirma que este email es tuyo para que le llegue la petición:\n\n%3\$s\n\nCuando la apruebe, te llegará la invitación de Google Calendar con el enlace de Meet. El enlace caduca en 3 días. Si no has sido tú, ignora este email y borraremos los datos.\n\nMAD · Marketing & Ads\nhttps://imad.pro", 'mad-oficina'), $brief['name'], $meeting_label, $link);
+        } else {
+            $subject = __('Confirma tu mensaje a MAD', 'mad-oficina');
+            $body = sprintf(__("Hola, %s:\n\nGracias por escribirnos. Para que tu mensaje llegue a Jessica, confirma que este email es tuyo:\n\n%s\n\nEl enlace caduca en 3 días. Si no has sido tú, ignora este email y borraremos los datos.\n\nMAD · Marketing & Ads\nhttps://imad.pro", 'mad-oficina'), $brief['name'], $link);
+        }
         $from = function(){ return __('MAD · Marketing & Ads', 'mad-oficina'); };
         add_filter('wp_mail_from_name', $from);
         $ok = wp_mail($brief['email'], $subject, $body);
@@ -97,8 +132,9 @@ final class Rest {
             wp_safe_redirect(add_query_arg('madof', 'enlace-no-valido', $return));
             exit;
         }
+        do_action('madoficina_lead_verified', $lead);
         do_action('madoficina_lead_created', $lead['id']);
-        wp_safe_redirect(add_query_arg('madof', 'confirmado', $return));
+        wp_safe_redirect(add_query_arg('madof', $lead['source'] === 'meeting' ? 'reunion-pedida' : 'confirmado', $return));
         exit;
     }
 

@@ -67,6 +67,8 @@ final class Leads {
             'verified_at' => $data['verified_at'] ?? null,
             'consent_at'  => $data['consent_at'] ?? null,
             'ip_hash'     => $data['ip_hash'] ?? null,
+            'meeting_start' => $data['meeting_start'] ?? null,
+            'meeting_end'   => $data['meeting_end'] ?? null,
             'created_at'  => $now,
             'updated_at'  => $now,
         ]);
@@ -172,6 +174,9 @@ final class Leads {
     private static function hydrate($row){
         $row['id'] = (int) $row['id'];
         $row['client_id'] = $row['client_id'] ? (int) $row['client_id'] : null;
+        $row['meeting_start'] = $row['meeting_start'] ? (int) $row['meeting_start'] : null;
+        $row['meeting_end'] = $row['meeting_end'] ? (int) $row['meeting_end'] : null;
+        $row['approval_id'] = $row['approval_id'] ? (int) $row['approval_id'] : null;
         $row['services'] = json_decode($row['services'] ?: '[]', true) ?: [];
         return $row;
     }

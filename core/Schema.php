@@ -285,6 +285,8 @@ final class Schema {
   consent_at datetime NULL,
   ip_hash char(64) NULL,
   approval_id bigint(20) unsigned NULL,
+  meeting_start bigint(20) NULL,
+  meeting_end bigint(20) NULL,
   notes text NULL,
   created_at datetime NOT NULL,
   updated_at datetime NOT NULL,

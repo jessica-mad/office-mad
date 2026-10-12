@@ -5,7 +5,7 @@ Se entrega por partes. Cada parte se puede desplegar sola.
 | Parte | Estado |
 |---|---|
 | 1 · Leads y brief (también «Nuevo encargo» para clientes) | **Hecha** |
-| 2 · Primera reunión con confirmación por email | Pendiente |
+| 2 · Primera reunión con confirmación por email | **Hecha** |
 | 3 · Charla con la recepcionista («Qué hacemos») | Pendiente |
 | 4 · Oficina con las salas cerradas (solo un velo oscuro, sin rediseñar) | **Hecha** (adelantada) |
 
@@ -13,7 +13,7 @@ Se entrega por partes. Cada parte se puede desplegar sola.
 
 ### Qué ve un visitante en `/oficina`
 Si no ha iniciado sesión, ve la **recepción abierta**: un saludo de la recepcionista, tres botones y «Ya soy cliente: entrar».
-- **Qué hacemos** y **Pedir una primera reunión** ponen «Pronto» hasta las partes 2 y 3.
+- **Qué hacemos** pone «Pronto» hasta la parte 3.
 - **Dejar un brief** abre un formulario con estos campos:
   - nombre, email, empresa y web;
   - qué necesita (web, ads, diseño, contenidos, vídeo u otra cosa);
@@ -66,3 +66,32 @@ Al borrar un cliente, también se borran sus leads.
   - los personajes siguen trabajando en penumbra.
 - **Al pulsar una sala cerrada o a su personaje,** sale el panel «Solo para clientes» con dos botones: «Ya soy cliente: entrar» y «Dejar un brief». La recepción y la recepcionista abren el menú de recepción.
 - **Sin dibujos nuevos:** el velo es un rectángulo que se dibuja por código encima de cada sala del mapa. Seguirá funcionando igual después del rediseño de la oficina.
+
+## Parte 2 · Primera reunión
+### Qué ve el visitante
+En recepción, **«Pedir una primera reunión»** abre:
+- **6 huecos reales de 30 minutos** de tu agenda. Se calculan con las mismas reglas y calendarios de MAD Oficina → Agenda, en días distintos.
+- Sus datos: nombre, email, empresa (opcional), de qué quiere hablar (opcional) y el consentimiento.
+
+Si la agenda no está conectada o no hay huecos, se le ofrece dejar un brief.
+
+### Flujo
+1. El visitante elige un hueco y envía el formulario. Le llega el email «Confirma tu petición de reunión con MAD».
+2. Al confirmar, la petición llega a **tu bandeja y a tu Chat**: «Primera reunión: nombre (empresa) · día y hora».
+   - Ese hueco deja de ofrecerse a otros visitantes y clientes.
+   - Hasta que confirma el email, el hueco no se reserva.
+3. **Al aprobar:**
+   - vuelvo a mirar tu calendario;
+   - creo el evento «Empresa x MAD · Primera reunión» con Meet;
+   - Google le envía la invitación;
+   - el lead pasa a «Contactado».
+
+   Antes de aprobar puedes cambiar la hora, la duración, los invitados y el tema.
+4. **Si descartas,** no le llega nada automático. Escríbele tú desde el lead.
+
+### Seguridad
+- **Las primeras reuniones siempre te preguntan.** Aunque des autonomía a las reuniones de clientes, esa autonomía no se aplica a desconocidos.
+- **Protecciones del formulario:** el mismo campo trampa, Turnstile y confirmación por email que el brief.
+- **Límites:** 2 peticiones al día por IP y por email.
+- **La consulta de huecos públicos** tiene un límite de 60 por hora por IP.
+- **Pequeña caché de 1 minuto** en los huecos que ve el visitante, para que nadie pueda saturar tu cuenta de Google. Al enviar el formulario y al aprobar, el hueco se comprueba siempre en directo.

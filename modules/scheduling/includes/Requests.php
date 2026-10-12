@@ -16,6 +16,7 @@ final class Requests {
 
     const AGENT  = 'scheduler';
     const ACTION = 'meeting_request';
+    const FIRST_MEETING = 'first_meeting'; // visitors (Visitantes module): never autonomous
     const DAILY_INTERPRETATIONS = 20;
 
     private $settings;
@@ -28,9 +29,14 @@ final class Requests {
     public function calendars(){ return array_values(array_filter((array) ($this->settings['calendars'] ?? ['primary']))) ?: ['primary']; }
     private function tz(){ return wp_timezone(); }
 
-    /** All free slots in the horizon, computed from live free/busy. @return array|\WP_Error */
-    public function free_slots(){
+    /**
+     * All free slots in the horizon, computed from live free/busy.
+     * @param int|null $duration minutes, to override the usual duration (e.g. 30 for a first meeting)
+     * @return array|\WP_Error
+     */
+    public function free_slots($duration = null){
         $rules = $this->rules();
+        if ( $duration ) $rules['duration'] = max(15, min(240, (int) $duration));
         $now = time();
         $busy = Calendar::busy($now, $now + ((int) $rules['horizon_days'] + 1) * DAY_IN_SECONDS, $this->calendars());
         if ( is_wp_error($busy) ) return $busy;
@@ -41,7 +47,7 @@ final class Requests {
     private function pending_holds(){
         global $wpdb;
         $rows = $wpdb->get_col($wpdb->prepare(
-            'SELECT payload FROM ' . Schema::table('approvals') . " WHERE action_type = %s AND status IN ('pending','processing')", self::ACTION
+            'SELECT payload FROM ' . Schema::table('approvals') . " WHERE action_type IN (%s, %s) AND status IN ('pending','processing')", self::ACTION, self::FIRST_MEETING
         ));
         $holds = [];
         foreach ( $rows as $json ) {
@@ -49,6 +55,19 @@ final class Requests {
             if ( ! empty($p['start']) && ! empty($p['end']) ) $holds[] = [(int) $p['start'], (int) $p['end']];
         }
         return $holds;
+    }
+
+    /**
+     * Live re-check before creating an event: Jessica's calendar changes a lot.
+     * @return true|\WP_Error
+     */
+    public function check_free($start, $end){
+        $buffer = (int) $this->rules()['buffer'] * 60;
+        $busy = Calendar::busy($start - $buffer, $end + $buffer, $this->calendars());
+        if ( is_wp_error($busy) ) return $busy;
+        $clash = array_filter($busy, fn($b) => $b[0] < $end + $buffer && $b[1] > $start - $buffer);
+        if ( $clash ) return new \WP_Error('madof_req_busy', __('Ese hueco ya no está libre en tu calendario. Cambia la hora en el formulario y vuelve a aprobar.', 'mad-oficina'));
+        return true;
     }
 
     public function present(array $slots){
@@ -170,12 +189,8 @@ final class Requests {
         $duration = max(15, min(240, (int) ($input['duration'] ?? $this->rules()['duration'])));
         $end = $start + $duration * 60;
 
-        // Live re-check: Jessica's calendar changes a lot.
-        $buffer = (int) $this->rules()['buffer'] * 60;
-        $busy = Calendar::busy($start - $buffer, $end + $buffer, $this->calendars());
-        if ( is_wp_error($busy) ) return $busy;
-        $clash = array_filter($busy, fn($b) => $b[0] < $end + $buffer && $b[1] > $start - $buffer);
-        if ( $clash ) return new \WP_Error('madof_req_busy', __('Ese hueco ya no está libre en tu calendario. Cambia la hora en el formulario y vuelve a aprobar.', 'mad-oficina'));
+        $free = $this->check_free($start, $end);
+        if ( is_wp_error($free) ) return $free;
 
         $attendees = [];
         foreach ( preg_split('/[\s,;]+/', (string) ($input['attendees'] ?? $p['email']), -1, PREG_SPLIT_NO_EMPTY) as $e ) {

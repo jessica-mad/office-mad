@@ -46,7 +46,7 @@ export const MENU = [
 
 export const VISITOR_MENU = [
   { panel: 'que-hacemos', label: 'Qué hacemos', icon: 'chat', soon: true },
-  { panel: 'primera-reunion', label: 'Pedir una primera reunión', icon: 'calendar', soon: true },
+  { panel: 'primera-reunion', label: 'Pedir una primera reunión', icon: 'calendar' },
   { panel: 'brief', label: 'Dejar un brief', icon: 'pencil' },
 ];
 
@@ -74,7 +74,6 @@ export function greeting(me) {
 function briefForm(ctx, { visitor = false, preview = false } = {}) {
   const o = (visitor ? ctx.config.brief : ctx.me.brief) || { services: {}, timelines: {}, budgets: {} };
   const opts = (map, sel) => Object.entries(map).map(([k, l]) => `<option value="${esc(k)}" ${k === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
-  const privacy = ctx.config.privacy || ctx.me.links?.privacy;
   return `
   <form class="madof-brief" novalidate>
     ${visitor ? `<p class="madof-lead">Cuéntanos qué tienes entre manos. Jessica lo lee personalmente y te responde en uno o dos días laborables.</p>` : '<p class="madof-lead">¿Qué quieres que hagamos? Jessica lo revisa y te propone los siguientes pasos.</p>'}
@@ -92,11 +91,7 @@ function briefForm(ctx, { visitor = false, preview = false } = {}) {
       <label>Plazo aproximado <select name="timeline">${opts(o.timelines, 'unknown')}</select></label>
       <label>Presupuesto orientativo <span class="madof-meta">(opcional)</span><select name="budget">${opts(o.budgets, '')}</select></label>
     </div>
-    ${visitor ? `
-    <div class="madof-hp" aria-hidden="true"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></div>
-    <label class="madof-consent"><input type="checkbox" name="consent" value="1" required>
-      <span>Acepto que MAD guarde estos datos para responderme${privacy ? ` (<a href="${esc(privacy)}" target="_blank" rel="noopener">política de privacidad</a>)` : ''}.</span></label>
-    ${ctx.config.turnstile ? '<div class="madof-turnstile"></div>' : ''}` : ''}
+    ${visitor ? consentField(ctx) : ''}
     <p class="madof-meta" aria-live="polite" data-status></p>
     <button class="madof-btn" type="submit" ${preview ? 'disabled' : ''}>${icon('send')} Enviar</button>
   </form>`;
@@ -116,19 +111,37 @@ function loadTurnstile() {
   return turnstileScript;
 }
 
-function mountBrief(el, ctx, visitor) {
-  const form = el.querySelector('form.madof-brief');
-  if (!form) return;
-  const status = form.querySelector('[data-status]');
-  const button = form.querySelector('button[type=submit]');
+/** Renders Turnstile in `.madof-turnstile` (if any). @returns {{needed:boolean, token():string, reset():void}} */
+function mountTurnstile(form, ctx, status) {
+  const box = form.querySelector('.madof-turnstile');
   let token = '';
   let widget = null;
-  const box = form.querySelector('.madof-turnstile');
   if (box) {
     loadTurnstile()
       .then((ts) => { widget = ts.render(box, { sitekey: ctx.config.turnstile, language: 'es', callback: (t) => { token = t; }, 'expired-callback': () => { token = ''; } }); })
       .catch(() => { status.textContent = 'No se ha podido cargar la comprobación anti-robots. Recarga la página.'; });
   }
+  return {
+    needed: !!box,
+    token: () => token,
+    reset: () => { if (widget !== null) { window.turnstile?.reset(widget); token = ''; } },
+  };
+}
+
+const consentField = (ctx) => {
+  const privacy = ctx.config.privacy || ctx.me.links?.privacy;
+  return `<div class="madof-hp" aria-hidden="true"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></div>
+    <label class="madof-consent"><input type="checkbox" name="consent" value="1" required>
+      <span>Acepto que MAD guarde estos datos para responderme${privacy ? ` (<a href="${esc(privacy)}" target="_blank" rel="noopener">política de privacidad</a>)` : ''}.</span></label>
+    ${ctx.config.turnstile ? '<div class="madof-turnstile"></div>' : ''}`;
+};
+
+function mountBrief(el, ctx, visitor) {
+  const form = el.querySelector('form.madof-brief');
+  if (!form) return;
+  const status = form.querySelector('[data-status]');
+  const button = form.querySelector('button[type=submit]');
+  const ts = mountTurnstile(form, ctx, status);
   form.addEventListener('input', () => { if (!button.disabled) status.textContent = ''; });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -139,8 +152,8 @@ function mountBrief(el, ctx, visitor) {
       if (!data.name?.trim()) { status.textContent = 'Dinos tu nombre.'; return form.elements.name.focus(); }
       if (!form.elements.email.checkValidity() || !data.email) { status.textContent = 'Revisa el email.'; return form.elements.email.focus(); }
       if (!data.consent) { status.textContent = 'Marca la casilla de consentimiento para poder enviarlo.'; return form.elements.consent.focus(); }
-      if (box && !token) { status.textContent = 'Espera un segundo a la comprobación anti-robots.'; return; }
-      data.turnstile = token;
+      if (ts.needed && !ts.token()) { status.textContent = 'Espera un segundo a la comprobación anti-robots.'; return; }
+      data.turnstile = ts.token();
       data.return = window.location.href.split('#')[0];
     }
     if ((data.message || '').trim().length < 10) { status.textContent = 'Cuéntanos un poco más del proyecto.'; return form.elements.message.focus(); }
@@ -154,7 +167,69 @@ function mountBrief(el, ctx, visitor) {
     } catch (err) {
       status.textContent = err.message;
       button.disabled = false;
-      if (widget !== null) { window.turnstile?.reset(widget); token = ''; }
+      ts.reset();
+    }
+  });
+}
+
+/* ───────────── first meeting (visitors) ───────────── */
+async function firstMeetingForm(ctx) {
+  const data = await ctx.api.publicSlots();
+  if (data.error || !data.slots.length) {
+    return `<p class="madof-lead">${esc(data.error || 'Ahora mismo no hay huecos libres en los próximos días.')}</p>
+      <p><button type="button" class="madof-btn" data-panel="brief">${icon('pencil')} Dejar un brief</button></p>`;
+  }
+  return `
+  <form class="madof-brief madof-first-meeting" novalidate>
+    <p class="madof-lead">Una primera charla de ${Number(data.duration) || 30} minutos por Google Meet con Jessica, para conocernos y ver cómo podemos ayudarte. Elige un hueco:</p>
+    <div class="madof-slots" role="radiogroup" aria-label="Huecos libres">${slotList(data.slots)}</div>
+    <div class="madof-fields">
+      <label>Tu nombre <input name="name" autocomplete="name" required maxlength="120"></label>
+      <label>Email <span class="madof-meta">(te llegará la invitación)</span><input name="email" type="email" autocomplete="email" required maxlength="190"></label>
+      <label>Empresa o proyecto <span class="madof-meta">(opcional)</span><input name="company" autocomplete="organization" maxlength="160"></label>
+    </div>
+    <label>¿De qué te gustaría hablar? <span class="madof-meta">(opcional)</span><textarea name="topic" rows="3" maxlength="1000"></textarea></label>
+    ${consentField(ctx)}
+    <p class="madof-meta" aria-live="polite" data-status></p>
+    <button class="madof-btn" type="submit">${icon('check')} Pedir la reunión</button>
+    <p class="madof-meta">¿Prefieres contarnos el proyecto por escrito? <button type="button" class="madof-link" data-panel="brief">Deja un brief</button>.</p>
+  </form>`;
+}
+
+function mountFirstMeeting(el, ctx) {
+  const form = el.querySelector('form.madof-first-meeting');
+  if (!form) return;
+  const status = form.querySelector('[data-status]');
+  const button = form.querySelector('button[type=submit]');
+  const slots = form.querySelector('.madof-slots');
+  const ts = mountTurnstile(form, ctx, status);
+  let chosen = null;
+  slots.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-start]');
+    if (!b) return;
+    slots.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    chosen = Number(b.dataset.start);
+    status.textContent = `Has elegido: ${b.textContent.trim()}`;
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (!chosen) { status.textContent = 'Primero elige uno de los huecos.'; return slots.querySelector('button')?.focus(); }
+    if (!data.name?.trim()) { status.textContent = 'Dinos tu nombre.'; return form.elements.name.focus(); }
+    if (!form.elements.email.checkValidity() || !data.email) { status.textContent = 'Revisa el email: ahí te llegará la invitación.'; return form.elements.email.focus(); }
+    if (!data.consent) { status.textContent = 'Marca la casilla de consentimiento para poder enviarlo.'; return form.elements.consent.focus(); }
+    if (ts.needed && !ts.token()) { status.textContent = 'Espera un segundo a la comprobación anti-robots.'; return; }
+    Object.assign(data, { start: chosen, turnstile: ts.token(), return: window.location.href.split('#')[0].split('?')[0] });
+    button.disabled = true; status.textContent = 'Enviando…';
+    try {
+      const res = await ctx.api.visitorMeeting(data);
+      el.innerHTML = `<div class="madof-request is-ok">${pill('Casi listo', 'is-on')}<p class="madof-lead" tabindex="-1">Te hemos enviado un email a <strong>${esc(data.email)}</strong>.</p>
+        <p>Abre el enlace para confirmar tu petición${res.label ? ` para el <strong>${esc(res.label)}</strong>` : ''}. Cuando Jessica la apruebe, te llegará la invitación de Google Calendar con el enlace de Meet. Si no ves el email, mira en spam.</p></div>`;
+      el.querySelector('.madof-lead')?.focus();
+    } catch (err) {
+      status.textContent = err.message;
+      button.disabled = false;
+      ts.reset();
     }
   });
 }
@@ -381,7 +456,11 @@ export const PANELS = {
       <button type="button" class="madof-btn is-ghost" data-panel="brief">${icon('pencil')} Dejar un brief</button></p>`,
   },
   'que-hacemos': { kicker: 'Recepción', title: 'Qué hacemos', render: () => soon('Muy pronto podrás charlar aquí con la recepcionista sobre lo que hacemos en MAD. Mientras tanto, déjanos un brief y te respondemos.') },
-  'primera-reunion': { kicker: 'Recepción', title: 'Pedir una primera reunión', render: () => soon('Muy pronto podrás elegir aquí un hueco de la agenda de Jessica. Mientras tanto, déjanos un brief y te proponemos fecha.') },
+  'primera-reunion': {
+    kicker: 'Recepción', title: 'Pedir una primera reunión',
+    render: (ctx) => firstMeetingForm(ctx),
+    mount: (el, ctx) => mountFirstMeeting(el, ctx),
+  },
   bandeja: {
     kicker: 'Despacho de gerencia', title: 'Bandeja de gerencia',
     render: ({ me }) => {

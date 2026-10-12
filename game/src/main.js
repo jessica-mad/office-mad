@@ -134,6 +134,7 @@ function visitorMe(config) {
 function notice() {
   const v = new URLSearchParams(window.location.search).get('madof');
   if (v === 'confirmado') return '<div class="madof-request is-ok madof-notice" role="status"><p class="madof-lead">¡Confirmado! Jessica ya tiene tu mensaje y te responderá pronto.</p></div>';
+  if (v === 'reunion-pedida') return '<div class="madof-request is-ok madof-notice" role="status"><p class="madof-lead">¡Confirmado! Jessica ya tiene tu petición de reunión. Cuando la apruebe, te llegará la invitación de Google Calendar con el enlace de Meet.</p></div>';
   if (v === 'enlace-no-valido') return '<div class="madof-request madof-notice" role="status"><p>Ese enlace no es válido o ya se usó. Si tu mensaje no llegó, vuelve a enviarlo.</p></div>';
   return '';
 }
