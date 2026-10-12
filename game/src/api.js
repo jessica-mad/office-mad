@@ -29,6 +29,14 @@ export function createApi(config) {
     me: () => request('me', { withClient: false }),
     state: () => request('office/state', { withClient: false }),
     section: (name) => request('portal/' + name),
+    invoices: () => request('portal/invoices'),
+    // Opened in a new tab, so the REST nonce goes in the URL (cookie auth needs it).
+    invoicePdfUrl(id) {
+      const url = new URL(config.rest + 'portal/invoices/' + Number(id) + '/pdf', window.location.origin);
+      if (clientId) url.searchParams.set('client', clientId);
+      if (config.nonce) url.searchParams.set('_wpnonce', config.nonce);
+      return url.toString();
+    },
     chatHistory: () => request('portal/chat'),
     chatSend: (message) => request('portal/chat', { method: 'POST', body: { message } }),
     meetingRequests: () => request('portal/meeting-requests'),

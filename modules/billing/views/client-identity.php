@@ -16,7 +16,7 @@ usort($unlinked, fn($a, $b) => (isset($suggested[$b['id']]) <=> isset($suggested
 ?>
 <section class="madof-card">
     <span class="madof-kicker"><?php esc_html_e('Datos fiscales', 'mad-oficina'); ?></span>
-    <p class="description"><?php esc_html_e('Cómo se llama legalmente este cliente en las facturas. Puede ser distinto del nombre con el que hablamos con él; los dos son el mismo cliente. Si factura con varias empresas, une todas.', 'mad-oficina'); ?></p>
+    <p class="description"><?php esc_html_e('Cómo se llama legalmente este cliente en las facturas. Puede ser distinto del nombre con el que hablamos con él; los dos son el mismo cliente. Si cambió de razón social o factura con varias empresas, une todas: el historial de cada una se conserva y se ve junto. Marca las antiguas como «anterior» para que las facturas nuevas salgan con la actual.', 'mad-oficina'); ?></p>
 
     <?php if ( $linked ) : ?>
     <table class="madof-table">
@@ -26,6 +26,7 @@ usort($unlinked, fn($a, $b) => (isset($suggested[$b['id']]) <=> isset($suggested
             <tr>
                 <td><a href="<?php echo esc_url($billing . '&tab=clients&profile=' . $p['id']); ?>"><strong><?php echo esc_html($p['legal_name']); ?></strong></a>
                     <?php if ( $p['series'] === 'AR' ) echo ' <span class="madof-pill">AR</span>'; ?>
+                    <?php if ( count($linked) > 1 ) echo ' <span class="madof-pill' . ($p['status'] === 'active' ? ' is-on' : '') . '">' . esc_html($p['status'] === 'active' ? __('Actual', 'mad-oficina') : __('Anterior', 'mad-oficina')) . '</span>'; ?>
                     <?php if ( $p['email'] ) echo '<br><small>' . esc_html($p['email']) . '</small>'; ?></td>
                 <td><?php echo esc_html((string) $p['tax_id'] ?: '—'); ?></td>
                 <td><?php echo esc_html(trim(implode(', ', array_filter([$p['address'], $p['city']]))) ?: '—'); ?></td>
@@ -35,6 +36,11 @@ usort($unlinked, fn($a, $b) => (isset($suggested[$b['id']]) <=> isset($suggested
                     <?php if ( $st['unpaid'] ) echo '<br><small>' . esc_html(sprintf(_n('%d sin cobrar', '%d sin cobrar', $st['unpaid'], 'mad-oficina'), $st['unpaid'])) . '</small>'; ?>
                 <?php else : ?>—<?php endif; ?></td>
                 <td class="madof-row-actions">
+                    <?php if ( count($linked) > 1 ) : echo AdminUi::form_open('billing_profile_status', 'madof-inline'); ?>
+                        <input type="hidden" name="profile_id" value="<?php echo (int) $p['id']; ?>">
+                        <input type="hidden" name="status" value="<?php echo $p['status'] === 'active' ? 'inactive' : 'active'; ?>">
+                        <button class="madof-link"><?php echo esc_html($p['status'] === 'active' ? __('Marcar como anterior', 'mad-oficina') : __('Marcar como actual', 'mad-oficina')); ?></button>
+                    </form><?php endif; ?>
                     <?php echo AdminUi::form_open('billing_unlink', 'madof-inline'); ?>
                         <input type="hidden" name="profile_id" value="<?php echo (int) $p['id']; ?>">
                         <input type="hidden" name="from_client" value="1">

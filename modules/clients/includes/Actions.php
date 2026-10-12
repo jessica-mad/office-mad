@@ -17,7 +17,7 @@ final class Actions {
 
     const ACTIONS = [
         'client_save', 'client_delete', 'contact_save', 'contact_delete',
-        'user_add', 'user_remove', 'user_send_access',
+        'user_add', 'user_remove', 'user_send_access', 'user_areas',
         'team_save', 'team_delete', 'demo_seed', 'demo_purge',
     ];
 
@@ -112,6 +112,7 @@ final class Actions {
         $linked = Clients::link_user($client_id, $user->ID);
         if ( is_wp_error($linked) ) return self::fail(self::client_url($client_id), $linked->get_error_message());
         if ( ! in_array(Roles::ROLE_CLIENT, (array) $user->roles, true) ) $user->add_role(Roles::ROLE_CLIENT);
+        if ( isset($p['areas_sent']) ) \MAD_Oficina\Core\PortalAreas::set($client_id, $user->ID, (array) ($p['areas'] ?? []));
 
         return self::ok(self::client_url($client_id), sprintf(__('%s ya tiene acceso al portal. No se ha enviado ningún email.', 'mad-oficina'), $email));
     }
@@ -124,6 +125,17 @@ final class Actions {
             self::revoke_portal($user);
         }
         return self::ok(self::client_url($client_id), __('Acceso al portal retirado.', 'mad-oficina'));
+    }
+
+    /** Which parts of the office this person sees (e.g. invoices only for whoever pays). */
+    private static function user_areas($p){
+        $client_id = (int) ($p['client_id'] ?? 0);
+        $user = get_user_by('id', (int) ($p['user_id'] ?? 0));
+        if ( ! $user || \MAD_Oficina\Core\ClientContext::client_for_user($user->ID) !== $client_id ) {
+            return self::fail(self::client_url($client_id), __('Usuario no encontrado.', 'mad-oficina'));
+        }
+        \MAD_Oficina\Core\PortalAreas::set($client_id, $user->ID, (array) ($p['areas'] ?? []));
+        return self::ok(self::client_url($client_id), sprintf(__('Guardado lo que ve %s en su oficina.', 'mad-oficina'), $user->display_name));
     }
 
     private static function user_send_access($p){

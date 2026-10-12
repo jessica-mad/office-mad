@@ -54,6 +54,7 @@ final class Schema {
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   client_id bigint(20) unsigned NOT NULL,
   wp_user_id bigint(20) unsigned NOT NULL,
+  areas varchar(255) DEFAULT NULL,
   created_at datetime NOT NULL,
   PRIMARY KEY  (id),
   UNIQUE KEY wp_user_id (wp_user_id),

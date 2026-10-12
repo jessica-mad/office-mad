@@ -75,8 +75,20 @@ final class Profiles {
     /** Fiscal profiles of an office client (usually one; a client may invoice through several companies). */
     public static function for_client($client_id){
         global $wpdb;
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE client_id = %d ORDER BY legal_name', $client_id), ARRAY_A);
+        // Current ones first; a client that changed company keeps its previous legal name as «inactive».
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . " WHERE client_id = %d ORDER BY status = 'active' DESC, legal_name", $client_id), ARRAY_A);
         return array_map([self::class, 'hydrate'], $rows);
+    }
+
+    /** The legal name new invoices of a client go to (null when it has none active). */
+    public static function current_for_client($client_id){
+        foreach ( self::for_client($client_id) as $p ) if ( $p['status'] === 'active' ) return $p;
+        return null;
+    }
+
+    public static function set_status($profile_id, $status){
+        global $wpdb;
+        return $wpdb->update(self::table(), ['status' => $status === 'inactive' ? 'inactive' : 'active', 'updated_at' => Time::now()], ['id' => $profile_id]);
     }
 
     /** Fiscal profiles not yet joined to an office client (Argentina series included: they are clients too). */

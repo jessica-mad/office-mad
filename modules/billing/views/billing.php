@@ -132,7 +132,7 @@ $status_pill = function($inv){
             </div>
             <div class="madof-cols">
                 <label><?php esc_html_e('Cliente de la oficina', 'mad-oficina'); ?><select name="client_id"><option value=""><?php esc_html_e('— Ninguno —', 'mad-oficina'); ?></option><?php foreach ( Clients::all() as $c ) echo '<option value="' . (int) $c['id'] . '" ' . selected((int) $p['client_id'], (int) $c['id'], false) . '>' . esc_html($c['code'] . ' · ' . $c['name']) . '</option>'; ?></select></label>
-                <label><?php esc_html_e('Estado', 'mad-oficina'); ?><select name="status"><option value="active" <?php selected($p['status'], 'active'); ?>><?php esc_html_e('Activo', 'mad-oficina'); ?></option><option value="inactive" <?php selected($p['status'], 'inactive'); ?>><?php esc_html_e('Ya no trabajamos', 'mad-oficina'); ?></option></select></label>
+                <label><?php esc_html_e('Estado', 'mad-oficina'); ?><select name="status"><option value="active" <?php selected($p['status'], 'active'); ?>><?php esc_html_e('Activo', 'mad-oficina'); ?></option><option value="inactive" <?php selected($p['status'], 'inactive'); ?>><?php esc_html_e('Inactiva (ya no trabajamos o razón social anterior)', 'mad-oficina'); ?></option></select></label>
             </div>
             <label><?php esc_html_e('Notas', 'mad-oficina'); ?><textarea name="notes" rows="2"><?php echo esc_textarea((string) $p['notes']); ?></textarea></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>

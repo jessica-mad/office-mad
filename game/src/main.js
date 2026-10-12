@@ -2,7 +2,7 @@
 import './portal.css';
 import { createApi } from './api.js';
 import { icon } from './icons.js';
-import { PANELS, ROOM_PANEL, CHARACTER_PANEL, menuButtons, greeting, esc } from './panels.js';
+import { PANELS, ROOM_PANEL, CHARACTER_PANEL, menuButtons, greeting, esc, canSee } from './panels.js';
 
 const POLL_MS = 25000;
 const store = {
@@ -225,6 +225,11 @@ function createDialog(root, ctx, onToggle = () => {}) {
     onToggle(true);
     if (panel.needsClient && ctx.me.role === 'manager' && !ctx.api.getClient()) {
       body.innerHTML = '<p class="madof-empty">Elige arriba un cliente para ver su oficina tal y como la ve él.</p>';
+      root.querySelector('.madof-close').focus();
+      return;
+    }
+    if (!canSee(ctx.me, name)) {
+      body.innerHTML = '<p class="madof-empty">Esta parte de la oficina no está abierta para tu usuario. Si la necesitas, pídeselo a Jessica.</p>';
       root.querySelector('.madof-close').focus();
       return;
     }

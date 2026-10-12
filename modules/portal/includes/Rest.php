@@ -5,6 +5,7 @@ use MAD_Oficina\Core\Agents\Characters;
 use MAD_Oficina\Core\Agents\ClaudeClient;
 use MAD_Oficina\Core\ClientContext;
 use MAD_Oficina\Core\OfficeState;
+use MAD_Oficina\Core\PortalAreas;
 use MAD_Oficina\Core\Repo\Clients;
 use MAD_Oficina\Core\Repo\Portal;
 use MAD_Oficina\Core\Repo\Team;
@@ -37,6 +38,7 @@ final class Rest {
             'permission_callback' => [$this, 'can_portal'],
         ]);
 
+        // Route = area (see PortalAreas): each person of the company only reads what is open for them.
         $sections = [
             'timeline'  => fn($id) => Portal::timeline($id),
             'meetings'  => fn($id) => Portal::meetings($id),
@@ -47,9 +49,10 @@ final class Rest {
         foreach ( $sections as $route => $reader ){
             register_rest_route(self::NS, '/portal/' . $route, [
                 'methods' => 'GET', 'args' => $client_arg, 'permission_callback' => [$this, 'can_portal'],
-                'callback' => function(\WP_REST_Request $req) use ($reader){
+                'callback' => function(\WP_REST_Request $req) use ($reader, $route){
                     $client_id = $this->client_or_error($req);
                     if ( is_wp_error($client_id) ) return $client_id;
+                    if ( ! PortalAreas::can($route) ) return PortalAreas::denied();
                     return rest_ensure_response($reader($client_id));
                 },
             ]);
@@ -113,6 +116,7 @@ final class Rest {
             'user'       => ['name' => $user->first_name ?: $user->display_name],
             'role'       => $role,
             'client'     => $client,
+            'areas'      => PortalAreas::for_user($user->ID),
             'characters' => $characters,
             'rooms'      => Characters::ROOMS,
             'chat'       => [

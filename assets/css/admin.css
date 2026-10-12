@@ -97,3 +97,7 @@
 .madof-scroll{overflow-x:auto;max-width:100%}
 .madof-scroll .madof-table{min-width:1100px}
 .madof-scroll .madof-table td,.madof-scroll .madof-table th{white-space:nowrap}
+.madof-areas{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.madof-areas label.madof-check{display:inline-flex;flex-direction:row;align-items:center;gap:6px;font-weight:300;margin:0}
+.madof-areas small{flex-basis:100%}
+.madof-areas .madof-btn{margin-left:auto}

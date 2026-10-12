@@ -43,9 +43,10 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk'] as $a ) {
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
+        add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
         // One client, two faces: the office card shows the fiscal data it invoices under.
         add_action('madoficina_client_edit_identity', [$this, 'render_client_identity']);
         add_action('madoficina_client_list_head', [$this, 'render_client_list_head']);
@@ -148,6 +149,18 @@ return new class($core) implements MAD_Oficina_Module {
         \MAD_Oficina\Billing\Profiles::link($profile['id'], null);
         $msg = sprintf(__('«%s» ya no está unido a este cliente. Sus facturas se conservan.', 'mad-oficina'), $profile['legal_name']);
         $client && ! empty($_POST['from_client']) ? $this->back_to_client($client, $msg) : $this->back(['tab' => 'clients', 'profile' => $profile['id']], $msg);
+    }
+
+    /** A client that changed company: the old legal name stays (with its history) as «anterior». */
+    public function handle_billing_profile_status(){
+        $this->guard('billing_profile_status');
+        $profile = \MAD_Oficina\Billing\Profiles::get(absint($_POST['profile_id'] ?? 0));
+        if ( ! $profile || ! $profile['client_id'] ) $this->back(['tab' => 'clients'], __('Esos datos fiscales no existen.', 'mad-oficina'), 'error');
+        $status = ($_POST['status'] ?? '') === 'inactive' ? 'inactive' : 'active';
+        \MAD_Oficina\Billing\Profiles::set_status($profile['id'], $status);
+        $this->back_to_client($profile['client_id'], $status === 'active'
+            ? sprintf(__('«%s» vuelve a ser una razón social actual.', 'mad-oficina'), $profile['legal_name'])
+            : sprintf(__('«%s» queda como razón social anterior. Su historial sigue en la ficha y en su oficina.', 'mad-oficina'), $profile['legal_name']));
     }
 
     /** New fiscal data for an office client that has never been invoiced. */

@@ -37,7 +37,7 @@ export const MENU = [
   { panel: 'tareas', label: 'Tareas en compromiso', icon: 'check' },
   { panel: 'ideas', label: 'Ideas para el futuro', icon: 'bulb' },
   { panel: 'documentos', label: 'Mis documentos', icon: 'folder' },
-  { panel: 'facturas', label: 'Mis facturas y presupuestos', icon: 'receipt', soon: true },
+  { panel: 'facturas', label: 'Mis facturas y presupuestos', icon: 'receipt' },
   { panel: 'campanas', label: 'Mis campañas', icon: 'megaphone', soon: true },
   { panel: 'reunion', label: 'Pedir una reunión', icon: 'plus' },
   { panel: 'encargo', label: 'Nuevo encargo', icon: 'pencil' },
@@ -50,12 +50,16 @@ export const VISITOR_MENU = [
   { panel: 'brief', label: 'Dejar un brief', icon: 'pencil' },
 ];
 
+// Panel → area of the office it shows (see PortalAreas on the server, which is what enforces it).
+export const PANEL_AREA = { proyecto: 'timeline', reuniones: 'meetings', tareas: 'tasks', ideas: 'ideas', documentos: 'documents', estudio: 'tasks', facturas: 'billing' };
+export const canSee = (me, panel) => !PANEL_AREA[panel] || !Array.isArray(me.areas) || me.areas.includes(PANEL_AREA[panel]);
+
 export function menuButtons(me, { compact = false } = {}) {
   const items = me.role === 'visitor' ? VISITOR_MENU
     : me.role === 'team'
     ? [{ panel: 'mis-tareas', label: 'Mis encargos', icon: 'check' }]
     : MENU.map((m) => (m.panel === 'encargo' ? { ...m, soon: !me.brief } : m))
-      .filter((m) => !m.chat || me.chat.enabled).concat(me.role === 'manager' ? [{ panel: 'bandeja', label: 'Bandeja de gerencia', icon: 'inbox' }] : []);
+      .filter((m) => (!m.chat || me.chat.enabled) && canSee(me, m.panel)).concat(me.role === 'manager' ? [{ panel: 'bandeja', label: 'Bandeja de gerencia', icon: 'inbox' }] : []);
   return `<div class="madof-menu ${compact ? 'is-compact' : ''}">${items.map((m) => `
     <button type="button" class="madof-menu-btn" data-panel="${m.panel}">
       <span class="madof-menu-icon">${icon(m.icon)}</span><span class="madof-menu-label">${esc(m.label)}${m.soon ? '<span class="madof-tag">Pronto</span>' : ''}</span>
@@ -476,7 +480,26 @@ export const PANELS = {
     },
   },
 
-  facturas: { kicker: 'Administración', title: 'Facturas y presupuestos', render: () => soon('Muy pronto verás aquí tus facturas y presupuestos, con su estado (pendiente o pagada).') },
+  facturas: {
+    kicker: 'Administración', title: 'Facturas y presupuestos', needsClient: true,
+    async render({ api }) {
+      const { invoices, pending } = await api.invoices();
+      if (!invoices.length) return empty('Aún no hay facturas tuyas por aquí. Cuando te emitamos una, la verás con su estado.');
+      const money = (n, cur = 'EUR') => new Intl.NumberFormat('es-ES', { style: 'currency', currency: cur }).format(n);
+      const head = pending.count
+        ? `<p class="madof-lead">Tienes ${pending.count === 1 ? '1 factura pendiente' : `${pending.count} facturas pendientes`} de pago (${esc(money(pending.total))}).</p>`
+        : '<p class="madof-lead">Todo al día: no tienes facturas pendientes.</p>';
+      return `${head}<ul class="madof-invoices">${invoices.map((i) => `
+        <li>
+          <div><strong>${esc(i.number || 'Factura Argentina')}</strong> <span class="madof-meta">${esc(date(i.date))}${i.legal_name ? ' · ' + esc(i.legal_name) : ''}</span>
+            ${i.concept ? `<p>${esc(i.concept)}</p>` : ''}</div>
+          <div class="madof-invoice-side"><strong>${esc(money(i.total, i.currency))}</strong>
+            ${i.argentina ? pill('Emitida en Argentina') : i.paid ? pill('Pagada') : pill('Pendiente', 'is-on')}
+            ${i.pdf ? `<a class="madof-btn is-ghost" href="${esc(api.invoicePdfUrl(i.id))}" target="_blank" rel="noopener">${icon('receipt')} PDF</a>` : ''}</div>
+        </li>`).join('')}</ul>
+        <p class="madof-meta">Los presupuestos aparecerán aquí muy pronto.</p>`;
+    },
+  },
   campanas: { kicker: 'Sala de campañas', title: 'Tus campañas', render: () => soon('Estamos preparando un resumen claro de tus campañas de Google y Meta.') },
   reunion: {
     kicker: 'Recepción', title: 'Pedir una reunión', needsClient: true,

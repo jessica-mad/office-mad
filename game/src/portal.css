@@ -168,3 +168,9 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-chat-log li.is-slots,.madof-chat-log li.is-booking{max-width:100%;width:100%;box-sizing:border-box}
 .madof-chat-log li.is-slots .madof-slots{margin:6px 0}
 .madof-chat-booking{margin-top:8px}
+/* Mis facturas */
+.madof-invoices{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px}
+.madof-invoices li{display:flex;justify-content:space-between;gap:14px;background:var(--g);border-radius:14px;padding:12px 14px}
+.madof-invoices p{margin:4px 0 0}
+.madof-invoice-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px;white-space:nowrap}
+@media (max-width:560px){.madof-invoices li{flex-direction:column}.madof-invoice-side{flex-direction:row;align-items:center;flex-wrap:wrap}}

@@ -2,6 +2,7 @@
 /** @var array|null $client */
 use MAD_Oficina\Core\AdminUi;
 use MAD_Oficina\Core\Repo\Clients;
+use MAD_Oficina\Core\PortalAreas;
 use MAD_Oficina\Clients\Actions;
 
 if ( ! defined('ABSPATH') ) exit;
@@ -110,14 +111,21 @@ $edit_contact = isset($_GET['contact']) ? absint($_GET['contact']) : 0;
 
     <section class="madof-card">
         <span class="madof-kicker"><?php esc_html_e('Acceso al portal', 'mad-oficina'); ?></span>
-        <p class="description"><?php esc_html_e('Usuarios de WordPress que entran en /oficina y ven solo lo de este cliente. Crear un usuario no envía ningún email: el acceso se manda aparte, cuando tú quieras.', 'mad-oficina'); ?></p>
+        <p class="description"><?php esc_html_e('Usuarios de WordPress que entran en /oficina y ven solo lo de este cliente, y de eso, solo las partes que marques para cada persona. Crear un usuario no envía ningún email: el acceso se manda aparte, cuando tú quieras.', 'mad-oficina'); ?></p>
         <?php $users = Clients::users($c['id']); if ( $users ) : ?>
         <table class="madof-table">
             <tbody>
             <?php foreach ( $users as $u ) : ?>
                 <tr>
-                    <td><?php echo AdminUi::icon('user'); ?> <strong><?php echo esc_html($u->display_name); ?></strong></td>
-                    <td><?php echo esc_html($u->user_email); ?></td>
+                    <td><?php echo AdminUi::icon('user'); ?> <strong><?php echo esc_html($u->display_name); ?></strong><br><small><?php echo esc_html($u->user_email); ?></small></td>
+                    <td><?php $areas = PortalAreas::for_user($u->ID); echo AdminUi::form_open('user_areas', 'madof-areas'); ?>
+                            <input type="hidden" name="client_id" value="<?php echo (int) $c['id']; ?>">
+                            <input type="hidden" name="user_id" value="<?php echo (int) $u->ID; ?>">
+                            <?php foreach ( PortalAreas::AREAS as $k => $l ) : ?>
+                                <label class="madof-check"><input type="checkbox" name="areas[]" value="<?php echo esc_attr($k); ?>" <?php checked(in_array($k, $areas, true)); ?>> <?php echo esc_html__($l, 'mad-oficina'); ?></label>
+                            <?php endforeach; ?>
+                            <button class="madof-btn is-small is-ghost"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
+                        </form></td>
                     <td class="madof-row-actions">
                         <?php echo AdminUi::form_open('user_send_access', 'madof-inline'); ?>
                             <input type="hidden" name="client_id" value="<?php echo (int) $c['id']; ?>">
@@ -141,6 +149,13 @@ $edit_contact = isset($_GET['contact']) ? absint($_GET['contact']) : 0;
                 <label><?php esc_html_e('Email', 'mad-oficina'); ?><input type="email" name="email" required></label>
                 <label><?php esc_html_e('Nombre', 'mad-oficina'); ?><input type="text" name="name"></label>
             </div>
+            <input type="hidden" name="areas_sent" value="1">
+            <fieldset class="madof-fieldset madof-areas"><legend><?php esc_html_e('Qué ve en su oficina', 'mad-oficina'); ?></legend>
+                <?php foreach ( PortalAreas::AREAS as $k => $l ) : ?>
+                    <label class="madof-check"><input type="checkbox" name="areas[]" value="<?php echo esc_attr($k); ?>" <?php checked(in_array($k, PortalAreas::DEFAULT, true)); ?>> <?php echo esc_html__($l, 'mad-oficina'); ?></label>
+                <?php endforeach; ?>
+                <small><?php esc_html_e('Las facturas y presupuestos solo los ve quien marques (normalmente, quien paga). Pedir reuniones, hacer encargos y hablar con la recepcionista está abierto para todos.', 'mad-oficina'); ?></small>
+            </fieldset>
             <button class="madof-btn"><?php esc_html_e('Dar acceso', 'mad-oficina'); ?></button>
         </form>
     </section>
