@@ -5,8 +5,8 @@ Se entrega por partes.
 | Parte | Estado |
 |---|---|
 | 1 · Libro de facturas, histórico importado, clientes de facturación y resumen | **Hecha** |
-| 2 · Emitir desde la oficina: borrador → número → PDF con la plantilla MAD → envío (con tu aprobación) y «Libro MAD» en la unidad compartida | Siguiente |
-| 3 · Calendario de facturación: borradores automáticos y «¿Envío la factura de X?» por Chat | Pendiente |
+| 2 · Emitir desde la oficina: borrador → número → PDF con la plantilla MAD → envío (con tu aprobación) y «Libro MAD» en la unidad compartida | **Hecha** |
+| 3 · Calendario de facturación: borradores automáticos y «¿Envío la factura de X?» por Chat | Siguiente |
 
 ## Parte 1 · Libro de facturas
 
@@ -67,3 +67,41 @@ El diseño de tus facturas actuales («Work invoice» en negro y mostaza, el log
 
 ## Surarquia
 No es de la serie Argentina: en la vista previa de la importación, desmárcala. Sus dos facturas de 2022 se enviaron sin número, así que se importan como borradores históricos, con una nota.
+
+## Parte 2 · Emitir desde la oficina
+
+### Borradores
+- **Nueva factura** desde Facturación o desde la ficha del cliente. Toma su razón social actual, su IVA y su IRPF.
+- **Copia los conceptos de su última factura**, porque las cuotas se repiten cada mes. Los cambias si ese mes es distinto.
+- Puedes poner **tantos conceptos como quieras** (concepto, cantidad y precio). Los totales se calculan al momento y redondean igual que el servidor (147,105 → 147,11).
+- **Fecha:** el día de facturación del cliente. Por defecto es el **28** (fin de mes); si el mes es más corto, el último día. Cada cliente puede tener su propio día (p. ej. DT) en sus datos fiscales.
+- **Vencimiento:** fecha + **15 días**, o los días que tenga ese cliente.
+- **Enviarme una prueba:** el cartero te manda solo a ti el PDF con la marca BORRADOR y el texto del email.
+- Un borrador se puede borrar. Una factura emitida no se toca: se corrige con **Rectificar**, que prepara la rectificativa (serie R) con los conceptos en negativo.
+
+### Emitir
+1. **Pedir emisión** deja la tarjeta en la bandeja (y en Chat). Puedes cambiar la fecha, el destinatario, el asunto y el mensaje, y elegir **Emitir y enviar** o **Solo emitir**.
+2. **Al aprobar:**
+   - se le da el **siguiente número**;
+   - se comprueba que la fecha no sea anterior a la última factura emitida, porque las facturas tienen que ir en orden;
+   - se guarda una **copia de tus datos de emisor** en la factura, para que si cambias de dirección o de IBAN las antiguas no cambien;
+   - se crea la orden para el cartero.
+3. **El cartero:**
+   - guarda el PDF en `Emitidas/AAAA/Tn/`;
+   - si lo elegiste, lo envía **desde tu Gmail** con el PDF adjunto;
+   - actualiza el **Libro MAD**;
+   - avisa a la web, que marca la factura como **Enviada** y guarda el enlace de Drive.
+4. La factura aparece en **«Mis facturas»** de las personas del cliente con ese permiso.
+
+Si descartas una emisión, no se gasta ningún número.
+
+### Cobros y Libro MAD
+- **Marcar como cobrada** actualiza su fila del Libro MAD.
+- Las facturas sin cobrar que pasan del vencimiento salen como **Vencida**.
+- **Sincronizar todo el Libro MAD** (en Datos del emisor) vuelca todo el histórico de una vez.
+
+### Argentina
+Los borradores de la serie Argentina no se emiten aquí: se guardan y, desde su ficha, se marcan como **emitidos en Argentina**.
+
+### Email
+El texto se edita en **Datos del emisor**. Admite `{numero}`, `{cliente}`, `{total}`, `{mes}` y `{vencimiento}`.

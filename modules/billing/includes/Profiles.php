@@ -60,6 +60,8 @@ final class Profiles {
             'vat_rate'   => (float) ($data['vat_rate'] ?? 21),
             'irpf_rate'  => (float) ($data['irpf_rate'] ?? 15),
             'series'     => isset(Invoices::SERIES[$data['series'] ?? '']) ? $data['series'] : 'F',
+            'billing_day'  => ($bd = (int) ($data['billing_day'] ?? 0)) >= 1 && $bd <= 31 ? $bd : null,
+            'payment_days' => isset($data['payment_days']) && $data['payment_days'] !== '' ? max(0, min(365, (int) $data['payment_days'])) : null,
             'status'     => in_array($data['status'] ?? 'active', ['active', 'inactive'], true) ? ($data['status'] ?? 'active') : 'active',
             'notes'      => sanitize_textarea_field($data['notes'] ?? '') ?: null,
             'updated_at' => Time::now(),
@@ -168,7 +170,7 @@ final class Profiles {
     }
 
     private static function hydrate($r){
-        foreach ( ['id', 'client_id'] as $k ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
+        foreach ( ['id', 'client_id', 'billing_day', 'payment_days'] as $k ) if ( array_key_exists($k, $r) ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
         $r['vat_rate'] = (float) $r['vat_rate'];
         $r['irpf_rate'] = (float) $r['irpf_rate'];
         return $r;

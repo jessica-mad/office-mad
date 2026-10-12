@@ -101,3 +101,13 @@
 .madof-areas label.madof-check{display:inline-flex;flex-direction:row;align-items:center;gap:6px;font-weight:300;margin:0}
 .madof-areas small{flex-basis:100%}
 .madof-areas .madof-btn{margin-left:auto}
+/* Invoice editor */
+.madof-pill.is-alert{background:var(--k);color:var(--y)}
+.madof-lines textarea{width:100%;min-width:260px}
+.madof-lines .madof-qty{width:70px}
+.madof-lines .madof-price{width:110px}
+.madof-lines .madof-amount{white-space:nowrap;text-align:right;font-weight:500}
+.madof-totals{margin:6px 0 18px auto;border-collapse:collapse;min-width:260px}
+.madof-totals th{text-align:left;font-weight:500;padding:6px 14px 6px 0}
+.madof-totals td{text-align:right;padding:6px 0;white-space:nowrap}
+.madof-totals tr.is-total th,.madof-totals tr.is-total td{font-weight:600;font-size:1.15em;border-top:2px solid var(--k);background:var(--y);padding:8px 10px}

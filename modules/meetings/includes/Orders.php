@@ -15,6 +15,17 @@ final class Orders {
 
     const AGENT = 'apps_script';
 
+    /** Any other module's order for the cartero (e.g. billing: archive and send an invoice). */
+    public static function queue($type, array $payload, $client_id = null){
+        global $wpdb;
+        $wpdb->insert(Schema::table('tasks'), [
+            'agent' => self::AGENT, 'type' => sanitize_key($type), 'client_id' => $client_id,
+            'payload' => wp_json_encode($payload), 'status' => 'queued',
+            'created_at' => Time::now(), 'updated_at' => Time::now(),
+        ]);
+        return (int) $wpdb->insert_id;
+    }
+
     public static function queue_archive(array $meeting, array $client, $share_recording, $share_notes){
         global $wpdb;
         $emails = [];
@@ -78,6 +89,7 @@ final class Orders {
             if ( ! empty($result['folder_id']) ) $fields['drive_folder_id'] = preg_replace('/[^A-Za-z0-9_\-]/', '', $result['folder_id']);
             Meetings::update((int) $payload['meeting_id'], $fields);
         }
+        do_action('madoficina_order_done', $task['type'], json_decode($task['payload'], true) ?: [], $ok, $result);
         return true;
     }
 }

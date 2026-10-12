@@ -33,7 +33,7 @@ return new class($core) implements MAD_Oficina_Module {
     public function description(){
         return __('Libro de facturas emitidas, clientes de facturación y resumen por mes, trimestre y cliente. Importa el histórico de tu hoja antigua.', 'mad-oficina');
     }
-    public function dependencies(){ return ['clients']; }
+    public function dependencies(){ return ['clients', 'meetings']; } // meetings: the cartero (Apps Script) archives and sends
 
     public function settings(){
         $s = get_option(MAD_Oficina_Core::option_key($this->slug()), []);
@@ -43,10 +43,18 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status'] as $a ) {
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
+        add_action('rest_api_init', [$this, 'register_hooks']);
+
+        // Issuing: approval in the inbox (and Chat), then the cartero.
+        $type = \MAD_Oficina\Billing\Issuing::ACTION;
+        add_filter('madoficina_approval_handler_' . $type, fn() => fn($approval, $input) => $this->issuing()->approve($approval, $input));
+        add_filter('madoficina_approval_form_' . $type, fn($html, $approval) => $this->issuing()->render_form($html, $approval), 10, 2);
+        add_filter('madoficina_approval_default_input_' . $type, fn($input, $approval) => $this->issuing()->default_input($approval), 10, 2);
+        add_action('madoficina_order_done', ['MAD_Oficina\\Billing\\Issuing', 'order_done'], 10, 4);
         // One client, two faces: the office card shows the fiscal data it invoices under.
         add_action('madoficina_client_edit_identity', [$this, 'render_client_identity']);
         add_action('madoficina_client_list_head', [$this, 'render_client_list_head']);
@@ -54,6 +62,26 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function admin_init(){}
+
+    public function issuing(){
+        return new \MAD_Oficina\Billing\Issuing($this->settings());
+    }
+
+    /** The cartero downloads the PDF it archives and sends (signed like the rest of its calls). */
+    public function register_hooks(){
+        $meetings = get_option(MAD_Oficina_Core::option_key('meetings'), []);
+        $hooks = new \MAD_Oficina\Meetings\Hooks(fn() => \MAD_Oficina\Meetings\Hooks::secret_from(is_array($meetings) ? $meetings : []), fn() => null);
+        register_rest_route('mad-oficina/v1', '/hooks/invoices/(?P<id>\d+)/pdf', [
+            'methods' => 'GET', 'permission_callback' => [$hooks, 'verify'],
+            'callback' => function(\WP_REST_Request $req){
+                $inv = \MAD_Oficina\Billing\Invoices::get((int) $req['id']);
+                if ( ! $inv ) return new \WP_Error('madof_not_found', 'Unknown invoice', ['status' => 404]);
+                $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
+                if ( is_wp_error($pdf) ) return $pdf;
+                return rest_ensure_response(['filename' => \MAD_Oficina\Billing\InvoicePdf::filename($inv), 'base64' => base64_encode($pdf)]);
+            },
+        ]);
+    }
 
     /* ==== Admin ==== */
 
@@ -97,6 +125,7 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('billing_paid');
         $id = absint($_POST['invoice_id'] ?? 0);
         \MAD_Oficina\Billing\Invoices::set_paid($id, ! empty($_POST['paid']));
+        \MAD_Oficina\Billing\Issuing::queue_libro($id);
         $this->back(['invoice' => $id], ! empty($_POST['paid']) ? __('Marcada como cobrada.', 'mad-oficina') : __('Marcada como pendiente de cobro.', 'mad-oficina'));
     }
 
@@ -218,8 +247,67 @@ return new class($core) implements MAD_Oficina_Module {
         $s = $this->settings();
         foreach ( ['issuer_name', 'issuer_tagline', 'issuer_tax_label', 'issuer_tax_id', 'issuer_address', 'issuer_city', 'issuer_email', 'issuer_phone', 'payment_method', 'issuer_bank', 'issuer_iban'] as $k ) $s[$k] = sanitize_text_field($p[$k] ?? '');
         $s['payment_terms'] = sanitize_textarea_field($p['payment_terms'] ?? '');
+        $s['billing_day'] = max(1, min(31, (int) ($p['billing_day'] ?? 28)));
+        $s['payment_days'] = max(0, min(365, (int) ($p['payment_days'] ?? 15)));
+        $s['email_subject'] = sanitize_text_field($p['email_subject'] ?? '');
+        $s['email_body'] = sanitize_textarea_field($p['email_body'] ?? '');
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
         $this->back(['tab' => 'settings'], __('Datos del emisor guardados.', 'mad-oficina'));
+    }
+
+    /** Editor: save the draft, and optionally ask to issue it or send a test to Jessica. */
+    public function handle_billing_draft_save(){
+        $this->guard('billing_draft_save');
+        $p = wp_unslash($_POST);
+        $id = absint($p['invoice_id'] ?? 0);
+        $lines = [];
+        foreach ( (array) ($p['lines'] ?? []) as $l ) if ( is_array($l) ) $lines[] = $l;
+        $saved = $this->issuing()->save_draft($p, $lines, $id);
+        if ( is_wp_error($saved) ) {
+            $this->back($id ? ['edit' => $id] : ['edit' => 'new', 'profile' => absint($p['profile_id'] ?? 0)], $saved->get_error_message(), 'error');
+        }
+        $do = sanitize_key($p['do'] ?? 'save');
+        if ( $do === 'issue' ) {
+            $approval = $this->issuing()->request($saved);
+            if ( is_wp_error($approval) ) $this->back(['edit' => $saved], $approval->get_error_message(), 'error');
+            \MAD_Oficina\Core\AdminUi::flash(__('Borrador guardado. Tienes la emisión en la bandeja (y en Chat) para aprobarla.', 'mad-oficina'));
+            wp_safe_redirect(admin_url('admin.php?page=mad-oficina-bandeja#approval-' . (int) $approval));
+            exit;
+        }
+        if ( $do === 'test' ) {
+            $queued = $this->issuing()->queue_test($saved, wp_get_current_user()->user_email);
+            $this->back(['edit' => $saved], is_wp_error($queued) ? $queued->get_error_message() : __('Borrador guardado. El cartero te enviará la prueba a tu email en unos minutos.', 'mad-oficina'), is_wp_error($queued) ? 'error' : 'success');
+        }
+        $this->back(['edit' => $saved], __('Borrador guardado.', 'mad-oficina'));
+    }
+
+    public function handle_billing_draft_delete(){
+        $this->guard('billing_draft_delete');
+        $ok = \MAD_Oficina\Billing\Issuing::delete_draft(absint($_POST['invoice_id'] ?? 0));
+        $this->back([], $ok ? __('Borrador eliminado.', 'mad-oficina') : __('Solo se pueden borrar borradores sin número.', 'mad-oficina'), $ok ? 'success' : 'error');
+    }
+
+    public function handle_billing_rectify(){
+        $this->guard('billing_rectify');
+        $id = $this->issuing()->rectify(absint($_POST['invoice_id'] ?? 0));
+        if ( is_wp_error($id) ) $this->back(['invoice' => absint($_POST['invoice_id'] ?? 0)], $id->get_error_message(), 'error');
+        $this->back(['edit' => $id], __('Rectificativa preparada con los conceptos en negativo. Ajústala si solo corrige una parte y pide emitirla.', 'mad-oficina'));
+    }
+
+    public function handle_billing_libro_sync(){
+        $this->guard('billing_libro_sync');
+        \MAD_Oficina\Billing\Issuing::queue_libro_sync();
+        $this->back(['tab' => 'settings'], __('El cartero volcará todas las facturas emitidas en el Libro MAD en su próxima vuelta (unos minutos).', 'mad-oficina'));
+    }
+
+    /** Argentina: the invoice is issued on the Argentine platform; here it is only recorded. */
+    public function handle_billing_ar_issued(){
+        $this->guard('billing_ar_issued');
+        global $wpdb;
+        $id = absint($_POST['invoice_id'] ?? 0);
+        $wpdb->update(\MAD_Oficina\Billing\Invoices::table(), ['status' => 'sent', 'sent_at' => \MAD_Oficina\Core\Time::now(), 'updated_at' => \MAD_Oficina\Core\Time::now()], ['id' => $id, 'series' => 'AR', 'status' => 'draft']);
+        \MAD_Oficina\Billing\Issuing::queue_libro($id);
+        $this->back(['invoice' => $id], __('Apuntada como emitida en Argentina.', 'mad-oficina'));
     }
 
     /** The invoice as PDF with MAD's design (opens in the browser). */
@@ -229,7 +317,7 @@ return new class($core) implements MAD_Oficina_Module {
         check_admin_referer('madof_billing_pdf_' . $id);
         $inv = \MAD_Oficina\Billing\Invoices::get($id);
         if ( ! $inv ) wp_die(esc_html__('Esa factura no existe.', 'mad-oficina'), 404);
-        $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, $this->settings());
+        $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
         if ( is_wp_error($pdf) ) wp_die(esc_html($pdf->get_error_message()));
         nocache_headers();
         header('Content-Type: application/pdf');
@@ -242,6 +330,17 @@ return new class($core) implements MAD_Oficina_Module {
     public function render_settings_page(){
         if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         $settings = $this->settings();
+        if ( isset($_GET['edit']) ) {
+            $issuing = $this->issuing();
+            $draft = $_GET['edit'] === 'new' ? null : \MAD_Oficina\Billing\Invoices::get(absint($_GET['edit']));
+            if ( $draft && $draft['status'] !== 'draft' ) { wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'invoice' => $draft['id']], admin_url('admin.php'))); exit; }
+            if ( $draft ) $profile = \MAD_Oficina\Billing\Profiles::get((int) $draft['profile_id']);
+            elseif ( isset($_GET['profile']) ) $profile = \MAD_Oficina\Billing\Profiles::get(absint($_GET['profile']));
+            elseif ( isset($_GET['client']) ) $profile = \MAD_Oficina\Billing\Profiles::current_for_client(absint($_GET['client']));
+            else $profile = null;
+            include __DIR__ . '/views/invoice-edit.php';
+            return;
+        }
         $tab = sanitize_key($_GET['tab'] ?? 'invoices');
         $invoice = isset($_GET['invoice']) ? \MAD_Oficina\Billing\Invoices::get(absint($_GET['invoice'])) : null;
         $preview = $tab === 'import' && ! empty($_GET['preview']) ? get_transient(self::IMPORT_TRANSIENT . get_current_user_id()) : null;

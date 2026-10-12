@@ -20,6 +20,28 @@ Este script vigila tu carpeta de Meet y hace tres cosas:
 
 4. Ejecuta la función **`install`** y acepta los permisos. Pide Drive, Docs, Calendar (lectura), Hojas y conexiones externas. Crea un disparador cada 10 minutos y la hoja «Reuniones MAD» dentro de tu carpeta de reuniones.
 
+## Facturas: Emitidas, envío y Libro MAD
+
+Desde el bloque 10 el cartero también se encarga de las facturas que apruebas en la bandeja:
+- guarda el PDF en la unidad compartida, en `Emitidas/AAAA/Tn/26-024 Cliente.pdf`;
+- si elegiste «Emitir y enviar», lo **envía desde tu Gmail** con el PDF adjunto (queda en tus Enviados y las respuestas te llegan a ti);
+- apunta o actualiza su fila en la hoja **«Libro MAD»** (pestaña Emitidas), que crea en la unidad compartida la primera vez;
+- con «Enviarme una prueba», te manda solo a ti el borrador con la marca BORRADOR.
+
+Nunca envía una factura dos veces, aunque se reintente la orden.
+
+**Para activarlo (una vez):**
+1. Pega el `Code.gs` y el `appsscript.json` nuevos.
+2. En **Propiedades del script**, añade:
+
+   | Propiedad | Valor |
+   |---|---|
+   | `ACCOUNTING_DRIVE_ID` | `0AEAF3xbrnHIuUk9PVA` (la unidad compartida de contabilidad) |
+   | `EMITIDAS_FOLDER_ID` | *(opcional)* `1Tv8hF7BByRhxb3DJYw8MXWsZQovrr4qX`, la carpeta «Emitidas». Si no la pones, la busca por nombre. |
+
+3. Ejecuta **`install`** otra vez y acepta el permiso nuevo: **enviar correo en tu nombre** (`script.send_mail`).
+4. En **MAD Oficina → Facturación → Datos del emisor**, pulsa **«Sincronizar todo el Libro MAD»** para volcar el histórico.
+
 ## Qué reuniones envía
 
 Google Meet guarda cada reunión en la carpeta **«Google Meet»**:

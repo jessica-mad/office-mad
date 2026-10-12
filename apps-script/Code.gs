@@ -3,7 +3,9 @@
  *
  * Watches the Meet folder, sends new meetings (notes + transcript text) to the
  * website, keeps a "Reuniones MAD" sheet, and carries out the orders the website
- * creates after Jessica approves a draft (archive in the client's folder, share).
+ * creates after Jessica approves something: archive a meeting and share it;
+ * archive an issued invoice in the shared drive, email it from her Gmail and
+ * keep the «Libro MAD» sheet up to date.
  *
  * Script properties (Project settings → Script properties):
  *   MAD_ENDPOINT   https://imad.pro/wp-json/mad-oficina/v1   (shown in MAD Oficina → Reuniones → Apps Script)
@@ -14,6 +16,9 @@
  *                  moved to the clients' shared document folders (the team can see those).
  *   SHEET_ID       (optional) created automatically on first run
  *   START_DATE     (optional, YYYY-MM-DD) ignore meetings before this date; set by install()
+ *   ACCOUNTING_DRIVE_ID  shared drive «Contabilidad MAD» (billing): «Emitidas/AAAA/Tn/» and «Libro MAD» live there
+ *   EMITIDAS_FOLDER_ID   (optional) found or created as «Emitidas» in ACCOUNTING_DRIVE_ID
+ *   LIBRO_SHEET_ID       (optional) created automatically on first use
  *
  * Run install() once: it asks for permissions and creates the 10-minute trigger.
  */
@@ -243,7 +248,14 @@ function processOrders() {
   var res = signedFetch_('get', '/hooks/orders', null);
   (res.orders || []).forEach(function (order) {
     try {
-      var result = order.type === 'meeting_archive' ? archiveMeeting_(order.payload) : null;
+      var handlers = {
+        meeting_archive: archiveMeeting_,
+        invoice_archive: archiveInvoice_,
+        invoice_test: testInvoice_,
+        libro_upsert: function (p) { upsertLibro_(p.rows || []); return { rows: (p.rows || []).length }; },
+        libro_sync: function (p) { syncLibro_(p.rows || []); return { rows: (p.rows || []).length }; },
+      };
+      var result = handlers[order.type] ? handlers[order.type](order.payload) : null;
       if (!result) throw new Error('Tipo de orden desconocido: ' + order.type);
       signedFetch_('post', '/hooks/orders/' + order.id + '/done', { ok: true, result: result });
     } catch (e) {
@@ -314,6 +326,121 @@ function shareQuietly_(fileId, email) {
 function childFolder_(parent, name) {
   var it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+/* ───────────────────────── invoices ───────────────────────── */
+
+/** The PDF exactly as the website renders it (signed request). */
+function invoicePdf_(id) {
+  var res = signedFetch_('get', '/hooks/invoices/' + id + '/pdf', null);
+  return Utilities.newBlob(Utilities.base64Decode(res.base64), 'application/pdf', res.filename);
+}
+
+function emitidasRoot_() {
+  var p = props_(), id = p.getProperty('EMITIDAS_FOLDER_ID');
+  if (id) return DriveApp.getFolderById(id);
+  var drive = p.getProperty('ACCOUNTING_DRIVE_ID');
+  if (!drive) throw new Error('Falta la propiedad del script ACCOUNTING_DRIVE_ID (la unidad compartida de contabilidad).');
+  var folder = childFolder_(DriveApp.getFolderById(drive), 'Emitidas');
+  p.setProperty('EMITIDAS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+/**
+ * Issued invoice → «Emitidas/AAAA/Tn/<número> <cliente>.pdf», email from Jessica's
+ * Gmail (only if she chose to send it) and its row in «Libro MAD». Safe to retry:
+ * the file is reused and an invoice is never emailed twice.
+ */
+function archiveInvoice_(p) {
+  var folder = childFolder_(childFolder_(emitidasRoot_(), p.folder[0]), p.folder[1]);
+  var existing = folder.getFilesByName(p.filename);
+  var file = existing.hasNext() ? existing.next() : folder.createFile(invoicePdf_(p.invoice_id));
+  var sent = false;
+  if (p.email && p.email.to) {
+    var key = 'SENT_INVOICE_' + p.invoice_id, props = props_();
+    if (!props.getProperty(key)) {
+      MailApp.sendEmail({ to: p.email.to, subject: p.email.subject, body: p.email.body, attachments: [file.getBlob()] });
+      props.setProperty(key, new Date().toISOString());
+    }
+    sent = true;
+  }
+  var row = p.row || {};
+  row['PDF'] = file.getUrl();
+  if (sent) row['Estado'] = 'Enviada';
+  upsertLibro_([row]);
+  return { file_id: file.getId(), url: file.getUrl(), sent: sent };
+}
+
+/** «Enviarme una prueba»: the draft PDF to Jessica only; nothing is archived. */
+function testInvoice_(p) {
+  MailApp.sendEmail({ to: p.email.to, subject: p.email.subject, body: p.email.body, attachments: [invoicePdf_(p.invoice_id)] });
+  return { sent: true };
+}
+
+/* ───────────────────────── Libro MAD ───────────────────────── */
+
+function libro_() {
+  var p = props_(), id = p.getProperty('LIBRO_SHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  var drive = p.getProperty('ACCOUNTING_DRIVE_ID');
+  if (!drive) throw new Error('Falta la propiedad del script ACCOUNTING_DRIVE_ID (la unidad compartida de contabilidad).');
+  var ss = SpreadsheetApp.create('Libro MAD');
+  DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(drive));
+  ss.getSheets()[0].setName('Emitidas');
+  p.setProperty('LIBRO_SHEET_ID', ss.getId());
+  return ss;
+}
+
+/** «Emitidas» tab with the columns of the rows the website sends (the last one, ID, is the key). */
+function emitidasSheet_(headers) {
+  var ss = libro_(), sh = ss.getSheetByName('Emitidas') || ss.insertSheet('Emitidas');
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(headers);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#FBB62F');
+  }
+  return sh;
+}
+
+function rowValues_(headers, row) {
+  return headers.map(function (h) { return row[h] === undefined || row[h] === null ? '' : row[h]; });
+}
+
+function formatLibro_(sh, headers, rows) {
+  if (rows < 1) return;
+  ['Base', 'IVA', 'IRPF', 'Total'].forEach(function (h) {
+    var c = headers.indexOf(h) + 1;
+    if (c > 0) sh.getRange(2, c, rows, 1).setNumberFormat('#,##0.00 €');
+  });
+}
+
+function upsertLibro_(rows) {
+  if (!rows.length) return;
+  var headers = Object.keys(rows[0]), sh = emitidasSheet_(headers);
+  var idCol = headers.indexOf('ID') + 1, last = sh.getLastRow(), at = {};
+  if (last > 1) sh.getRange(2, idCol, last - 1, 1).getValues().forEach(function (r, i) { if (r[0] !== '') at[String(r[0])] = i + 2; });
+  rows.forEach(function (row) {
+    var values = [rowValues_(headers, row)], r = at[String(row.ID)];
+    if (r) sh.getRange(r, 1, 1, headers.length).setValues(values);
+    else { sh.appendRow(values[0]); at[String(row.ID)] = sh.getLastRow(); }
+  });
+  formatLibro_(sh, headers, sh.getLastRow() - 1);
+}
+
+/** Whole book at once (first time, or to repair it): rewrites the tab. */
+function syncLibro_(rows) {
+  if (!rows.length) return;
+  var headers = Object.keys(rows[0]), sh = emitidasSheet_(headers);
+  // Keep the Drive links the cartero already knows (the website may not have them yet).
+  var pdfCol = headers.indexOf('PDF'), idCol = headers.indexOf('ID'), known = {}, last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, headers.length).getValues().forEach(function (r) { if (r[pdfCol]) known[String(r[idCol])] = r[pdfCol]; });
+  var values = rows.map(function (row) {
+    if (!row.PDF && known[String(row.ID)]) row.PDF = known[String(row.ID)];
+    return rowValues_(headers, row);
+  });
+  if (last > 1) sh.getRange(2, 1, last - 1, sh.getLastColumn()).clearContent();
+  sh.getRange(2, 1, values.length, headers.length).setValues(values);
+  formatLibro_(sh, headers, values.length);
 }
 
 /* ───────────────────────── sheet ───────────────────────── */

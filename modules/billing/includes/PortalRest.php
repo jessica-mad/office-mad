@@ -99,7 +99,7 @@ final class PortalRest {
         if ( ! $inv || (int) $inv['client_id'] !== (int) $client_id || ! in_array($inv['status'], ['issued', 'sent'], true) || ! $inv['number'] || $inv['series'] === 'AR' ) {
             return new \WP_Error('madof_not_found', __('No encuentro esa factura.', 'mad-oficina'), ['status' => 404]);
         }
-        $pdf = InvoicePdf::render($inv, call_user_func($this->issuer));
+        $pdf = InvoicePdf::render($inv, Issuing::issuer_for($inv, call_user_func($this->issuer)));
         if ( is_wp_error($pdf) ) return $pdf;
         nocache_headers();
         header('Content-Type: application/pdf');

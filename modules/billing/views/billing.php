@@ -19,6 +19,7 @@ $status_pill = function($inv){
     $cls = $inv['status'] === 'draft' ? '' : 'is-on';
     $out = '<span class="madof-pill ' . $cls . '">' . esc_html__($label, 'mad-oficina') . '</span>';
     if ( in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' ) $out .= ' <span class="madof-pill ' . ($inv['paid'] ? 'is-on' : '') . '">' . ($inv['paid'] ? esc_html__('Cobrada', 'mad-oficina') : esc_html__('Sin cobrar', 'mad-oficina')) . '</span>';
+    if ( ! $inv['paid'] && in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' && ! empty($inv['due_date']) && $inv['due_date'] < current_time('Y-m-d') ) $out .= ' <span class="madof-pill is-alert">' . esc_html__('Vencida', 'mad-oficina') . '</span>';
     return $out;
 };
 ?>
@@ -42,16 +43,31 @@ $status_pill = function($inv){
             <?php foreach ( $inv['lines'] as $l ) : ?>
                 <tr><th scope="row"><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><td><?php echo esc_html($l['description']); ?> — <strong><?php echo esc_html($money($l['amount'])); ?></strong></td></tr>
             <?php endforeach; ?>
+            <?php if ( $inv['due_date'] ) : ?><tr><th scope="row"><?php esc_html_e('Vencimiento', 'mad-oficina'); ?></th><td><?php echo esc_html(mysql2date('j M Y', $inv['due_date'])); ?></td></tr><?php endif; ?>
+            <?php if ( $inv['sent_at'] ) : ?><tr><th scope="row"><?php esc_html_e('Enviada', 'mad-oficina'); ?></th><td><?php echo esc_html(mysql2date('j M Y H:i', get_date_from_gmt($inv['sent_at']))); ?></td></tr><?php endif; ?>
             <tr><th scope="row"><?php esc_html_e('Base', 'mad-oficina'); ?></th><td><?php echo esc_html($money($inv['base'])); ?></td></tr>
             <tr><th scope="row"><?php echo esc_html(sprintf(__('IVA (%s %%)', 'mad-oficina'), rtrim(rtrim(number_format($inv['vat_rate'], 2, ',', ''), '0'), ','))); ?></th><td><?php echo esc_html($money($inv['vat'])); ?></td></tr>
             <tr><th scope="row"><?php echo esc_html(sprintf(__('IRPF (%s %%)', 'mad-oficina'), rtrim(rtrim(number_format($inv['irpf_rate'], 2, ',', ''), '0'), ','))); ?></th><td><?php echo esc_html(($inv['irpf'] > 0 ? '−' : '') . $money($inv['irpf'])); ?></td></tr>
             <tr><th scope="row"><?php esc_html_e('Total', 'mad-oficina'); ?></th><td><strong><?php echo esc_html($money($inv['total'])); ?></strong></td></tr>
             <tr><th scope="row">PDF</th><td>
                 <?php if ( $inv['series'] !== 'AR' ) : ?><a class="madof-btn is-small" href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $inv['id']), 'madof_billing_pdf_' . $inv['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver con el diseño MAD', 'mad-oficina'); ?></a><?php endif; ?>
-                <?php if ( $inv['pdf_url'] ) : ?> <a href="<?php echo esc_url($inv['pdf_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('PDF original en Drive', 'mad-oficina'); ?></a><?php endif; ?>
+                <?php if ( $inv['pdf_url'] ) : ?> <a href="<?php echo esc_url($inv['pdf_url']); ?>" target="_blank" rel="noopener"><?php echo $inv['source'] === 'import' ? esc_html__('PDF original en Drive', 'mad-oficina') : esc_html__('PDF en Emitidas (Drive)', 'mad-oficina'); ?></a><?php endif; ?>
             </td></tr>
             <tr><th scope="row"><?php esc_html_e('Origen', 'mad-oficina'); ?></th><td><?php echo $inv['source'] === 'import' ? esc_html__('Importada de la hoja antigua', 'mad-oficina') : esc_html__('Creada en la oficina', 'mad-oficina'); ?></td></tr>
         </tbody></table>
+        <div class="madof-actions">
+        <?php if ( $inv['status'] === 'draft' ) : ?>
+            <a class="madof-btn" href="<?php echo esc_url($base . '&edit=' . $inv['id']); ?>"><?php echo $inv['series'] === 'AR' ? esc_html__('Editar', 'mad-oficina') : esc_html__('Editar y emitir', 'mad-oficina'); ?></a>
+            <?php if ( $inv['series'] === 'AR' ) : echo AdminUi::form_open('billing_ar_issued', 'madof-inline'); ?>
+                <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+                <button class="madof-btn is-ghost"><?php esc_html_e('Marcar como emitida en Argentina', 'mad-oficina'); ?></button>
+            </form><?php endif; ?>
+        <?php endif; ?>
+        <?php if ( $inv['number'] && $inv['series'] === 'F' ) : echo AdminUi::form_open('billing_rectify', 'madof-inline'); ?>
+            <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+            <button class="madof-btn is-ghost"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></button>
+        </form><?php endif; ?>
+        </div>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' ) : ?>
             <?php echo AdminUi::form_open('billing_paid', 'madof-inline'); ?>
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
@@ -128,6 +144,9 @@ $status_pill = function($inv){
                 <label><?php esc_html_e('IVA %', 'mad-oficina'); ?><input type="number" step="0.01" name="vat_rate" value="<?php echo esc_attr($p['vat_rate']); ?>"></label>
                 <label><?php esc_html_e('IRPF %', 'mad-oficina'); ?><input type="number" step="0.01" name="irpf_rate" value="<?php echo esc_attr($p['irpf_rate']); ?>">
                     <small><?php esc_html_e('0 para particulares o clientes de fuera.', 'mad-oficina'); ?></small></label>
+                <label><?php esc_html_e('Día de facturación', 'mad-oficina'); ?><input type="number" min="1" max="31" name="billing_day" value="<?php echo esc_attr((string) ($p['billing_day'] ?? '')); ?>" placeholder="<?php echo (int) ($settings['billing_day'] ?? 28); ?>">
+                    <small><?php esc_html_e('Vacío = el de siempre (fin de mes).', 'mad-oficina'); ?></small></label>
+                <label><?php esc_html_e('Días para pagar', 'mad-oficina'); ?><input type="number" min="0" max="365" name="payment_days" value="<?php echo esc_attr((string) ($p['payment_days'] ?? '')); ?>" placeholder="<?php echo (int) ($settings['payment_days'] ?? 15); ?>"></label>
                 <label><?php esc_html_e('Serie', 'mad-oficina'); ?><select name="series"><?php foreach ( Invoices::SERIES as $k => $l ) if ( $k !== 'R' ) echo '<option value="' . esc_attr($k) . '" ' . selected($p['series'], $k, false) . '>' . esc_html__($l, 'mad-oficina') . '</option>'; ?></select></label>
             </div>
             <div class="madof-cols">
@@ -250,9 +269,25 @@ $status_pill = function($inv){
                 <label><?php esc_html_e('IBAN', 'mad-oficina'); ?><input type="text" name="issuer_iban" value="<?php echo esc_attr($settings['issuer_iban'] ?? ''); ?>"></label>
             </div>
             <label><?php esc_html_e('Nota bajo el pago (opcional)', 'mad-oficina'); ?><textarea name="payment_terms" rows="2"><?php echo esc_textarea($settings['payment_terms'] ?? ''); ?></textarea></label>
+        </section>
+        <section class="madof-card">
+            <span class="madof-kicker"><?php esc_html_e('Fechas y email de envío', 'mad-oficina'); ?></span>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Día de facturación', 'mad-oficina'); ?><input type="number" min="1" max="31" name="billing_day" value="<?php echo (int) ($settings['billing_day'] ?? 28); ?>">
+                    <small><?php esc_html_e('Para los clientes que no tienen su propio día (p. ej. DT). Si el mes es más corto, el último día.', 'mad-oficina'); ?></small></label>
+                <label><?php esc_html_e('Días para pagar', 'mad-oficina'); ?><input type="number" min="0" max="365" name="payment_days" value="<?php echo (int) ($settings['payment_days'] ?? 15); ?>"></label>
+            </div>
+            <label><?php esc_html_e('Asunto', 'mad-oficina'); ?><input type="text" name="email_subject" value="<?php echo esc_attr($settings['email_subject'] ?? '') ?>" placeholder="<?php echo esc_attr(\MAD_Oficina\Billing\Issuing::DEFAULT_SUBJECT); ?>"></label>
+            <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="email_body" rows="8" placeholder="<?php echo esc_attr(\MAD_Oficina\Billing\Issuing::DEFAULT_BODY); ?>"><?php echo esc_textarea($settings['email_body'] ?? ''); ?></textarea>
+                <small><?php esc_html_e('Puedes usar {numero}, {cliente}, {total}, {mes} y {vencimiento}. Vacío = el texto de ejemplo. Sale desde tu Gmail con el PDF adjunto; cada envío lo apruebas tú.', 'mad-oficina'); ?></small></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>
     </form>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Libro MAD', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('La hoja «Libro MAD» de la unidad compartida refleja las facturas emitidas (pestaña Emitidas). Se actualiza sola al emitir y al marcar cobros. Para volcar todo el histórico la primera vez, pulsa aquí:', 'mad-oficina'); ?></p>
+        <?php echo AdminUi::form_open('billing_libro_sync', 'madof-inline'); ?><button class="madof-btn is-ghost"><?php esc_html_e('Sincronizar todo el Libro MAD', 'mad-oficina'); ?></button></form>
+    </section>
 
 <?php else :
     $unpaid_tab = $tab === 'unpaid';
@@ -264,8 +299,9 @@ $status_pill = function($inv){
     $unpaid = Invoices::unpaid();
     $list = $unpaid_tab ? array_reverse($unpaid) : Invoices::all($filters); ?>
     <?php if ( ! $years ) : ?>
-        <section class="madof-card"><p class="madof-lead"><?php esc_html_e('Aún no hay facturas.', 'mad-oficina'); ?></p><p><a class="madof-btn" href="<?php echo esc_url($base . '&tab=import'); ?>"><?php esc_html_e('Importar el histórico', 'mad-oficina'); ?></a></p></section>
+        <section class="madof-card"><p class="madof-lead"><?php esc_html_e('Aún no hay facturas.', 'mad-oficina'); ?></p><p><a class="madof-btn" href="<?php echo esc_url($base . '&tab=import'); ?>"><?php esc_html_e('Importar el histórico', 'mad-oficina'); ?></a> <a class="madof-btn is-ghost" href="<?php echo esc_url($base . '&edit=new'); ?>"><?php esc_html_e('Nueva factura', 'mad-oficina'); ?></a></p></section>
     <?php else : ?>
+    <p><a class="madof-btn" href="<?php echo esc_url($base . '&edit=new' . ($for_client ? '&client=' . (int) $for_client['id'] : '')); ?>"><?php esc_html_e('Nueva factura', 'mad-oficina'); ?></a></p>
     <?php if ( ! $for_client ) : ?>
     <form method="get" class="madof-filters">
         <input type="hidden" name="page" value="mad-oficina-facturacion">
@@ -283,7 +319,7 @@ $status_pill = function($inv){
         <tbody>
         <?php foreach ( $list as $inv ) : ?>
             <tr>
-                <td><a href="<?php echo esc_url($base . '&invoice=' . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a></td>
+                <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a></td>
                 <td><?php echo esc_html(mysql2date('j M Y', $inv['issue_date'])); ?></td>
                 <td><?php if ( $inv['client_id'] && isset($codes[$inv['client_id']]) ) echo '<a class="madof-code" href="' . esc_url($base . '&client=' . $inv['client_id']) . '">' . esc_html($codes[$inv['client_id']]) . '</a> '; ?><?php echo esc_html($inv['client_name']); ?><?php if ( $inv['notes'] ) echo ' <span title="' . esc_attr($inv['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
                 <td><?php echo esc_html($money($inv['base'])); ?></td>

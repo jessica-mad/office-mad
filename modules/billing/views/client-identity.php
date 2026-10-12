@@ -55,6 +55,7 @@ usort($unlinked, fn($a, $b) => (isset($suggested[$b['id']]) <=> isset($suggested
         <p class="madof-warn"><?php esc_html_e('Aún no tiene datos fiscales unidos: sus facturas no saldrán en su oficina.', 'mad-oficina'); ?></p>
     <?php endif; ?>
 
+    <?php if ( $linked ) : ?><p><a class="madof-btn is-small" href="<?php echo esc_url($billing . '&edit=new&client=' . (int) $client['id']); ?>"><?php esc_html_e('Nueva factura', 'mad-oficina'); ?></a></p><?php endif; ?>
     <div class="madof-cols">
     <?php if ( $unlinked ) : ?>
         <?php echo AdminUi::form_open('billing_link'); ?>

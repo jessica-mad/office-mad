@@ -9,7 +9,7 @@ if ( ! defined('ABSPATH') ) exit;
 final class Installer {
 
     /** Bump whenever Schema or Roles change. */
-    const DB_VERSION        = 6; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end · 5: billing_profiles, invoices, invoice_lines · 6: client_users.areas
+    const DB_VERSION        = 7; // 2: meetings.source/source_key, approvals.object_type/object_id · 3: leads · 4: leads.meeting_start/end · 5: billing_profiles, invoices, invoice_lines · 6: client_users.areas · 7: invoices.due_date/issued_at/issuer, billing_profiles.billing_day/payment_days
     const DB_VERSION_OPTION = 'madoficina_db_version';
 
     public static function activate(){
