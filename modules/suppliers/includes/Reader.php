@@ -24,8 +24,13 @@ final class Reader {
 
     /** PDF readers accept the «%PDF» header anywhere in the first 1 KB (some generators put bytes before it). */
     public static function is_pdf($bytes){
-        $p = strpos(substr((string) $bytes, 0, 1024), '%PDF');
-        return $p !== false;
+        return strpos(substr((string) $bytes, 0, 65536), '%PDF') !== false;
+    }
+
+    /** From «%PDF» on: some files carry bytes before it (signed documents wrap the PDF). */
+    public static function pdf_part($bytes){
+        $p = strpos(substr((string) $bytes, 0, 65536), '%PDF');
+        return $p ? substr($bytes, $p) : (string) $bytes;
     }
 
     public static function schema(){
@@ -56,6 +61,7 @@ final class Reader {
             . "- is_invoice: true solo si es una factura, factura simplificada, recibo de pago o abono (credit_note). Presupuestos, proformas, extractos, contratos, newsletters o cualquier otra cosa: false.\n"
             . "- supplier_*: quien EMITE la factura. recipient_*: a quién va dirigida (cliente/destinatario/bill to/facturar a), tal como aparece. Si no aparece, cadena vacía. No lo deduzcas del email.\n"
             . "- NIF/CIF/VAT tal cual, sin espacios. Fechas en formato AAAA-MM-DD (issue_date = fecha de emisión). Moneda en ISO (EUR, USD…).\n"
+            . "- Fechas: en España el orden es día/mes/año (03/10/25 = 3 de octubre de 2025). Con año de dos cifras, es 20xx. Una factura no puede tener fecha posterior a la del email que la trae: usa esa fecha para no equivocarte de año.\n"
             . "- Importes como números con punto decimal: base imponible, cuota de IVA, retención IRPF (positiva) y total a pagar. Si solo hay total, base = total y vat = 0. En un abono, los importes en negativo.\n"
             . "- concept: qué se paga, en pocas palabras (p. ej. «Google Workspace · octubre»).\n"
             . "- category y periodicity: tu mejor estimación (suscripción mensual, anual, compra puntual…).\n"
@@ -70,7 +76,8 @@ final class Reader {
     public function read($pdf, array $meta = []){
         if ( strlen($pdf) > self::MAX_BYTES ) return new \WP_Error('madof_pdf_big', __('El PDF es demasiado grande para leerlo.', 'mad-oficina'));
         if ( ! self::is_pdf($pdf) ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'));
-        $context = trim(sprintf("Remitente del email: %s\nAsunto: %s\nArchivo: %s", $meta['from'] ?? '—', $meta['subject'] ?? '—', $meta['filename'] ?? '—'));
+        $pdf = self::pdf_part($pdf);
+        $context = trim(sprintf("Remitente del email: %s\nAsunto: %s\nArchivo: %s\nFecha en que llegó el email: %s", $meta['from'] ?? '—', $meta['subject'] ?? '—', $meta['filename'] ?? '—', $meta['received'] ?? '—'));
         $res = ClaudeClient::create([
             'model' => $this->model,
             'max_tokens' => 2000,

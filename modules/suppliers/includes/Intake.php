@@ -101,6 +101,7 @@ final class Intake {
             'status' => 'queued',
             'source' => in_array($meta['source'] ?? '', ['gmail', 'upload'], true) ? $meta['source'] : 'gmail',
             'gmail_message_id' => isset($meta['message_id']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) $meta['message_id']) : null,
+            'received_at' => self::day($meta['date'] ?? '') ?: current_time('Y-m-d'),
             'sender' => self::clean_sender($meta['from'] ?? '') ?: null,
             'subject' => mb_substr(sanitize_text_field($meta['subject'] ?? ''), 0, 255) ?: null,
             'filename' => mb_substr(sanitize_file_name($meta['filename'] ?? 'factura.pdf'), 0, 255),
@@ -139,7 +140,7 @@ final class Intake {
             return ['expense_id' => (int) $id, 'status' => 'review', 'reason' => 'unreadable'];
         }
         Expenses::update($id, ['reason' => 'try:' . $tries]);
-        $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $e['subject'], 'filename' => $e['filename']]);
+        $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $e['subject'], 'filename' => $e['filename'], 'received' => $e['received_at']]);
         if ( is_wp_error($x) ) {
             Expenses::update($id, $tries >= 3
                 ? ['status' => 'review', 'reason' => 'unreadable', 'notes' => sprintf(__('No he podido leerla: %s Ábrela y completa los datos a mano.', 'mad-oficina'), $x->get_error_message())]
@@ -149,9 +150,36 @@ final class Intake {
         return $this->decide($id, $x);
     }
 
+    /** «2025-10-14T09:12:00.000Z» → «2025-10-14» (local day). */
+    private static function day($iso){
+        if ( ! $iso ) return null;
+        try { return (new \DateTimeImmutable((string) $iso))->setTimezone(wp_timezone())->format('Y-m-d'); } catch ( \Exception $e ) { return null; }
+    }
+
+    /**
+     * An invoice cannot be dated after the email that brings it, nor years before.
+     * A wrong year (the usual reading slip) is corrected with the email's date.
+     * @return array{0:?string, 1:?string} [date, note]
+     */
+    public static function check_date($date, $received){
+        if ( ! $received ) return [$date ?: null, null];
+        if ( ! $date ) return [$received, __('Sin fecha legible en la factura: uso la del email.', 'mad-oficina')];
+        $ok = fn($d) => $d <= gmdate('Y-m-d', strtotime($received . ' +7 days')) && $d >= gmdate('Y-m-d', strtotime($received . ' -400 days'));
+        if ( $ok($date) ) return [$date, null];
+        $md = substr($date, 4);
+        foreach ( [(int) substr($received, 0, 4), (int) substr($received, 0, 4) - 1] as $y ) {
+            $try = $y . $md;
+            if ( checkdate((int) substr($try, 5, 2), (int) substr($try, 8, 2), $y) && $ok($try) ) {
+                return [$try, sprintf(__('Fecha corregida: la factura se leyó como %1$s, pero llegó el %2$s.', 'mad-oficina'), date_i18n('j/m/Y', strtotime($date)), date_i18n('j/m/Y', strtotime($received)))];
+            }
+        }
+        return [$date, sprintf(__('Ojo con la fecha: %1$s, y el email llegó el %2$s.', 'mad-oficina'), date_i18n('j/m/Y', strtotime($date)), date_i18n('j/m/Y', strtotime($received)))];
+    }
+
     /** Steps 2–4 with what the Contable read. */
     private function decide($id, array $x){
         $e = Expenses::get($id);
+        [$x['issue_date'], $date_note] = self::check_date($x['issue_date'], $e['received_at']);
         $from = self::address($e['sender'] ?? '');
         $row = [
             'issue_date' => $x['issue_date'] ?: null, 'number' => $x['number'] ?: null,
@@ -160,6 +188,7 @@ final class Intake {
             'concept' => $x['concept'] ?: null, 'base' => $x['base'], 'vat' => $x['vat'], 'irpf' => $x['irpf'], 'total' => $x['total'],
             'currency' => $x['currency'], 'category' => $x['category'], 'extraction' => wp_json_encode($x), 'reason' => null,
         ];
+        if ( $date_note ) $row['notes'] = $date_note;
         $done = function($status, $reason = null, array $more = []) use ($id, $row){
             Expenses::update($id, ['status' => $status, 'reason' => $reason ? mb_substr($reason, 0, 40) : null] + $more + $row);
             if ( $status === 'ignored' ) Uploads::delete($id);
@@ -202,8 +231,9 @@ final class Intake {
         if ( $supplier['usual_amount'] && $x['total'] > $supplier['usual_amount'] * 1.1 ) {
             $notes = sprintf(__('Ojo: %1$s es más de lo habitual (%2$s).', 'mad-oficina'), \MAD_Oficina\Billing\Money::format($x['total']), \MAD_Oficina\Billing\Money::format($supplier['usual_amount']));
         }
-        return ['status' => 'registered', 'reason' => $notes ? 'price_up' : null, 'notes' => $notes, 'supplier_id' => $supplier['id'],
-            'supplier_name' => $supplier['name'], 'category' => $supplier['category'], 'client_id' => $supplier['client_id']];
+        return ['status' => 'registered', 'reason' => $notes ? 'price_up' : null, 'supplier_id' => $supplier['id'],
+            'supplier_name' => $supplier['name'], 'category' => $supplier['category'], 'client_id' => $supplier['client_id']]
+            + ( $notes ? ['notes' => $notes] : [] ); // (no key: a note about the date is kept)
     }
 
     /** «Name <a@b.c>» kept readable and safe (a text filter would drop the <address> as a tag). */

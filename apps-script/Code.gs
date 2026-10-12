@@ -429,7 +429,7 @@ function scanInvoices_() {
       files.forEach(function (f) {
         if (unknown.indexOf(f.hash) < 0) return;
         try {
-          signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, filename: f.name, base64: Utilities.base64Encode(f.bytes) });
+          signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, date: new Date(Number(m.internalDate)).toISOString(), filename: f.name, base64: Utilities.base64Encode(f.bytes) });
         } catch (e) {
           // One bad file never stops the rest: it is logged and the scan goes on.
           console.warn('No he podido entregar «' + f.name + '» (' + (head.subject || m.id) + '): ' + e);

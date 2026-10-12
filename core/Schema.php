@@ -475,6 +475,7 @@ final class Schema {
   client_id bigint(20) unsigned NULL,
   source varchar(20) NOT NULL DEFAULT 'gmail',
   gmail_message_id varchar(64) NULL,
+  received_at date NULL,
   sender varchar(255) NULL,
   subject varchar(255) NULL,
   filename varchar(255) NULL,

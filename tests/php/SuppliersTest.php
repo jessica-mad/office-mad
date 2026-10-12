@@ -231,4 +231,21 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame($pdf, base64_decode($file['base64']));
         $this->assertSame('Nube <facturas@nube.example>', Expenses::get($res->get_data()['expense_id'])['sender']);
     }
+
+    public function test_dates_are_checked_against_the_email(){
+        $this->assertSame(['2025-10-03', null], Intake::check_date('2025-10-03', '2025-10-05'));
+        [$d, $note] = Intake::check_date('2026-10-03', '2025-10-05');
+        $this->assertSame('2025-10-03', $d, 'dated after the email: the year was misread');
+        $this->assertStringContainsString('corregida', $note);
+        $this->assertSame('2025-12-28', Intake::check_date('2026-12-28', '2026-01-04')[0], 'late December invoice arriving in January');
+        $this->assertSame(['2025-11-02', 'Sin fecha legible en la factura: uso la del email.'], Intake::check_date('', '2025-11-02'));
+
+        $this->next = $this->x(['issue_date' => '2026-10-03', 'number' => 'Y1']);
+        Suppliers::save(['name' => 'Nube SL', 'tax_id' => 'B99999999']);
+        $r = $this->intake()->receive('%PDF-1.4 dated', ['source' => 'gmail', 'date' => '2025-10-05T08:00:00.000Z', 'from' => 'x@nube.example']);
+        $e = Expenses::get($r['expense_id']);
+        $this->assertSame(['2025-10-03', '2025-10-05', 2025], [$e['issue_date'], $e['received_at'], $e['year']]);
+        $this->assertStringContainsString('Fecha corregida', $e['notes'], 'the note survives registration');
+        $this->assertTrue(\MAD_Oficina\Suppliers\Reader::is_pdf(str_repeat('x', 3000) . '%PDF-1.7'), 'signed documents wrap the PDF');
+    }
 }

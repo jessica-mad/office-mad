@@ -107,7 +107,7 @@ return new class($core) implements MAD_Oficina_Module {
             if ( function_exists('set_time_limit') ) @set_time_limit(150);
             if ( function_exists('wp_raise_memory_limit') ) wp_raise_memory_limit('admin');
             try {
-                $res = $this->intake()->receive($pdf, ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename'])));
+                $res = $this->intake()->receive($pdf, ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename', 'date'])));
             } catch ( \Throwable $e ) {
                 return new \WP_Error('madof_expense_error', 'Error al recibir la factura: ' . $e->getMessage(), ['status' => 500]);
             }

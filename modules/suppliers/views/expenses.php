@@ -40,7 +40,9 @@ $table = function(array $list, $show_reason = false) use ($base, $codes, $reason
         <tbody>
         <?php foreach ( $list as $e ) : ?>
             <tr>
-                <td class="madof-nowrap"><a href="<?php echo esc_url($base . '&expense=' . $e['id']); ?>"><?php echo esc_html($e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '—'); ?></a></td>
+                <td class="madof-nowrap"><a href="<?php echo esc_url($base . '&expense=' . $e['id']); ?>"><?php echo esc_html($e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '—'); ?></a>
+                    <?php if ( $e['received_at'] && $e['received_at'] !== $e['issue_date'] ) echo '<br><small class="madof-muted">' . esc_html(sprintf(__('llegó %s', 'mad-oficina'), date_i18n('j M Y', strtotime($e['received_at'])))) . '</small>'; ?>
+                    <?php if ( $e['notes'] && str_contains((string) $e['notes'], __('Fecha', 'mad-oficina')) ) echo ' <span title="' . esc_attr($e['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
                 <td><?php echo esc_html($e['supplier_name'] ?: ($e['sender'] ?: '—')); ?><?php if ( $e['number'] ) echo '<br><small>' . esc_html($e['number']) . '</small>'; ?></td>
                 <td><?php echo esc_html((string) $e['concept']); ?>
                     <?php if ( $e['client_id'] ) echo ' <span class="madof-code" title="' . esc_attr__('Se repercute a este cliente', 'mad-oficina') . '">' . esc_html($codes[$e['client_id']] ?? '?') . '</span>'; ?>
