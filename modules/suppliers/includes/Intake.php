@@ -16,7 +16,9 @@ if ( ! defined('ABSPATH') ) exit;
  *      someone else → «no es mía», kept aside (she can recover it). No clear
  *      recipient → she is asked;
  *   4. known supplier → registered (internal, nothing goes out) and archived in
- *      «Recibidas/AAAA/Tn/»; unknown → she is asked whether it is a new supplier.
+ *      «Facturas para MAD/AAAA/AAAA-Tn/»; unknown → she is asked whether it is a new supplier.
+ * Payment proofs are joined to the invoice they pay; payments to Hacienda or the
+ * Seguridad Social go to Impuestos. Files can also come from her Drive archive.
  */
 final class Intake {
 
@@ -24,6 +26,9 @@ final class Intake {
     const READ_HOOK = 'madoficina_expense_read';
     const MAX_TRIES = 3;
     const REVIEW = 'expense_review';
+    const SOURCES = ['gmail', 'upload', 'drive'];
+    /** Drive files that turned out to be copies of one already known (so they are not sent again). */
+    const SEEN_OPTION = 'madoficina_drive_seen';
 
     private $settings;
 
@@ -89,23 +94,32 @@ final class Intake {
     /* ==== The pipeline ==== */
 
     /**
-     * A PDF arrives (cartero or upload): kept privately, then read straight away.
+     * A document arrives (cartero, upload or Drive archive): kept privately, then read.
      * If reading fails or times out it stays «queued» and the next tick retries.
-     * @param string $pdf  raw bytes
-     * @param array  $meta source (gmail|upload), message_id, from, subject, filename
+     * @param string $pdf  raw bytes (PDF or image)
+     * @param array  $meta source (gmail|upload|drive), message_id, from, subject, filename, date;
+     *                     from Drive: file_id, folder (path, a hint), in_archive (already in the
+     *                     archive: it is moved and renamed there, not copied)
      * @return array{expense_id:int, status:string, reason:?string}|\WP_Error
      */
     public function receive($pdf, array $meta){
-        if ( ! Reader::is_pdf($pdf) ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF.', 'mad-oficina'), ['status' => 422]);
+        if ( ! Reader::media_type($pdf) ) return new \WP_Error('madof_pdf_type', __('El archivo no es un PDF ni una imagen.', 'mad-oficina'), ['status' => 422]);
+        $source = in_array($meta['source'] ?? '', self::SOURCES, true) ? $meta['source'] : 'gmail';
+        $file_id = $source === 'drive' ? preg_replace('/[^A-Za-z0-9_\-]/', '', (string) ($meta['file_id'] ?? '')) : '';
+        $in_archive = $file_id && ! empty($meta['in_archive']);
         $hash = hash('sha256', $pdf);
-        if ( $seen = Expenses::by_hash($hash) ) return ['expense_id' => $seen['id'], 'status' => $seen['status'], 'reason' => 'seen'];
+        if ( $seen = Expenses::by_hash($hash) ) return $this->seen($seen, $file_id, $in_archive);
+        $folder = mb_substr(sanitize_text_field((string) ($meta['folder'] ?? '')), 0, 255);
         $id = Expenses::insert([
             'status' => 'queued',
-            'source' => in_array($meta['source'] ?? '', ['gmail', 'upload'], true) ? $meta['source'] : 'gmail',
+            'source' => $source,
+            'source_ref' => $file_id ? 'drive:' . $file_id : null,
+            'drive_file_id' => $in_archive ? $file_id : null,
             'gmail_message_id' => isset($meta['message_id']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) $meta['message_id']) : null,
-            'received_at' => self::day($meta['date'] ?? '') ?: current_time('Y-m-d'),
+            'received_at' => ($source === 'drive' ? self::folder_end($folder) : null) ?: self::day($meta['date'] ?? '') ?: current_time('Y-m-d'),
             'sender' => self::clean_sender($meta['from'] ?? '') ?: null,
-            'subject' => mb_substr(sanitize_text_field($meta['subject'] ?? ''), 0, 255) ?: null,
+            // From Drive the «subject» is the folder it was in (shown in the lists, and a hint for the date).
+            'subject' => ($source === 'drive' ? $folder : mb_substr(sanitize_text_field($meta['subject'] ?? ''), 0, 255)) ?: null,
             'filename' => mb_substr(sanitize_file_name($meta['filename'] ?? 'factura.pdf'), 0, 255),
             'file_hash' => $hash,
         ]);
@@ -118,6 +132,38 @@ final class Intake {
             return ['expense_id' => (int) $id, 'status' => 'queued', 'reason' => null];
         }
         return $this->process($id);
+    }
+
+    /**
+     * The same file again. From the Drive archive: if the known one has no file in the
+     * archive yet, this one becomes its file (moved and renamed into place); if it has
+     * one, this copy is a duplicate (the cartero puts it in «Duplicados», never deletes).
+     */
+    private function seen(array $seen, $file_id, $in_archive){
+        $out = ['expense_id' => (int) $seen['id'], 'status' => $seen['status'], 'reason' => 'seen'];
+        if ( ! $file_id ) return $out;
+        if ( ! $in_archive ) {
+            $known = get_option(self::SEEN_OPTION, []);
+            $known = is_array($known) ? $known : [];
+            if ( ! in_array('drive:' . $file_id, $known, true) ) { $known[] = 'drive:' . $file_id; update_option(self::SEEN_OPTION, array_slice($known, -5000), false); }
+            return $out;
+        }
+        if ( $seen['drive_file_id'] === $file_id ) return $out;
+        if ( ! $seen['drive_file_id'] ) {
+            Expenses::update($seen['id'], ['drive_file_id' => $file_id, 'source_ref' => $seen['source_ref'] ?: 'drive:' . $file_id]);
+            $this->queue_archive($seen['id']);
+            return ['reason' => 'adopted'] + $out;
+        }
+        return ['reason' => 'duplicate', 'duplicate' => true] + $out;
+    }
+
+    /** «Facturas Compras IMAD/2025/T1» → «2025-03-31» (last day of the quarter or month named in the path). */
+    public static function folder_end($path){
+        if ( ! preg_match('/\b(20\d\d)\b/', (string) $path, $y) ) return null;
+        $parts = explode('/', (string) $path);
+        $last = end($parts);
+        if ( preg_match('/\bT\s*([1-4])\b/i', $last, $q) || preg_match('/-T([1-4])\b/i', $last, $q) ) return gmdate('Y-m-t', strtotime(sprintf('%s-%02d-01', $y[1], $q[1] * 3)));
+        return $y[1] . '-12-31';
     }
 
     public static function schedule($id){
@@ -171,7 +217,8 @@ final class Intake {
         $log = trim($log . "\n" . sprintf(__('Intento %d', 'mad-oficina'), $tries) . '…');
         Expenses::update($id, ['reason' => 'try:' . $tries, 'notes' => $log]);
         if ( function_exists('set_time_limit') ) @set_time_limit(150);
-        $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $e['subject'], 'filename' => $e['filename'], 'received' => $e['received_at']]);
+        $drive = $e['source'] === 'drive';
+        $x = (new Reader($this->settings['model'] ?? ''))->read($pdf, ['from' => $e['sender'], 'subject' => $drive ? '' : $e['subject'], 'filename' => $e['filename'], 'received' => $drive ? '' : $e['received_at'], 'folder' => $drive ? $e['subject'] : '']);
         if ( is_wp_error($x) ) {
             $log = preg_replace('/…$/u', ': ' . $x->get_error_message(), $log);
             Expenses::update($id, $tries >= self::MAX_TRIES
@@ -213,7 +260,8 @@ final class Intake {
     /** Steps 2–4 with what the Contable read. */
     private function decide($id, array $x){
         $e = Expenses::get($id);
-        [$x['issue_date'], $date_note] = self::check_date($x['issue_date'], $e['received_at']);
+        // An upload can be years old: only an email's (or the archive folder's) date says something.
+        [$x['issue_date'], $date_note] = self::check_date($x['issue_date'], $e['source'] === 'upload' && $x['issue_date'] ? null : $e['received_at']);
         $from = self::address($e['sender'] ?? '');
         $row = [
             'issue_date' => $x['issue_date'] ?: null, 'number' => $x['number'] ?: null,
@@ -225,12 +273,17 @@ final class Intake {
         if ( $date_note ) $row['notes'] = $date_note;
         $done = function($status, $reason = null, array $more = []) use ($id, $row){
             Expenses::update($id, ['status' => $status, 'reason' => $reason ? mb_substr($reason, 0, 40) : null] + $more + $row);
-            if ( $status === 'ignored' ) Uploads::delete($id);
+            if ( $status === 'ignored' ) {
+                Uploads::delete($id);
+                if ( $reason === 'duplicate' && Expenses::get($id)['drive_file_id'] ) $this->queue_archive($id); // a copy already in the archive → «Duplicados»
+            }
             if ( in_array($status, ['registered', 'not_mine'], true) ) $this->queue_archive($id);
             if ( $status === 'registered' ) do_action('madoficina_expense_registered', $id);
             return ['expense_id' => (int) $id, 'status' => $status, 'reason' => $reason];
         };
 
+        if ( ($x['doc_type'] ?? '') === 'payment' ) return $this->payment($id, $x, $row);
+        if ( ($x['doc_type'] ?? '') === 'tax' ) return $this->tax($id, $x, $row);
         if ( ! $x['is_invoice'] ) return $done('ignored', 'not_invoice');
 
         [$who, $why] = $this->recipient($x);
@@ -287,16 +340,36 @@ final class Intake {
 
     /* ==== Archive in the shared drive (the cartero) ==== */
 
+    /** The archive folder in the shared drive (Gastos → Ajustes); empty = the cartero's «Recibidas». */
+    public function archive_root(){
+        return preg_replace('/[^A-Za-z0-9_\-]/', '', (string) ($this->settings['archive_folder'] ?? ''));
+    }
+
     public function queue_archive($id){
         global $wpdb;
         $e = Expenses::get($id);
-        if ( ! $e || ! in_array($e['status'], ['registered', 'not_mine'], true) ) return 0;
+        if ( ! $e ) return 0;
+        $ok = in_array($e['status'], ['registered', 'not_mine', 'tax'], true)
+            || ( $e['status'] === 'payment' && $e['payment_for'] )
+            || ( $e['status'] === 'ignored' && $e['reason'] === 'duplicate' && $e['drive_file_id'] ); // only a copy already in the archive
+        if ( ! $ok ) return 0;
         // The latest decision wins: an older order for this file that has not run yet is dropped.
         $wpdb->query($wpdb->prepare('DELETE FROM ' . \MAD_Oficina\Core\Schema::table('tasks') . " WHERE agent = %s AND status = 'queued' AND type IN ('expense_archive','expense_move') AND payload LIKE %s",
             Orders::AGENT, $wpdb->esc_like('{"expense_id":' . (int) $id . ',') . '%'));
-        $payload = ['expense_id' => (int) $id, 'folder' => Expenses::folder($e), 'name' => Expenses::filename($e)];
+        $payload = ['expense_id' => (int) $id, 'folder' => Expenses::folder($e), 'name' => Expenses::filename($e), 'root' => $this->archive_root()];
+        if ( $e['status'] === 'ignored' ) $payload['name'] = $e['filename']; // a duplicate keeps its name
         if ( $e['drive_file_id'] ) return Orders::queue('expense_move', $payload + ['file_id' => $e['drive_file_id']]);
         return Orders::queue('expense_archive', $payload);
+    }
+
+    /** «Reorganizar el archivo»: every archived file goes to its place in the current archive folder. @return int orders */
+    public function reorganize(){
+        global $wpdb;
+        $n = 0;
+        foreach ( $wpdb->get_col('SELECT id FROM ' . Expenses::table() . " WHERE drive_file_id IS NOT NULL AND status IN ('registered','not_mine','payment','tax') ORDER BY id") as $id ) {
+            if ( $this->queue_archive((int) $id) ) $n++;
+        }
+        return $n;
     }
 
     public static function order_done($type, array $payload, $ok, array $result){
@@ -304,8 +377,106 @@ final class Intake {
         $fields = [];
         if ( ! empty($result['file_id']) ) $fields['drive_file_id'] = preg_replace('/[^A-Za-z0-9_\-]/', '', $result['file_id']);
         if ( ! empty($result['url']) && preg_match('#^https://(drive|docs)\.google\.com/#', $result['url']) ) $fields['drive_url'] = esc_url_raw($result['url']);
-        if ( $fields ) Expenses::update((int) $payload['expense_id'], $fields);
-        if ( $type === 'expense_archive' && ! empty($fields['drive_file_id']) ) Uploads::delete((int) $payload['expense_id']); // safe in Drive now
+        $id = (int) $payload['expense_id'];
+        if ( $fields ) Expenses::update($id, $fields);
+        if ( $type === 'expense_archive' && ! empty($fields['drive_file_id']) ) Uploads::delete($id); // safe in Drive now
+        $e = Expenses::get($id);
+        if ( ! $e || empty($fields['drive_url']) ) return;
+        // The proof of payment is reachable from its invoice; a tax document from Impuestos.
+        if ( $e['status'] === 'payment' && $e['payment_for'] ) Expenses::update($e['payment_for'], ['payment_file_id' => $fields['drive_file_id'] ?? $e['drive_file_id'], 'payment_url' => $fields['drive_url']]);
+        if ( $e['status'] === 'tax' && ! empty($e['extraction']['tax_entry_id']) ) \MAD_Oficina\Billing\Taxes::set_file((int) $e['extraction']['tax_entry_id'], $fields['drive_url']);
+    }
+
+    /* ==== Payments and taxes ==== */
+
+    /** A proof of payment: joined to the invoice it pays, or kept waiting for it. */
+    private function payment($id, array $x, array $row){
+        $supplier = Suppliers::match($x['supplier_tax_id'], '', $x['supplier_name'] ?: $x['payee_name']);
+        Expenses::update($id, ['status' => 'payment', 'reason' => 'unmatched', 'supplier_id' => $supplier['id'] ?? null, 'paid_eur' => $x['paid_eur'] ?: null] + $row);
+        $inv = $this->link_payment($id);
+        return ['expense_id' => (int) $id, 'status' => 'payment', 'reason' => $inv ? null : 'unmatched'];
+    }
+
+    /**
+     * The invoice a payment pays: the one it names, or one of the same supplier (or payee)
+     * with the same amount (same currency) dated up to 90 days before or 10 after;
+     * among them, one not yet paid and closest in date. @return int invoice id or 0
+     */
+    public function link_payment($pid, $invoice_id = 0){
+        global $wpdb;
+        $p = Expenses::get($pid);
+        if ( ! $p || $p['status'] !== 'payment' ) return 0;
+        if ( ! $invoice_id ) {
+            $date = $p['issue_date'] ?: $p['received_at'];
+            if ( ! $date ) return 0;
+            $cands = array_map(fn($r) => Expenses::get((int) $r), $wpdb->get_col($wpdb->prepare('SELECT id FROM ' . Expenses::table() . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s",
+                gmdate('Y-m-d', strtotime($date . ' -90 days')), gmdate('Y-m-d', strtotime($date . ' +10 days')))));
+            $ref = Suppliers::key_name((string) ($p['extraction']['invoice_ref'] ?? ''));
+            $payee = array_filter([Suppliers::key_name((string) $p['supplier_name']), Suppliers::key_name((string) ($p['extraction']['payee_name'] ?? ''))]);
+            $best = null; $score = -1;
+            foreach ( $cands as $c ) {
+                $named = $ref && $c['number'] && Suppliers::key_name($c['number']) === $ref;
+                $same = ( $p['supplier_id'] && $p['supplier_id'] === $c['supplier_id'] ) || in_array(Suppliers::key_name((string) $c['supplier_name']), $payee, true);
+                $amount = $c['currency'] === $p['currency'] ? abs((float) $c['total'] - (float) $p['total']) < 0.02 : null; // other currency: the amount says nothing
+                if ( ! $named && ! ( $same && $amount !== false ) ) continue;
+                $sc = ($named ? 100 : 0) + ($amount ? 20 : 0) + (Expenses::payments_for($c['id']) ? 0 : 10) - abs(strtotime($c['issue_date']) - strtotime($date)) / DAY_IN_SECONDS / 10;
+                if ( $sc > $score ) { $score = $sc; $best = $c; }
+            }
+            if ( ! $best ) return 0;
+            $invoice_id = $best['id'];
+        }
+        $inv = Expenses::get($invoice_id);
+        if ( ! $inv ) return 0;
+        Expenses::update($pid, ['payment_for' => $inv['id'], 'reason' => null, 'supplier_id' => $inv['supplier_id']]);
+        // An invoice in another currency counts in euros by what was actually paid.
+        if ( $inv['currency'] !== 'EUR' ) {
+            $eur = (float) ($p['paid_eur'] ?? 0) ?: ( $p['currency'] === 'EUR' ? (float) $p['total'] : 0 );
+            if ( $eur > 0 ) Expenses::update($inv['id'], ['paid_eur' => round((float) $inv['paid_eur'] + $eur, 2)]);
+        }
+        $this->queue_archive($pid);
+        return (int) $inv['id'];
+    }
+
+    /** A newly registered invoice may be the one a waiting payment pays. */
+    public function payments_waiting($invoice_id){
+        global $wpdb;
+        $inv = Expenses::get($invoice_id);
+        if ( ! $inv || ! $inv['issue_date'] ) return 0;
+        $n = 0;
+        foreach ( $wpdb->get_col($wpdb->prepare('SELECT id FROM ' . Expenses::table() . " WHERE status = 'payment' AND payment_for IS NULL AND issue_date BETWEEN %s AND %s",
+            gmdate('Y-m-d', strtotime($inv['issue_date'] . ' -10 days')), gmdate('Y-m-d', strtotime($inv['issue_date'] . ' +90 days')))) as $pid ) {
+            if ( $this->link_payment((int) $pid) ) $n++;
+        }
+        return $n;
+    }
+
+    /** A payment to Hacienda or the Seguridad Social: noted in Impuestos (one per tax and period). */
+    private function tax($id, array $x, array $row){
+        $date = $x['issue_date'] ?: Expenses::get($id)['received_at'];
+        $kind = $x['tax_kind'] ?: 'other';
+        $period = $x['tax_period'];
+        if ( ! preg_match('/^\d{4}(-T[1-4]|-\d{2})?$/', $period) ) {
+            $prev = gmdate('Y-m-d', strtotime(substr($date, 0, 7) . '-01 -1 month'));
+            $period = $kind === 'autonomos' ? substr($date, 0, 7)
+                : ( in_array($kind, ['vat_303', 'irpf_130'], true) ? substr($prev, 0, 4) . '-T' . (int) ceil((int) substr($prev, 5, 2) / 3) : substr($date, 0, 4) );
+        }
+        $tax = \MAD_Oficina\Billing\Taxes::save(['kind' => $kind, 'period' => $period, 'paid_on' => $date, 'amount' => number_format(abs((float) $x['total']), 2, ',', ''),
+            'source' => 'document', 'notes' => trim(($x['concept'] ?: '') . ' · ' . Expenses::get($id)['filename'], ' ·')]);
+        $row['extraction'] = wp_json_encode($x + ['tax_entry_id' => is_wp_error($tax) ? 0 : $tax]);
+        Expenses::update($id, ['status' => is_wp_error($tax) ? 'review' : 'tax', 'reason' => is_wp_error($tax) ? 'unreadable' : null] + $row);
+        if ( ! is_wp_error($tax) ) $this->queue_archive($id);
+        return ['expense_id' => (int) $id, 'status' => is_wp_error($tax) ? 'review' : 'tax', 'reason' => null];
+    }
+
+    /** «Es una factura»: a document read as a payment proof that is in fact the only invoice there is. */
+    public function as_invoice($id){
+        $e = Expenses::get($id);
+        if ( ! $e || ! in_array($e['status'], ['payment', 'ignored', 'review'], true) || ! $e['extraction'] ) return new \WP_Error('madof_expense', __('No puedo tratar este documento como factura.', 'mad-oficina'));
+        Expenses::update($id, ['payment_for' => null]);
+        $x = $e['extraction'];
+        $x['is_invoice'] = true; $x['doc_type'] = 'invoice';
+        if ( empty($x['supplier_name']) ) $x['supplier_name'] = $x['payee_name'] ?? '';
+        return $this->decide($id, $x);
     }
 
     /* ==== Jessica's answers ==== */

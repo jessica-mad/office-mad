@@ -486,6 +486,8 @@ final class Schema {
   paid_eur decimal(12,2) NULL,
   payment_file_id varchar(128) NULL,
   payment_url varchar(255) NULL,
+  payment_for bigint(20) unsigned NULL,
+  source_ref varchar(128) NULL,
   extraction longtext NULL,
   notes text NULL,
   created_at datetime NOT NULL,
@@ -495,7 +497,9 @@ final class Schema {
   KEY supplier (supplier_id,issue_date),
   KEY status (status),
   KEY client_id (client_id),
-  KEY message (gmail_message_id)",
+  KEY message (gmail_message_id),
+  KEY payment_for (payment_for),
+  KEY source_ref (source_ref)",
 
             // Taxes and social security paid (IVA 303, cuota de autónomos…), entered by hand or
             // as a monthly fixed amount. Orientative: the gestoría files the real figures.

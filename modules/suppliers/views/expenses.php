@@ -18,8 +18,9 @@ $tabs = [
     'review' => sprintf(__('Por revisar (%d)', 'mad-oficina'), $count('review')),
     'reading' => sprintf(__('Leyendo (%d)', 'mad-oficina'), $count('queued')),
     'aside' => sprintf(__('No son mías (%d)', 'mad-oficina'), $count('not_mine')),
+    'payments' => sprintf(__('Pagos (%d sin factura)', 'mad-oficina'), (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . Expenses::table() . " WHERE status = 'payment' AND payment_for IS NULL")),
     'suppliers' => __('Proveedores', 'mad-oficina'),
-    'upload' => __('Subir factura', 'mad-oficina'),
+    'upload' => __('Subir o importar', 'mad-oficina'),
     'settings' => __('Ajustes', 'mad-oficina'),
 ];
 $codes = array_column(Clients::all(), 'code', 'id');
@@ -32,6 +33,7 @@ $reason = function(array $e){
         'recipient' => __('No dice a nombre de quién está', 'mad-oficina'), 'supplier' => __('Proveedor nuevo', 'mad-oficina'),
         'unreadable' => __('No he podido leerla', 'mad-oficina'), 'long' => __('Documento largo: no leído para no gastar', 'mad-oficina'), 'not_invoice' => __('No es una factura', 'mad-oficina'),
         'duplicate' => __('Repetida', 'mad-oficina'), 'price_up' => __('Más cara de lo habitual', 'mad-oficina'),
+        'unmatched' => __('Aún no sé qué factura paga', 'mad-oficina'),
     ][$r] ?? '';
 };
 $table = function(array $list, $show_reason = false, $pick = false) use ($base, $codes, $reason){
@@ -53,8 +55,9 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
                     <?php if ( $e['status'] === 'queued' && $e['subject'] ) echo '<br><small class="madof-muted">' . esc_html($e['subject']) . '</small>'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['base'] !== null ? esc_html(Money::format($e['base'])) : '—'; ?></td>
                 <td class="madof-nowrap"><?php echo $e['vat'] !== null ? esc_html(Money::format($e['vat'])) : '—'; ?></td>
-                <td class="madof-nowrap"><strong><?php echo $e['total'] !== null ? esc_html(Money::format($e['total']) . ($e['currency'] !== 'EUR' ? ' ' . $e['currency'] : '')) : '—'; ?></strong></td>
-                <td class="madof-row-actions"><?php if ( $e['drive_url'] ) : ?><a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener">PDF</a><?php elseif ( in_array($e['status'], ['registered', 'not_mine'], true) ) : ?><small class="madof-muted"><?php esc_html_e('archivando…', 'mad-oficina'); ?></small><?php else : ?><small class="madof-muted"><?php esc_html_e('se archiva al decidir', 'mad-oficina'); ?></small><?php endif; ?></td>
+                <td class="madof-nowrap"><strong><?php echo $e['total'] !== null ? esc_html(Suppliers::money($e['total'], $e['currency'])) : '—'; ?></strong>
+                    <?php if ( $e['currency'] !== 'EUR' && $e['paid_eur'] ) echo '<br><small>' . esc_html(sprintf(__('pagado %s', 'mad-oficina'), Money::format($e['paid_eur']))) . '</small>'; ?></td>
+                <td class="madof-row-actions"><?php if ( $e['drive_url'] ) : ?><a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php echo esc_html(strtoupper(Expenses::ext($e))); ?></a><?php if ( $e['payment_url'] ) : ?> · <a href="<?php echo esc_url($e['payment_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('pago', 'mad-oficina'); ?></a><?php endif; ?><?php elseif ( in_array($e['status'], ['registered', 'not_mine'], true) ) : ?><small class="madof-muted"><?php esc_html_e('archivando…', 'mad-oficina'); ?></small><?php else : ?><small class="madof-muted"><?php esc_html_e('se archiva al decidir', 'mad-oficina'); ?></small><?php endif; ?></td>
             </tr>
         <?php endforeach; ?>
         </tbody>
@@ -62,7 +65,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
 <?php };
 ?>
 <div class="wrap madof-wrap">
-    <?php AdminUi::header(__('Administración', 'mad-oficina'), __('Proveedores y gastos', 'mad-oficina'), __('La Contable lee las facturas de tus proveedores en Gmail. Solo cuentan las que van a tu nombre: las de clientes u otros las guarda aparte por si alguna fuera tuya.', 'mad-oficina')); ?>
+    <?php AdminUi::header(__('Finanzas', 'mad-oficina'), __('Proveedores y gastos', 'mad-oficina'), __('La Contable lee las facturas de tus proveedores (Gmail, subidas o tu archivo de Drive) y une cada pago a su factura. Solo cuentan las que van a tu nombre: las de clientes u otros las guarda aparte por si alguna fuera tuya.', 'mad-oficina')); ?>
     <nav class="madof-tabs" aria-label="<?php esc_attr_e('Secciones', 'mad-oficina'); ?>">
         <?php foreach ( $tabs as $k => $l ) : ?><a href="<?php echo esc_url($base . '&tab=' . $k); ?>" class="<?php echo ($tab === $k && ! $expense) ? 'is-active' : ''; ?>"><?php echo esc_html($l); ?></a><?php endforeach; ?>
     </nav>
@@ -73,14 +76,32 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
         <span class="madof-kicker"><?php echo esc_html(__(Expenses::STATUSES[$e['status']] ?? $e['status'], 'mad-oficina') . ($reason($e) ? ' · ' . $reason($e) : '')); ?></span>
         <h2><?php echo esc_html(($e['supplier_name'] ?: __('Factura', 'mad-oficina')) . ($e['number'] ? ' · ' . $e['number'] : '')); ?></h2>
         <p><?php echo esc_html(sprintf(__('A nombre de: %s', 'mad-oficina'), trim(($e['recipient_name'] ?: '—') . ' ' . ($e['recipient_tax_id'] ?: '')))); ?>
-            · <?php echo esc_html(sprintf(__('De: %s', 'mad-oficina'), $e['sender'] ?: __('subida manual', 'mad-oficina'))); ?>
-            <?php if ( $e['subject'] ) echo '· ' . esc_html($e['subject']); ?>
-            <?php if ( $e['drive_url'] ) : ?>· <a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver el PDF en Drive', 'mad-oficina'); ?></a><?php endif; ?></p>
+            · <?php echo esc_html(sprintf(__('De: %s', 'mad-oficina'), $e['sender'] ?: ( $e['source'] === 'drive' ? __('tu archivo de Drive', 'mad-oficina') : __('subida manual', 'mad-oficina') ))); ?>
+            <?php if ( $e['subject'] && $e['source'] !== 'drive' ) echo '· ' . esc_html($e['subject']); ?>
+            <?php if ( $e['drive_url'] ) : ?>· <a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver el archivo en Drive', 'mad-oficina'); ?></a><?php endif; ?></p>
         <?php if ( $e['notes'] ) echo '<p class="madof-warn">' . esc_html($e['notes']) . '</p>'; ?>
         <?php if ( $e['client_id'] && ( $inv = Expenses::rebilled_in($e['id']) ) ) echo '<p>' . esc_html(sprintf(__('Repercutido en la factura %s.', 'mad-oficina'), $inv)) . '</p>'; ?>
+        <?php if ( $e['source'] === 'drive' && $e['subject'] ) echo '<p class="madof-muted">' . esc_html(sprintf(__('Venía de tu archivo: %s', 'mad-oficina'), $e['subject'])) . '</p>'; ?>
+        <?php foreach ( Expenses::payments_for($e['id']) as $pay ) : ?>
+            <p><?php echo AdminUi::icon('check'); ?> <?php echo esc_html(sprintf(__('Pagada el %1$s: %2$s', 'mad-oficina'), $pay['issue_date'] ? date_i18n('j M Y', strtotime($pay['issue_date'])) : '—', Suppliers::money((float) $pay['total'], $pay['currency']) . ( $pay['paid_eur'] ? ' (' . Money::format($pay['paid_eur']) . ')' : '' ))); ?>
+                · <a href="<?php echo esc_url($base . '&expense=' . $pay['id']); ?>"><?php esc_html_e('justificante', 'mad-oficina'); ?></a></p>
+        <?php endforeach; ?>
+        <?php if ( $e['status'] === 'payment' ) : $paid = $e['payment_for'] ? Expenses::get($e['payment_for']) : null; ?>
+            <?php if ( $paid ) : ?>
+                <p><?php echo esc_html(sprintf(__('Justificante del pago de la factura %1$s de %2$s.', 'mad-oficina'), $paid['number'] ?: '#' . $paid['id'], $paid['supplier_name'])); ?> <a href="<?php echo esc_url($base . '&expense=' . $paid['id']); ?>"><?php esc_html_e('Ver la factura', 'mad-oficina'); ?></a></p>
+            <?php endif; ?>
+            <?php $cands = Expenses::all(['status' => 'registered', 'supplier_id' => $e['supplier_id'] ?: null, 'around' => $e['issue_date'] ?: $e['received_at']], 80); ?>
+            <?php echo AdminUi::form_open('expense_link', 'madof-form madof-inline-form'); ?>
+                <input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>">
+                <label><?php echo $paid ? esc_html__('¿Es de otra factura?', 'mad-oficina') : esc_html__('¿Qué factura paga?', 'mad-oficina'); ?>
+                    <select name="invoice_id" required><option value=""></option><?php foreach ( $cands as $c ) echo '<option value="' . (int) $c['id'] . '" ' . selected((int) $e['payment_for'], (int) $c['id'], false) . '>' . esc_html(($c['issue_date'] ? date_i18n('j/m/Y', strtotime($c['issue_date'])) : '—') . ' · ' . $c['supplier_name'] . ' · ' . Suppliers::money((float) $c['total'], $c['currency']) . ($c['number'] ? ' · ' . $c['number'] : '')) . '</option>'; ?></select></label>
+                <button class="madof-btn is-small"><?php esc_html_e('Unir', 'mad-oficina'); ?></button>
+            </form>
+            <?php echo AdminUi::form_open('expense_as_invoice', 'madof-inline'); ?><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><button class="madof-btn is-small is-ghost"><?php esc_html_e('No hay factura: registrar este recibo como gasto', 'mad-oficina'); ?></button></form>
+        <?php endif; ?>
         <div class="madof-actions">
-            <?php if ( $e['status'] !== 'registered' ) : echo AdminUi::form_open('expense_mine', 'madof-inline'); ?><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><input type="hidden" name="mine" value="1"><button class="madof-btn is-small"><?php esc_html_e('Es mía: registrarla', 'mad-oficina'); ?></button></form><?php endif; ?>
-            <?php if ( $e['status'] !== 'not_mine' ) : echo AdminUi::form_open('expense_mine', 'madof-inline'); ?><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><button class="madof-btn is-small is-ghost"><?php esc_html_e('No es mía: guardarla aparte', 'mad-oficina'); ?></button></form><?php endif; ?>
+            <?php if ( ! in_array($e['status'], ['registered', 'payment', 'tax'], true) ) : echo AdminUi::form_open('expense_mine', 'madof-inline'); ?><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><input type="hidden" name="mine" value="1"><button class="madof-btn is-small"><?php esc_html_e('Es mía: registrarla', 'mad-oficina'); ?></button></form><?php endif; ?>
+            <?php if ( ! in_array($e['status'], ['not_mine', 'payment', 'tax'], true) ) : echo AdminUi::form_open('expense_mine', 'madof-inline'); ?><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><button class="madof-btn is-small is-ghost"><?php esc_html_e('No es mía: guardarla aparte', 'mad-oficina'); ?></button></form><?php endif; ?>
         </div>
     </section>
     <?php echo AdminUi::form_open('expense_save'); ?>
@@ -145,8 +166,16 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
     <?php endif; ?>
 
 <?php elseif ( $tab === 'aside' ) : ?>
-    <p class="description"><?php esc_html_e('Facturas a nombre de tus clientes u otras personas: no cuentan como gasto tuyo. Están en «Recibidas/No son mías» por si alguna fuera tuya: ábrela y pulsa «Es mía».', 'mad-oficina'); ?></p>
+    <p class="description"><?php esc_html_e('Facturas a nombre de tus clientes u otras personas: no cuentan como gasto tuyo. Están en la carpeta «No son mías» del archivo por si alguna fuera tuya: ábrela y pulsa «Es mía».', 'mad-oficina'); ?></p>
     <?php $table(Expenses::all(['status' => 'not_mine']), true); ?>
+
+<?php elseif ( $tab === 'payments' ) :
+    $waiting = array_values(array_filter(Expenses::all(['status' => 'payment'], 300), fn($e) => ! $e['payment_for'])); ?>
+    <p class="description"><?php esc_html_e('Recibos de tarjeta, transferencias y envíos (Western Union…). Cada uno se une solo a la factura que paga y se archiva a su lado con «_pago». Estos aún no la tienen: puede que la factura llegue después (se unirán solos) o ábrelos y elige la factura. Si no hay factura, regístralo como gasto.', 'mad-oficina'); ?></p>
+    <?php $table($waiting, true); ?>
+    <details class="madof-card"><summary><?php esc_html_e('Ya unidos a su factura', 'mad-oficina'); ?></summary>
+        <?php $table(array_values(array_filter(Expenses::all(['status' => 'payment'], 300), fn($e) => $e['payment_for']))); ?>
+    </details>
 
 <?php elseif ( $tab === 'suppliers' ) :
     $edit = $_GET['supplier'] ?? null;
@@ -222,13 +251,39 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
     </table>
     <?php endif; endif; ?>
 
-<?php elseif ( $tab === 'upload' ) : ?>
+<?php elseif ( $tab === 'upload' ) :
+    $imp = $settings['drive_import'] ?? [];
+    $by = $wpdb->get_results("SELECT status, COUNT(*) AS n FROM " . Expenses::table() . " WHERE source = 'drive' GROUP BY status", ARRAY_A);
+    $by = array_column($by, 'n', 'status'); ?>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Importar tu archivo de Drive', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('Para el histórico: el cartero recorre las carpetas (por año y trimestre) y la Contable lee cada factura, justificante de pago o recibo de impuestos. Tus carpetas no se tocan: se hace una copia ordenada en el archivo. Lo que ya estaba en el archivo se ordena y renombra allí mismo; las copias repetidas van a «Duplicados» (no se borra nada).', 'mad-oficina'); ?></p>
+        <?php if ( empty($settings['archive_folder']) ) : ?><p class="madof-warn"><?php esc_html_e('Primero elige la carpeta del archivo en Ajustes (p. ej. «Facturas para MAD»).', 'mad-oficina'); ?></p><?php endif; ?>
+        <?php echo AdminUi::form_open('expense_import'); ?>
+            <label><?php esc_html_e('Carpetas de Drive que importar (enlaces, una por línea)', 'mad-oficina'); ?>
+                <textarea name="folders" rows="3" placeholder="https://drive.google.com/drive/folders/…"><?php echo esc_textarea(implode("\n", array_map(fn($id) => 'https://drive.google.com/drive/folders/' . $id, (array) ($imp['folders'] ?? [])))); ?></textarea></label>
+            <label><?php esc_html_e('Desde el año', 'mad-oficina'); ?> <input type="number" name="since" min="2000" max="<?php echo (int) current_time('Y'); ?>" value="<?php echo (int) ($imp['since'] ?? 2025); ?>" style="width:90px"></label>
+            <p class="description"><?php esc_html_e('La carpeta del archivo se recorre siempre la primera. Las subcarpetas de años anteriores se saltan.', 'mad-oficina'); ?></p>
+            <?php if ( ! empty($imp['active']) ) : ?>
+                <p><strong><?php esc_html_e('En marcha.', 'mad-oficina'); ?></strong>
+                    <?php if ( ! empty($imp['last']) ) echo esc_html(sprintf(__('Última pasada %1$s: %2$d archivos en las carpetas, %3$d enviados, %4$d por enviar, %5$d errores.', 'mad-oficina'), mysql2date('j M H:i', $imp['last']['at']), $imp['last']['files'], $imp['last']['sent'], $imp['last']['pending'], $imp['last']['errors'])); else esc_html_e('Esperando la primera pasada del cartero.', 'mad-oficina'); ?></p>
+                <button class="madof-btn is-ghost" name="do" value="stop"><?php esc_html_e('Parar la importación', 'mad-oficina'); ?></button>
+            <?php else : ?>
+                <?php if ( ! empty($imp['finished']) ) echo '<p>' . esc_html(sprintf(__('Terminada el %s.', 'mad-oficina'), mysql2date('j M Y H:i', $imp['finished']))) . '</p>'; ?>
+                <button class="madof-btn" name="do" value="start"><?php esc_html_e('Empezar la importación', 'mad-oficina'); ?></button>
+            <?php endif; ?>
+        </form>
+        <?php if ( $by ) : ?>
+            <p class="madof-lead"><?php echo esc_html(sprintf(__('Del archivo: %1$d gastos, %2$d justificantes de pago, %3$d impuestos, %4$d por revisar, %5$d leyendo, %6$d no son tuyas, %7$d descartados o repetidos.', 'mad-oficina'),
+                $by['registered'] ?? 0, $by['payment'] ?? 0, $by['tax'] ?? 0, $by['review'] ?? 0, $by['queued'] ?? 0, $by['not_mine'] ?? 0, $by['ignored'] ?? 0)); ?></p>
+        <?php endif; ?>
+    </section>
     <section class="madof-card">
         <span class="madof-kicker"><?php esc_html_e('Subir facturas', 'mad-oficina'); ?></span>
-        <p class="description"><?php esc_html_e('Para las que se descargan del panel del proveedor (o las que te dieron en papel y escaneaste). Pasan por lo mismo que las de Gmail: la Contable las lee, comprueba que van a tu nombre y las archiva.', 'mad-oficina'); ?></p>
+        <p class="description"><?php esc_html_e('Para las que se descargan del panel del proveedor, los justificantes de pago (también capturas de pantalla) o los recibos de impuestos. Pasan por lo mismo que las de Gmail.', 'mad-oficina'); ?></p>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data" class="madof-form">
             <?php wp_nonce_field('madof_expense_upload'); ?><input type="hidden" name="action" value="madof_expense_upload">
-            <input type="file" name="pdfs[]" accept="application/pdf" multiple required>
+            <input type="file" name="pdfs[]" accept="application/pdf,image/png,image/jpeg,image/webp" multiple required>
             <button class="madof-btn"><?php esc_html_e('Subir y leer', 'mad-oficina'); ?></button>
         </form>
     </section>
@@ -245,6 +300,12 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
             </div>
         </section>
         <section class="madof-card">
+            <span class="madof-kicker"><?php esc_html_e('Archivo en Drive', 'mad-oficina'); ?></span>
+            <label><?php esc_html_e('Carpeta donde se archivan las facturas (enlace de la carpeta de la unidad compartida)', 'mad-oficina'); ?>
+                <input type="text" name="archive_folder" value="<?php echo ! empty($settings['archive_folder']) ? esc_attr('https://drive.google.com/drive/folders/' . $settings['archive_folder']) : ''; ?>" placeholder="https://drive.google.com/drive/folders/…"></label>
+            <p class="description"><?php esc_html_e('Dentro: «AAAA/AAAA-Tn» con cada factura y su justificante de pago al lado, «No son mías» y «Duplicados». Vacío = la carpeta «Recibidas» de la unidad de contabilidad.', 'mad-oficina'); ?></p>
+        </section>
+        <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Avisos', 'mad-oficina'); ?></span>
             <div class="madof-cols">
                 <label><?php esc_html_e('Preguntar por una factura que falta tras', 'mad-oficina'); ?><select name="grace_days"><?php foreach ( [3, 5, 7, 10, 15] as $d ) echo '<option value="' . $d . '" ' . selected((int) ($settings['grace_days'] ?? 5), $d, false) . '>' . esc_html(sprintf(__('%d días', 'mad-oficina'), $d)) . '</option>'; ?></select></label>
@@ -258,6 +319,11 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
             <label class="madof-check"><input type="checkbox" name="weekly" value="1" <?php checked($settings['weekly'] ?? true); ?>> <?php esc_html_e('Resumen de gastos los lunes por Chat', 'mad-oficina'); ?></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>
+    </form>
+    <?php echo AdminUi::form_open('expense_reorganize', 'madof-form madof-card'); ?>
+        <span class="madof-kicker"><?php esc_html_e('Reorganizar el archivo', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('Mueve y renombra lo que ya está archivado para que quede en la carpeta del archivo con el orden actual. Úsalo tras cambiar la carpeta.', 'mad-oficina'); ?></p>
+        <button class="madof-btn is-small is-ghost"><?php esc_html_e('Reorganizar el archivo', 'mad-oficina'); ?></button>
     </form>
 
 <?php else :

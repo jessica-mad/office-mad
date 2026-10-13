@@ -82,6 +82,7 @@ $current_q = $tyear === $this_year ? (int) ceil(current_time('n') / 3) : 4;
             <tr>
                 <td><?php echo esc_html(Taxes::KINDS[$r['kind']] ?? $r['kind']); ?>
                     <?php if ( $r['source'] === 'monthly' ) echo ' <span class="madof-pill">' . esc_html__('automático', 'mad-oficina') . '</span>'; ?>
+                    <?php if ( $r['source'] === 'document' ) echo ' <span class="madof-pill">' . esc_html__('del justificante', 'mad-oficina') . '</span>'; ?>
                     <?php if ( $r['notes'] ) echo '<br><small>' . esc_html($r['notes']) . '</small>'; ?></td>
                 <td><?php echo esc_html(Taxes::period_label($r['period'])); ?></td>
                 <td><?php echo $r['paid_on'] ? esc_html(date_i18n('j M Y', strtotime($r['paid_on']))) : '<span class="madof-muted">' . esc_html__('pendiente', 'mad-oficina') . '</span>'; ?></td>

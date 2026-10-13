@@ -11,11 +11,14 @@ if ( ! defined('ABSPATH') ) exit;
  *   registered – MAD's expense (counts in the books and the gestoría package);
  *   review     – Jessica decides (new supplier, or unclear who it is addressed to);
  *   not_mine   – addressed to a client or someone else: kept aside, never counted;
- *   ignored    – not an invoice, or a duplicate.
+ *   ignored    – not an invoice, or a duplicate;
+ *   payment    – proof of a payment (card receipt, transfer, Western Union): joined to the
+ *                invoice it pays (payment_for), never counted on its own;
+ *   tax        – a payment to Hacienda or the Seguridad Social: noted in Impuestos.
  */
 final class Expenses {
 
-    const STATUSES = ['queued' => 'Leyendo…', 'registered' => 'Registrada', 'review' => 'Por revisar', 'not_mine' => 'No es mía', 'ignored' => 'Descartada'];
+    const STATUSES = ['queued' => 'Leyendo…', 'registered' => 'Registrada', 'review' => 'Por revisar', 'not_mine' => 'No es mía', 'ignored' => 'Descartada', 'payment' => 'Justificante de pago', 'tax' => 'Impuesto'];
 
     public static function table(){ return Schema::table('expenses'); }
 
@@ -25,7 +28,7 @@ final class Expenses {
         return $r ? self::hydrate($r) : null;
     }
 
-    /** @param array $f status, year, quarter (1-4), month (YYYY-MM), supplier_id, client_id */
+    /** @param array $f status, year, quarter (1-4), month (YYYY-MM), supplier_id, client_id, around (a date: 120 days before, 15 after) */
     public static function all(array $f = [], $limit = 500){
         global $wpdb;
         $w = ['1=1']; $a = [];
@@ -35,6 +38,7 @@ final class Expenses {
         if ( ! empty($f['month']) ) { $w[] = 'LEFT(issue_date, 7) = %s'; $a[] = $f['month']; }
         if ( ! empty($f['supplier_id']) ) { $w[] = 'supplier_id = %d'; $a[] = $f['supplier_id']; }
         if ( ! empty($f['client_id']) ) { $w[] = 'client_id = %d'; $a[] = $f['client_id']; }
+        if ( ! empty($f['around']) ) { $w[] = 'issue_date BETWEEN %s AND %s'; $a[] = gmdate('Y-m-d', strtotime($f['around'] . ' -120 days')); $a[] = gmdate('Y-m-d', strtotime($f['around'] . ' +15 days')); }
         $a[] = $limit;
         $sql = 'SELECT * FROM ' . self::table() . ' WHERE ' . implode(' AND ', $w) . ' ORDER BY issue_date DESC, id DESC LIMIT %d';
         return array_map([self::class, 'hydrate'], $wpdb->get_results($wpdb->prepare($sql, ...$a), ARRAY_A));
@@ -83,18 +87,55 @@ final class Expenses {
         return 0;
     }
 
-    /** «2026-10-03_Google_12,10.pdf» */
-    public static function filename(array $e){
-        $name = sanitize_file_name(remove_accents($e['supplier_name'] ?: 'Proveedor'));
-        $name = trim(preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-') ?: 'Proveedor';
-        return ($e['issue_date'] ?: current_time('Y-m-d')) . '_' . mb_substr($name, 0, 40) . '_' . number_format((float) $e['total'], 2, ',', '') . '.pdf';
+    /** Extension of the original file (photos and screenshots keep theirs). */
+    public static function ext(array $e){
+        return preg_match('/\.(png|jpe?g|webp)$/i', (string) $e['filename'], $m) ? strtolower(str_replace('jpeg', 'jpg', $m[1])) : 'pdf';
     }
 
-    /** Folder in the shared drive: «Recibidas/AAAA/Tn» or «Recibidas/No son mías/AAAA». */
+    /**
+     * «2026-10-03_Google_12,10.pdf». A payment proof takes the name of the invoice it pays
+     * plus «_pago» (so they sit together); a tax payment, «_Impuesto-autonomos_».
+     */
+    public static function filename(array $e){
+        if ( $e['status'] === 'payment' && ! empty($e['payment_for']) && ($inv = self::get($e['payment_for'])) ) {
+            return preg_replace('/\.[a-z]+$/', '', self::filename($inv)) . '_pago.' . self::ext($e);
+        }
+        $who = $e['status'] === 'tax' ? 'Impuesto ' . (($e['extraction']['tax_kind'] ?? '') ?: 'otros') : ($e['supplier_name'] ?: 'Proveedor');
+        $name = sanitize_file_name(remove_accents($who));
+        $name = trim(preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-') ?: 'Proveedor';
+        return ($e['issue_date'] ?: current_time('Y-m-d')) . '_' . mb_substr($name, 0, 40) . '_' . number_format((float) $e['total'], 2, ',', '') . '.' . self::ext($e);
+    }
+
+    /**
+     * Folder in the archive («Facturas para MAD»): «AAAA/AAAA-Tn» (a payment, next to its
+     * invoice), «No son mías/AAAA» or «Duplicados».
+     */
     public static function folder(array $e){
+        if ( $e['status'] === 'payment' && ! empty($e['payment_for']) && ($inv = self::get($e['payment_for'])) ) return self::folder($inv);
+        if ( $e['status'] === 'ignored' ) return ['Duplicados'];
         $date = $e['issue_date'] ?: current_time('Y-m-d');
         $y = substr($date, 0, 4);
-        return $e['status'] === 'not_mine' ? ['No son mías', $y] : [$y, 'T' . (int) ceil((int) substr($date, 5, 2) / 3)];
+        return $e['status'] === 'not_mine' ? ['No son mías', $y] : [$y, $y . '-T' . (int) ceil((int) substr($date, 5, 2) / 3)];
+    }
+
+    /** Files already known by where they came from (a Drive file id, «drive:…») or where they are. @return string[] the unknown ones */
+    public static function unknown_refs(array $refs){
+        global $wpdb;
+        $refs = array_values(array_unique(array_filter(array_map(fn($r) => preg_replace('/[^A-Za-z0-9_\-:]/', '', (string) $r), $refs))));
+        if ( ! $refs ) return [];
+        $in = implode(',', array_fill(0, count($refs), '%s'));
+        $ids = array_map(fn($r) => preg_replace('/^drive:/', '', $r), $refs);
+        $known = $wpdb->get_col($wpdb->prepare('SELECT source_ref FROM ' . self::table() . " WHERE source_ref IN ({$in})", ...$refs));
+        $known_files = $wpdb->get_col($wpdb->prepare('SELECT drive_file_id FROM ' . self::table() . " WHERE drive_file_id IN ({$in})", ...$ids));
+        $copies = get_option('madoficina_drive_seen', []); // copies of files already known
+        $known = array_merge($known, is_array($copies) ? $copies : []);
+        return array_values(array_filter($refs, fn($r) => ! in_array($r, $known, true) && ! in_array(preg_replace('/^drive:/', '', $r), $known_files, true)));
+    }
+
+    /** Payment proofs joined to an invoice. */
+    public static function payments_for($id){
+        global $wpdb;
+        return array_map([self::class, 'hydrate'], $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . " WHERE status = 'payment' AND payment_for = %d ORDER BY issue_date, id", $id), ARRAY_A));
     }
 
     /** Re-billable expenses of a client not yet on any (non-cancelled) invoice line. */
@@ -125,8 +166,8 @@ final class Expenses {
     }
 
     private static function hydrate($r){
-        foreach ( ['id', 'supplier_id', 'client_id', 'year'] as $k ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
-        foreach ( ['base', 'vat', 'irpf', 'total'] as $k ) $r[$k] = $r[$k] === null ? null : (float) $r[$k];
+        foreach ( ['id', 'supplier_id', 'client_id', 'year', 'payment_for'] as $k ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
+        foreach ( ['base', 'vat', 'irpf', 'total', 'paid_eur'] as $k ) $r[$k] = $r[$k] === null ? null : (float) $r[$k];
         $r['extraction'] = $r['extraction'] ? (json_decode($r['extraction'], true) ?: []) : [];
         return $r;
     }

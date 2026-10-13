@@ -18,7 +18,7 @@ use MAD_Oficina\Suppliers\Watch;
  */
 class SuppliersTest extends MADOF_TestCase {
 
-    private $next = []; private $calls = 0; private $client; private $profile;
+    private $next = []; private $calls = 0; private $client; private $profile; private $blocks = [];
 
     public function set_up(){
         parent::set_up();
@@ -40,7 +40,8 @@ class SuppliersTest extends MADOF_TestCase {
         if ( $url !== 'https://api.anthropic.com/v1/messages' ) return $pre;
         $this->calls++;
         $body = json_decode($args['body'], true);
-        $this->assertSame('document', $body['messages'][0]['content'][0]['type'], 'the PDF goes as a document block');
+        $this->assertContains($body['messages'][0]['content'][0]['type'], ['document', 'image'], 'the file goes as a document or image block');
+        $this->blocks[] = $body['messages'][0]['content'][0]['type'];
         if ( $this->next === 'error' ) return ['response' => ['code' => 529], 'body' => '{"error":{"message":"overloaded"}}'];
         return ['response' => ['code' => 200], 'body' => wp_json_encode(['stop_reason' => 'end_turn', 'model' => 'claude-haiku-5-5', 'usage' => ['input_tokens' => 900, 'output_tokens' => 120],
             'content' => [['type' => 'text', 'text' => wp_json_encode($this->next)]]])];
@@ -91,7 +92,7 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame(['facturas@nube.example'], $s['emails']);
         $this->assertSame('hosting', $s['category']);
         $this->assertSame('registered', Expenses::get($r['expense_id'])['status']);
-        $this->assertSame(['2026', 'T4'], $this->orders('expense_archive')[0]['payload']['folder']);
+        $this->assertSame(['2026', '2026-T4'], $this->orders('expense_archive')[0]['payload']['folder']);
         $this->assertSame('2026-10-03_Nube-SL_12,10.pdf', $this->orders('expense_archive')[0]['payload']['name']);
         $this->assertSame(['facturas@nube.example'], $this->orders('gmail_filter')[0]['payload']['from']);
 
@@ -135,7 +136,7 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame('registered', Expenses::get($r['expense_id'])['status']);
         $this->assertSame($sid, Expenses::get($r['expense_id'])['supplier_id']);
         $move = $this->orders('expense_move')[0]['payload'];
-        $this->assertSame(['f1', ['2026', 'T4']], [$move['file_id'], $move['folder']], 'the file moves out of «No son mías»');
+        $this->assertSame(['f1', ['2026', '2026-T4']], [$move['file_id'], $move['folder']], 'the file moves out of «No son mías»');
     }
 
     public function test_unclear_recipient_card(){

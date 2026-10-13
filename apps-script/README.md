@@ -42,12 +42,14 @@ Nunca envía una factura dos veces, aunque se reintente la orden.
 3. Ejecuta **`install`** otra vez y acepta el permiso nuevo: **enviar correo en tu nombre** (`script.send_mail`).
 4. En **MAD Oficina → Facturación → Datos del emisor**, pulsa **«Sincronizar todo el Libro MAD»** para volcar el histórico.
 
-## Facturas de proveedores (Gmail → Recibidas)
+## Facturas de proveedores (Gmail → archivo)
 
 El cartero también lee tu Gmail, **solo para leer**: no cambia, borra ni marca nada. Busca correos con PDF que parezcan facturas: palabras como factura, invoice o recibo, o remitentes de proveedores conocidos.
 - Cada PDF nuevo se lo pasa a la web. La Contable lo lee y **solo cuenta las facturas a tu nombre**.
-- Las facturas a nombre de clientes u otros quedan guardadas aparte, en `Recibidas/No son mías/`.
-- Las tuyas van a `Recibidas/AAAA/Tn/AAAA-MM-DD_Proveedor_Importe.pdf`.
+- Todo se archiva en la carpeta elegida en **Finanzas → Gastos → Ajustes → Archivo en Drive** (p. ej. «Facturas para MAD»). Si no eliges ninguna, en `Recibidas/` de la unidad de contabilidad.
+- Las facturas a nombre de clientes u otros quedan guardadas aparte, en `No son mías/AAAA/`.
+- Las tuyas van a `AAAA/AAAA-Tn/AAAA-MM-DD_Proveedor_Importe.pdf`, y su justificante de pago al lado, con el mismo nombre más `_pago`.
+- Los pagos de impuestos (cuota de autónomos, 303, 130) se archivan igual como `AAAA-MM-DD_Impuesto-…` y se apuntan en Finanzas → Impuestos.
 - El mismo PDF nunca se manda dos veces.
 - Si apruebas el filtro de un proveedor nuevo, crea en Gmail el filtro que pone la etiqueta «Facturas» a sus correos.
 
@@ -59,7 +61,23 @@ El cartero también lee tu Gmail, **solo para leer**: no cambia, borra ni marca 
    - Con muchas facturas, puede tardar unas horas en ponerse al día.
 4. `facturas@imad.pro` entra solo si sus correos llegan a tu buzón, es decir, si es un alias tuyo o un grupo que te reenvía.
 
-Los PDF de más de 4 MB no se envían: súbelos a mano en **Gastos → Subir factura**.
+Los PDF de más de 4 MB no se envían: súbelos a mano en **Gastos → Subir o importar**.
+
+## Importar tu archivo de Drive (histórico)
+
+Para meter de una vez lo que ya tienes guardado en Drive (facturas, justificantes de pago y recibos de impuestos):
+1. Pega el `Code.gs` nuevo (no hace falta volver a ejecutar `install`).
+2. En **Gastos → Ajustes**, elige la carpeta del archivo y pulsa **Reorganizar el archivo**: lo que ya estaba en `Recibidas/` pasa allí.
+3. En **Gastos → Subir o importar**, pega el enlace de tus carpetas antiguas, elige desde qué año y pulsa **Empezar la importación**.
+
+Qué hace el cartero en cada pasada (cada 10 minutos, unos 4 minutos de trabajo):
+- Recorre primero la carpeta del archivo y luego las tuyas, por año y trimestre. Se salta las carpetas de años anteriores.
+- Manda cada PDF o imagen nuevo. Lo ya enviado no se vuelve a mandar.
+- **Tus carpetas antiguas solo se leen**: lo tuyo se copia, ordenado y renombrado, al archivo.
+- Lo que ya estaba en la carpeta del archivo se mueve y renombra allí mismo. Si es una copia de algo ya registrado, va a `Duplicados/`. **No se borra nada.**
+- Cuando una pasada no encuentra nada nuevo, la importación se da por terminada sola.
+
+Si tenías otro script que copiaba facturas a esa carpeta, desactívalo para que no se mezclen los dos sistemas.
 
 ## Qué reuniones envía
 

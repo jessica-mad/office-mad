@@ -22,6 +22,9 @@
  *   INVOICE_CURSOR       (expenses) Gmail is read from this moment on (epoch seconds); set by install(),
  *                        or 12 months back with backfillInvoices(365)
  *
+ * The archive folder for received invoices (e.g. «Facturas para MAD») and the Drive folders to
+ * import from are chosen in MAD Oficina (Finanzas → Gastos); the script asks for them each run.
+ *
  * Run install() once: it asks for permissions and creates the 10-minute trigger.
  */
 
@@ -58,12 +61,22 @@ function install() {
 }
 
 /** Main trigger: send new meetings, then carry out approved orders. */
+var RUN_STARTED = 0, EXPENSES_CFG = null;
+
+/** The expenses configuration, asked once per run (two identical signed requests in the same second would be taken as a replay). */
+function expensesConfig_() {
+  if (!EXPENSES_CFG) EXPENSES_CFG = signedFetch_('get', '/hooks/expenses/config', null);
+  return EXPENSES_CFG;
+}
+
 function run() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
+  RUN_STARTED = Date.now(); EXPENSES_CFG = null;
   try {
     try { scan(); } catch (e) { console.error(e); }
     try { scanInvoices_(); } catch (e) { console.error('facturas: ' + e); }
+    try { importDrive_(); } catch (e) { console.error('archivo de Drive: ' + e); }
     processOrders(); tick_();
   } finally {
     lock.releaseLock();
@@ -402,10 +415,10 @@ function backfillInvoices(days) {
  * Gmail is changed.
  */
 function scanInvoices_() {
-  var p = props_(), started = Date.now();
+  var p = props_(), started = RUN_STARTED || Date.now();
   var cursor = Number(p.getProperty('INVOICE_CURSOR') || 0);
   if (!cursor) return;
-  var cfg = signedFetch_('get', '/hooks/expenses/config', null);
+  var cfg = expensesConfig_();
   var terms = (cfg.keywords || []).concat((cfg.senders || []).map(function (e) { return 'from:' + e; }));
   var q = 'has:attachment filename:pdf after:' + cursor + ' -in:sent -in:chats -in:trash -in:spam (' + terms.join(' OR ') + ')';
   var ids = [], token = null;
@@ -470,7 +483,9 @@ function hex_(raw) {
   return raw.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
 }
 
-function recibidasRoot_() {
+/** The archive folder: the one chosen in MAD Oficina (each order carries it) or «Recibidas». */
+function recibidasRoot_(rootId) {
+  if (rootId) return DriveApp.getFolderById(rootId);
   var p = props_(), id = p.getProperty('RECIBIDAS_FOLDER_ID');
   if (id) return DriveApp.getFolderById(id);
   var drive = p.getProperty('ACCOUNTING_DRIVE_ID');
@@ -484,21 +499,83 @@ function folderPath_(root, parts) {
   return parts.reduce(function (f, name) { return childFolder_(f, name); }, root);
 }
 
-/** A received invoice → «Recibidas/AAAA/Tn/» (or «Recibidas/No son mías/AAAA/»). */
+/** A received invoice (or its proof of payment) → «<archivo>/AAAA/AAAA-Tn/» (or «No son mías/AAAA/»). */
 function archiveExpense_(p) {
   var res = signedFetch_('get', '/hooks/expenses/' + p.expense_id + '/file', null);
-  var folder = folderPath_(recibidasRoot_(), p.folder);
+  var folder = folderPath_(recibidasRoot_(p.root), p.folder);
   var existing = folder.getFilesByName(p.name);
-  var file = existing.hasNext() ? existing.next() : folder.createFile(Utilities.newBlob(Utilities.base64Decode(res.base64), 'application/pdf', p.name));
+  var file = existing.hasNext() ? existing.next() : folder.createFile(Utilities.newBlob(Utilities.base64Decode(res.base64), res.mime || 'application/pdf', p.name));
   return { file_id: file.getId(), url: file.getUrl() };
 }
 
-/** Jessica changed her mind (or the data): the file follows. */
+/** Already in Drive: the file goes to its place and takes its name (Jessica changed the data, or it came from the archive). */
 function moveExpense_(p) {
   var file = DriveApp.getFileById(p.file_id);
-  file.moveTo(folderPath_(recibidasRoot_(), p.folder));
+  file.moveTo(folderPath_(recibidasRoot_(p.root), p.folder));
   file.setName(p.name);
   return { file_id: file.getId(), url: file.getUrl() };
+}
+
+/* ───────────────────────── Drive archive import ───────────────────────── */
+
+var IMPORT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+var IMPORT_BUDGET_MS = 4 * 60 * 1000; // from the start of the run: the orders still fit
+
+/**
+ * Jessica's old archive (and what is already in the new one), once: every PDF or image
+ * from the chosen year on goes to the website, which reads it. Her folders are only
+ * read; files already in the archive folder are moved and renamed there, and copies
+ * of a known file go to «Duplicados». Nothing is deleted.
+ */
+function importDrive_() {
+  var cfg = expensesConfig_();
+  var imp = cfg.drive_import || {};
+  if (!imp.active || !(imp.folders || []).length) return;
+  var root = cfg.archive_root || '', max = cfg.max_bytes || 4194304, files = [], errors = 0, skipped = 0;
+  imp.folders.forEach(function (id) {
+    try { walk_(DriveApp.getFolderById(id), [], id === root, imp.since || 2025, files, 0); }
+    catch (e) { errors++; console.warn('No puedo abrir la carpeta ' + id + ': ' + e); }
+  });
+  var unknown = {};
+  for (var i = 0; i < files.length; i += 400) {
+    var res = signedFetch_('post', '/hooks/expenses/known', { refs: files.slice(i, i + 400).map(function (f) { return 'drive:' + f.id; }) });
+    (res.unknown_refs || []).forEach(function (r) { unknown[r] = true; });
+  }
+  var todo = files.filter(function (f) { return unknown['drive:' + f.id]; });
+  var sent = 0, cut = false;
+  for (var j = 0; j < todo.length; j++) {
+    if (Date.now() - (RUN_STARTED || Date.now()) > IMPORT_BUDGET_MS) { cut = true; break; } // the next run carries on
+    var f = todo[j];
+    if (f.size > max) { skipped++; console.warn('Demasiado grande, no lo envío: ' + f.path + '/' + f.name); continue; }
+    try {
+      var bytes = DriveApp.getFileById(f.id).getBlob().getBytes();
+      var r = signedFetch_('post', '/hooks/expenses', { source: 'drive', file_id: f.id, folder: f.path, in_archive: f.inArchive, filename: f.name, date: f.created, base64: Utilities.base64Encode(bytes) });
+      if (r.duplicate && root) DriveApp.getFileById(f.id).moveTo(childFolder_(DriveApp.getFolderById(root), 'Duplicados'));
+      sent++;
+    } catch (e) {
+      errors++;
+      console.warn('No he podido entregar «' + f.name + '» (' + f.path + '): ' + e);
+    }
+  }
+  var pending = todo.length - sent - skipped - errors;
+  signedFetch_('post', '/hooks/expenses/import', { files: files.length, sent: sent, pending: Math.max(0, pending), errors: errors + skipped, done: !cut && pending <= 0 });
+}
+
+/** Folders by year and quarter; years before «since» (by the year in the folder's name) are skipped. */
+function walk_(folder, path, inArchive, since, out, depth) {
+  var name = folder.getName(), year = name.match(/\b(?:19|20)\d\d\b/);
+  if (depth > 0 && year && Number(year[0]) < since) return;
+  if (inArchive && depth === 1 && (name === 'No son mías' || name === 'Duplicados')) return;
+  var here = path.concat([name]);
+  var it = folder.getFiles();
+  while (it.hasNext()) {
+    var file = it.next(), type = file.getMimeType();
+    if (IMPORT_TYPES.indexOf(type) < 0) continue;
+    out.push({ id: file.getId(), name: file.getName(), path: here.join('/'), inArchive: inArchive, created: file.getDateCreated().toISOString(), size: file.getSize() });
+  }
+  if (depth >= 4) return;
+  var sub = folder.getFolders();
+  while (sub.hasNext()) walk_(sub.next(), here, inArchive, since, out, depth + 1);
 }
 
 /** Approved by Jessica: a Gmail filter that labels a supplier's emails «Facturas». */

@@ -54,6 +54,30 @@ Un gasto marcado para un cliente (en el proveedor o en el propio gasto) se suma 
 ## Coste aproximado
 Leer una factura de 1–2 páginas con Opus 5.5 cuesta alrededor de 1–2 céntimos. El repaso de 12 meses, con unos cientos de PDF, son unos pocos euros. Con Haiku 5.5, una fracción de eso.
 
+## Archivo en Drive, importación del histórico y justificantes de pago
+- **Carpeta del archivo** configurable (Gastos → Ajustes), p. ej. «Facturas para MAD»:
+  - `AAAA/AAAA-Tn/` con cada factura y su justificante de pago al lado (`…_pago.pdf`);
+  - `No son mías/AAAA/` y `Duplicados/`.
+  - «Reorganizar el archivo» mueve allí lo ya archivado.
+- **Importación del histórico** desde carpetas de Drive (Gastos → Subir o importar), desde un año:
+  - el cartero recorre las carpetas y envía cada PDF o imagen nuevo (`/hooks/expenses` con `source: drive`);
+  - las carpetas de origen solo se leen: se copia al archivo;
+  - lo que ya está en el archivo se ordena allí mismo; las copias repetidas van a `Duplicados/`;
+  - se recuerda qué archivos de Drive se enviaron (`expenses.source_ref`), así no se descargan dos veces.
+- **La Contable distingue tres tipos de documento**:
+  - factura;
+  - **justificante de pago**: recibo de tarjeta, transferencia, Western Union o captura;
+  - **pago de impuestos**: autónomos, 303, 130.
+- **Justificantes de pago** (estado `payment`):
+  - se unen solos a la factura que pagan (`payment_for`), por número de factura o por proveedor, importe y fecha;
+  - si la factura llega después, se unen al registrarla;
+  - si la factura va en otra moneda, el importe pagado en euros (`paid_eur`) es lo que cuenta en el Resumen;
+  - nunca cuentan como gasto.
+  - Pestaña **Pagos**: los que aún no tienen factura, para unirlos a mano o registrarlos como gasto si no hay factura.
+- **Pagos de impuestos** (estado `tax`): se apuntan en Finanzas → Impuestos (uno por impuesto y periodo; sustituyen a la cuota automática de ese mes) con enlace al documento.
+- **Imágenes** (PNG, JPG, WEBP): se leen igual que los PDF.
+- **Corregido**: en las subidas a mano ya no se cambia el año de una factura antigua.
+
 ## Pendiente (bloque 9 y siguientes)
 - Hoja «Gastos MAD» con alertas de suscripciones duplicadas y categorías disparadas.
 - Importar la pestaña «Gastos» de 2024.

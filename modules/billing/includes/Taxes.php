@@ -55,7 +55,7 @@ final class Taxes {
         $paid = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($d['paid_on'] ?? '')) ? $d['paid_on'] : null;
         $row = [
             'kind' => $kind, 'period' => $period, 'paid_on' => $paid, 'amount' => $amount,
-            'status' => $paid ? 'paid' : 'pending', 'source' => in_array($d['source'] ?? '', ['manual', 'monthly'], true) ? $d['source'] : 'manual',
+            'status' => $paid ? 'paid' : 'pending', 'source' => in_array($d['source'] ?? '', ['manual', 'monthly', 'document'], true) ? $d['source'] : 'manual',
             'file_url' => esc_url_raw($d['file_url'] ?? '') ?: null, 'notes' => sanitize_textarea_field($d['notes'] ?? '') ?: null,
             'updated_at' => Time::now(),
         ];
@@ -63,6 +63,12 @@ final class Taxes {
         if ( $id ) { $wpdb->update(self::table(), $row, ['id' => $id]); return (int) $id; }
         $wpdb->insert(self::table(), $row + ['created_at' => Time::now()]);
         return (int) $wpdb->insert_id;
+    }
+
+    /** The document of a payment, once it is in the archive. */
+    public static function set_file($id, $url){
+        global $wpdb;
+        return (bool) $wpdb->update(self::table(), ['file_url' => esc_url_raw($url), 'updated_at' => Time::now()], ['id' => $id]);
     }
 
     public static function delete($id){

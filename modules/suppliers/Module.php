@@ -49,6 +49,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('rest_api_init', [$this, 'register_hooks']);
         add_action('madoficina_order_done', ['MAD_Oficina\\Suppliers\\Intake', 'order_done'], 10, 4);
         add_action('madoficina_expense_registered', ['MAD_Oficina\\Suppliers\\Watch', 'on_registered']);
+        add_action('madoficina_expense_registered', fn($id) => $this->intake()->payments_waiting((int) $id)); // a waiting proof of payment finds its invoice
 
         // Daily watch and leftovers to read (the cartero's tick every 10 min is the reliable clock).
         add_action(\MAD_Oficina\Suppliers\Intake::READ_HOOK, fn($id) => $this->intake()->process((int) $id));
@@ -84,7 +85,7 @@ return new class($core) implements MAD_Oficina_Module {
             add_submenu_page('mad-finanzas', __('Proveedores', 'mad-oficina'), __('Proveedores', 'mad-oficina'), $cap, 'admin.php?page=' . $this->menu_slug() . '&tab=suppliers', '', 11);
         }, 11);
 
-        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -100,12 +101,29 @@ return new class($core) implements MAD_Oficina_Module {
             'senders' => \MAD_Oficina\Suppliers\Suppliers::known_emails(),
             'keywords' => ['factura', 'invoice', 'recibo', 'receipt', 'fattura', 'rechnung', 'facture', 'billing'],
             'max_bytes' => 4 * 1024 * 1024,
+            'archive_root' => $this->intake()->archive_root(),
+            'drive_import' => $this->drive_import(),
         ])]);
+        // Import from the Drive archive: how it went (the cartero reports after each run).
+        register_rest_route($ns, '/hooks/expenses/import', ['methods' => 'POST', 'permission_callback' => [$hooks, 'verify'], 'callback' => function(\WP_REST_Request $r){
+            $p = (array) $r->get_json_params();
+            $s = $this->settings();
+            $imp = $s['drive_import'] ?? [];
+            $imp['last'] = ['at' => current_time('mysql'), 'files' => absint($p['files'] ?? 0), 'sent' => absint($p['sent'] ?? 0), 'pending' => absint($p['pending'] ?? 0), 'errors' => absint($p['errors'] ?? 0)];
+            if ( ! empty($p['done']) ) { $imp['active'] = false; $imp['finished'] = current_time('mysql'); }
+            $s['drive_import'] = $imp;
+            update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+            return rest_ensure_response(['ok' => true]);
+        }]);
         // Which attachments are new (so the same PDF is never uploaded twice).
         register_rest_route($ns, '/hooks/expenses/known', ['methods' => 'POST', 'permission_callback' => [$hooks, 'verify'], 'callback' => function(\WP_REST_Request $r){
-            return rest_ensure_response(['unknown' => \MAD_Oficina\Suppliers\Expenses::unknown_hashes((array) ($r->get_json_params()['hashes'] ?? []))]);
+            $p = (array) $r->get_json_params();
+            return rest_ensure_response([
+                'unknown' => \MAD_Oficina\Suppliers\Expenses::unknown_hashes((array) ($p['hashes'] ?? [])),
+                'unknown_refs' => \MAD_Oficina\Suppliers\Expenses::unknown_refs(array_slice((array) ($p['refs'] ?? []), 0, 500)),
+            ]);
         }]);
-        // A PDF from Gmail. Its content is data: it is only read, never obeyed.
+        // A PDF (or image) from Gmail or from the Drive archive. Its content is data: it is only read, never obeyed.
         register_rest_route($ns, '/hooks/expenses', ['methods' => 'POST', 'permission_callback' => [$hooks, 'verify'], 'callback' => function(\WP_REST_Request $r){
             $p = $r->get_json_params();
             if ( ! is_array($p) ) return new \WP_Error('madof_pdf', 'Empty body: the PDF may be larger than the server accepts (post_max_size).', ['status' => 413]);
@@ -115,7 +133,10 @@ return new class($core) implements MAD_Oficina_Module {
             if ( function_exists('set_time_limit') ) @set_time_limit(150);
             if ( function_exists('wp_raise_memory_limit') ) wp_raise_memory_limit('admin');
             try {
-                $res = $this->intake()->receive($pdf, ['source' => 'gmail', 'later' => true] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename', 'date'])));
+                $meta = ($p['source'] ?? '') === 'drive'
+                    ? ['source' => 'drive', 'in_archive' => ! empty($p['in_archive'])] + array_intersect_key($p, array_flip(['file_id', 'folder', 'filename', 'date']))
+                    : ['source' => 'gmail'] + array_intersect_key($p, array_flip(['message_id', 'from', 'subject', 'filename', 'date']));
+                $res = $this->intake()->receive($pdf, ['later' => true] + $meta);
             } catch ( \Throwable $e ) {
                 return new \WP_Error('madof_expense_error', 'Error al recibir la factura: ' . $e->getMessage(), ['status' => 500]);
             }
@@ -130,7 +151,7 @@ return new class($core) implements MAD_Oficina_Module {
             $e = \MAD_Oficina\Suppliers\Expenses::get((int) $r['id']);
             $pdf = $e ? \MAD_Oficina\Suppliers\Uploads::read($e['id']) : null;
             if ( $pdf === null ) return new \WP_Error('madof_not_found', 'No file', ['status' => 404]);
-            return rest_ensure_response(['filename' => \MAD_Oficina\Suppliers\Expenses::filename($e), 'base64' => base64_encode($pdf)]);
+            return rest_ensure_response(['filename' => \MAD_Oficina\Suppliers\Expenses::filename($e), 'mime' => \MAD_Oficina\Suppliers\Reader::media_type($pdf) ?: 'application/pdf', 'base64' => base64_encode($pdf)]);
         }]);
     }
 
@@ -268,9 +289,10 @@ return new class($core) implements MAD_Oficina_Module {
                 else $done[] = $r;
             }
         }
-        if ( ! $done && ! $errors ) $this->back(['tab' => 'upload'], __('Elige uno o varios PDF.', 'mad-oficina'), 'error');
+        if ( ! $done && ! $errors ) $this->back(['tab' => 'upload'], __('Elige uno o varios PDF o imágenes.', 'mad-oficina'), 'error');
         $count = array_count_values(array_column($done, 'status'));
         $msg = sprintf(__('Leídas %1$d: %2$d registradas, %3$d por revisar, %4$d no son tuyas, %5$d descartadas.', 'mad-oficina'), count($done), $count['registered'] ?? 0, ($count['review'] ?? 0) + ($count['queued'] ?? 0), $count['not_mine'] ?? 0, $count['ignored'] ?? 0);
+        if ( ! empty($count['payment']) || ! empty($count['tax']) ) $msg .= ' ' . sprintf(__('%1$d justificantes de pago y %2$d impuestos.', 'mad-oficina'), $count['payment'] ?? 0, $count['tax'] ?? 0);
         if ( $errors ) $msg .= ' ' . implode(' · ', $errors);
         $this->back(['tab' => 'expenses'], $msg, $errors ? 'error' : 'success');
     }
@@ -287,8 +309,68 @@ return new class($core) implements MAD_Oficina_Module {
         $s['max_pages'] = max(0, min(50, (int) ($p['max_pages'] ?? 5)));
         $s['paused'] = ! empty($p['paused']);
         $s['model'] = in_array($p['model'] ?? '', ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], true) ? $p['model'] : 'claude-opus-5-5';
+        $old = $s['archive_folder'] ?? '';
+        $s['archive_folder'] = self::drive_id($p['archive_folder'] ?? '');
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
-        $this->back(['tab' => 'settings'], __('Ajustes guardados.', 'mad-oficina'));
+        $msg = __('Ajustes guardados.', 'mad-oficina');
+        if ( $s['archive_folder'] && $s['archive_folder'] !== $old ) $msg .= ' ' . __('Carpeta del archivo cambiada: pulsa «Reorganizar el archivo» para llevar allí lo que ya estaba archivado.', 'mad-oficina');
+        $this->back(['tab' => 'settings'], $msg);
+    }
+
+    /** A Drive folder link («…/folders/ID?usp=…») or a bare ID → the ID. */
+    public static function drive_id($v){
+        $v = trim((string) $v);
+        if ( preg_match('#/folders/([A-Za-z0-9_\-]+)#', $v, $m) || preg_match('#[?&]id=([A-Za-z0-9_\-]+)#', $v, $m) ) return $m[1];
+        return preg_match('/^[A-Za-z0-9_\-]{10,}$/', $v) ? $v : '';
+    }
+
+    /** What the cartero imports from Drive: folders (the archive itself always first), since which year. */
+    public function drive_import(){
+        $imp = $this->settings()['drive_import'] ?? [];
+        return ['active' => ! empty($imp['active']) && empty($this->settings()['paused']), 'since' => (int) ($imp['since'] ?? 2025), 'folders' => array_values(array_unique(array_filter(array_merge([$this->intake()->archive_root()], (array) ($imp['folders'] ?? [])))))];
+    }
+
+    /** «Importar tu archivo de Drive»: start or stop. */
+    public function handle_expense_import(){
+        $this->guard('expense_import');
+        $p = wp_unslash($_POST);
+        $s = $this->settings();
+        $imp = $s['drive_import'] ?? [];
+        if ( ($p['do'] ?? '') === 'stop' ) {
+            $imp['active'] = false;
+            $msg = __('Importación parada. Lo que ya llegó se sigue leyendo (o pausa la lectura en Ajustes).', 'mad-oficina');
+        } else {
+            $folders = array_values(array_filter(array_map([self::class, 'drive_id'], preg_split('/[\s,]+/', (string) ($p['folders'] ?? '')))));
+            if ( ! $folders && empty($s['archive_folder']) ) $this->back(['tab' => 'upload'], __('Pega el enlace de al menos una carpeta de Drive.', 'mad-oficina'), 'error');
+            $imp = ['active' => true, 'folders' => $folders, 'since' => max(2000, min((int) current_time('Y'), (int) ($p['since'] ?? 2025))), 'started' => current_time('mysql')];
+            $msg = sprintf(__('Importación en marcha desde %d. El cartero recorre las carpetas en cada pasada (cada 10 minutos) y la Contable lee lo nuevo en segundo plano.', 'mad-oficina'), $imp['since']);
+        }
+        $s['drive_import'] = $imp;
+        update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
+        $this->back(['tab' => 'upload'], $msg);
+    }
+
+    /** Everything already archived goes to its place in the archive folder. */
+    public function handle_expense_reorganize(){
+        $this->guard('expense_reorganize');
+        $n = $this->intake()->reorganize();
+        $this->back(['tab' => 'settings'], sprintf(__('%d archivos se moverán a su sitio en las próximas pasadas del cartero.', 'mad-oficina'), $n));
+    }
+
+    /** A proof of payment joined by hand to the invoice it pays. */
+    public function handle_expense_link(){
+        $this->guard('expense_link');
+        $pid = absint($_POST['expense_id'] ?? 0);
+        $ok = $this->intake()->link_payment($pid, absint($_POST['invoice_id'] ?? 0));
+        $this->back(['expense' => $pid], $ok ? __('Justificante unido a su factura.', 'mad-oficina') : __('No he podido unirlo.', 'mad-oficina'), $ok ? 'success' : 'error');
+    }
+
+    /** «Es una factura»: the receipt is the only document there is. */
+    public function handle_expense_as_invoice(){
+        $this->guard('expense_as_invoice');
+        $id = absint($_POST['expense_id'] ?? 0);
+        $r = $this->intake()->as_invoice($id);
+        $this->back(['expense' => $id], is_wp_error($r) ? $r->get_error_message() : __('Tratado como factura.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
     }
 
     public function render_settings_page(){
