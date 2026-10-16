@@ -146,6 +146,7 @@ final class Schema {
   status varchar(20) NOT NULL DEFAULT 'open',
   visibility varchar(10) NOT NULL DEFAULT 'internal',
   source varchar(20) NOT NULL DEFAULT 'manual',
+  evidence text NULL,
   synced_to text NULL,
   completed_at datetime NULL,
   created_at datetime NOT NULL,

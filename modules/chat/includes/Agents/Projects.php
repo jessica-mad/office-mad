@@ -32,6 +32,7 @@ final class Projects extends Specialist {
     protected function instructions(){
         return "- Cambia tareas (hecha, reabrir, anular, fecha, crear) solo si la pregunta lo pide claramente; si hay duda entre varias, NO cambies nada y da las opciones con su id.\n"
             . "- Tras cambiar algo, di exactamente qué cambiaste (id, título, nuevo estado o fecha).\n"
+            . "- Si te cuentan algo nuevo de un cliente (una llamada, un WhatsApp, «ahora quiere X en vez de Y»), busca la tarea relacionada y ACTUALÍZALA con revise (nuevo título y/o fecha y una nota de qué cambió), dala por hecha o anúlala; si se vuelve a hablar de ella y sigue sin hacer, still_pending (sube su prioridad). Crea una nueva solo si no hay ninguna relacionada.\n"
             . "- Duplicadas: usa find_duplicates y revisa cada grupo; si de verdad son la misma tarea, deja la más completa (la que tenga fecha, descripción o la visible para el cliente; si empatan, la más antigua) y anula las demás con cancel. Si dos se parecen pero no son lo mismo, no las toques y dilo.\n"
             . ($this->ctx['member'] ? "- Solo trabajas con las tareas de {$this->ctx['member']['name']}.\n" : '');
     }
@@ -52,10 +53,14 @@ final class Projects extends Specialist {
              ]), 'handler' => [$this, 'list_tasks']],
             ['name' => 'find_duplicates', 'description' => 'Grupos de tareas abiertas que parecen la misma (mismo cliente y título igual o casi igual), con id, título, descripción, fecha, responsable, si el cliente la ve y de dónde salió.',
              'input_schema' => self::obj(['client' => ['type' => 'string']]), 'handler' => [$this, 'find_duplicates']],
-            ['name' => 'update_tasks', 'description' => 'Marca tareas como hechas, las reabre, las anula (cancel: duplicadas o que ya no aplican; no se borran) o cambia su fecha límite. Usa ids de list_tasks.',
+            ['name' => 'update_tasks', 'description' => 'Marca tareas como hechas, las reabre, las anula (cancel: duplicadas o que ya no aplican; no se borran), cambia su fecha límite, las reescribe (revise) o las marca como que siguen pendientes (still_pending). Usa ids de list_tasks.',
              'input_schema' => self::obj([
                 'done' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'cancel' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                'revise' => ['type' => 'array', 'description' => 'Cambiar lo que pide la tarea: nuevo título y/o fecha, con una nota de qué cambió y por qué.', 'items' => ['type' => 'object', 'properties' => [
+                    'id' => ['type' => 'integer'], 'title' => ['type' => 'string'], 'due_date' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'note' => ['type' => 'string'],
+                ], 'required' => ['id', 'note']]],
+                'still_pending' => ['type' => 'array', 'description' => 'Se ha vuelto a hablar de ellas y siguen sin hacer: sube su prioridad.', 'items' => ['type' => 'integer']],
                 'reopen' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'due' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer'], 'date' => ['type' => 'string', 'description' => 'AAAA-MM-DD']], 'required' => ['id', 'date']]],
              ]), 'handler' => [$this, 'update_tasks']],
@@ -112,7 +117,7 @@ final class Projects extends Specialist {
         $due = [];
         foreach ( (array) ($in['due'] ?? []) as $d ) if ( ($date = self::date_arg($d['date'] ?? '')) && abs(strtotime($date) - time()) < 2 * YEAR_IN_SECONDS ) $due[(int) ($d['id'] ?? 0)] = $date;
         $rows = TaskList::rows(array_merge($done, $reopen, $cancel, array_keys($due)));
-        if ( ! $rows ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
+        if ( ! $rows && empty($in['revise']) && empty($in['still_pending']) ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
         $token = TaskList::snapshot(array_values($rows));
         $pick = fn($ids) => array_values(array_intersect_key($rows, array_flip($ids)));
         $a = TaskList::mark($pick($done), $email, $manager);
@@ -127,7 +132,30 @@ final class Projects extends Specialist {
             'reopened' => array_map($t, $b['changed']), 'cancelled' => array_map($t, $x['changed']), 'new_dates' => array_map(fn($x) => $t($x['task']) + ['due' => $x['date']], $c['changed']),
             'not_allowed' => array_map($t, array_merge($a['denied'], $b['denied'], $c['denied'], $x['denied'])),
             'missing_ids' => array_values(array_diff(array_merge($done, $reopen, $cancel, array_keys($due)), array_keys($rows))),
-        ];
+        ] + $this->revise($in);
+    }
+
+    /** Revisions and «still pending», through TaskChanges (note in the task, priority up). */
+    private function revise(array $in){
+        $changes = [];
+        foreach ( (array) ($in['revise'] ?? []) as $r ) $changes[] = ['task_id' => (int) ($r['id'] ?? 0), 'action' => 'change', 'title' => (string) ($r['title'] ?? ''), 'due_date' => $r['due_date'] ?? null, 'note' => (string) ($r['note'] ?? '')];
+        foreach ( (array) ($in['still_pending'] ?? []) as $id ) $changes[] = ['task_id' => (int) $id, 'action' => 'repeat', 'note' => ''];
+        if ( ! $changes ) return [];
+        $rows = TaskList::rows(array_column($changes, 'task_id'));
+        $by_client = []; $denied = [];
+        foreach ( $changes as $c ) {
+            $t = $rows[$c['task_id']] ?? null;
+            if ( ! $t || ! TaskList::allowed($t, $this->ctx['email'], $this->ctx['manager_email']) ) { $denied[] = $c['task_id']; continue; }
+            $by_client[(int) $t['client_id']][] = $c;
+        }
+        $done = [];
+        $who = $this->ctx['member'] ? $this->ctx['member']['name'] : 'Jessica';
+        foreach ( $by_client as $cid => $list ) {
+            $r = \MAD_Oficina\Core\TaskChanges::apply($list, $cid ?: null, sprintf(__('lo que contó %s', 'mad-oficina'), $who));
+            if ( $r['undo'] ) $this->undo[] = $r['undo'];
+            foreach ( $r['applied'] as $a ) $done[] = \MAD_Oficina\Core\TaskChanges::describe($a);
+        }
+        return ['revised' => $done, 'revise_not_allowed' => $denied];
     }
 
     /** Open tasks grouped by client and normalised title (accents, case, punctuation, small words). */

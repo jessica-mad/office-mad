@@ -73,10 +73,11 @@ final class Orchestrator {
     /** The clients (code and name), so «Luz Clara» or «las lanas» become a code before asking. */
     private function clients_directory(){
         global $wpdb;
-        $rows = $wpdb->get_results('SELECT code, name FROM ' . \MAD_Oficina\Core\Schema::table('clients') . " WHERE status <> 'archived' ORDER BY name LIMIT 80", ARRAY_A);
+        $rows = $wpdb->get_results('SELECT c.code, c.name, GROUP_CONCAT(p.name ORDER BY p.id SEPARATOR \', \') AS people FROM ' . \MAD_Oficina\Core\Schema::table('clients') . ' c LEFT JOIN '
+            . \MAD_Oficina\Core\Schema::table('client_contacts') . " p ON p.client_id = c.id WHERE c.status <> 'archived' GROUP BY c.id ORDER BY c.name LIMIT 80", ARRAY_A);
         if ( ! $rows ) return '';
-        return "\nClientes (código · nombre). Cuando nombre a un cliente, usa su código al preguntar a un área:\n"
-            . implode("\n", array_map(fn($c) => '- ' . ($c['code'] ?: '—') . ' · ' . $c['name'], $rows)) . "\n";
+        return "\nClientes (código · nombre · personas). Cuando nombre a un cliente o a una de sus personas («hablé con Tomás»), usa el código del cliente al preguntar a un área:\n"
+            . implode("\n", array_map(fn($c) => '- ' . ($c['code'] ?: '—') . ' · ' . $c['name'] . ($c['people'] ? ' · ' . mb_substr($c['people'], 0, 120) : ''), $rows)) . "\n";
     }
 
     private function say($text){ if ( $this->progress ) $this->progress->say($text); }

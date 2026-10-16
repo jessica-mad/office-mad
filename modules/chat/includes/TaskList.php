@@ -182,10 +182,14 @@ final class TaskList {
         foreach ( self::rows(array_keys($data)) as $id => $t ) {
             if ( ! self::allowed($t, $email, $manager_email) ) { $out['denied'][] = $t; continue; }
             $was = $data[$id];
-            $wpdb->update(Schema::table('action_items'), [
+            $fields = [
                 'status' => in_array($was['status'], ['open', 'in_progress', 'done', 'cancelled'], true) ? $was['status'] : 'open',
-                'due_date' => ! empty($was['created']) ? $t['due_date'] : ($was['due_date'] ?: null), 'completed_at' => $was['completed_at'] ?: null, 'updated_at' => Time::now(),
-            ], ['id' => $id]);
+                'due_date' => ! empty($was['created']) ? $t['due_date'] : ($was['due_date'] ?: null),
+                'completed_at' => $was['completed_at'] ?: null, 'updated_at' => Time::now(),
+            ];
+            if ( array_key_exists('title', $was) ) { $fields['title'] = $was['title']; $fields['description'] = $was['description']; } // edits from TaskChanges
+            if ( ! empty($was['priority']) ) $fields['priority'] = $was['priority'];
+            $wpdb->update(Schema::table('action_items'), $fields, ['id' => $id]);
             $out['changed'][] = $t;
         }
         if ( $out['changed'] ) delete_transient('madof_task_undo_' . $token); // someone else's click leaves it usable

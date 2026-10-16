@@ -87,6 +87,11 @@ final class Coordinator {
             if ( $this->settings['client_reminders'] ) $ran['client_reminders'] = $this->client_reminders($today);
             if ( $this->settings['ideas'] ) $ran['ideas'] = $this->surface_ideas($today);
         }
+        if ( $local->format('N') === '1' && ! $this->was_sent('review:' . $today) ) {
+            $this->mark_sent('review:' . $today);
+            Reconciler::enqueue_all(); // every Monday, all clients
+        }
+        if ( Reconciler::pending() ) $ran['review'] = (new Reconciler())->run_queue();
         if ( $this->settings['weekly'] && $local->format('N') === '1' && $local->format('H:i') >= '08:45' && ! $this->was_sent('weekly:' . $today) ) {
             $this->mark_sent('weekly:' . $today);
             $ran['weekly'] = $this->weekly_summary($today);

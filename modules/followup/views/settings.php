@@ -36,6 +36,13 @@ $jobs = [
     </form>
 
     <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Registro de tareas limpio', 'mad-oficina'); ?></span>
+        <p><?php echo esc_html(sprintf(__('%s repasa las tareas de cada cliente después de cada acta o WhatsApp aprobado y cada lunes: une las repetidas (y les sube la prioridad: si salen una y otra vez es que se están quedando atrás), da por hechas o anula las que un acta posterior cerró y actualiza las que cambiaron. Lo claro lo hace sola y te avisa por Chat con «Deshacer»; lo dudoso te lo deja en la bandeja.', 'mad-oficina'), \MAD_Oficina\Core\Agents\Characters::get('coordinadora')['name'] ?? 'Valle')); ?></p>
+        <?php $pending = \MAD_Oficina\Followup\Reconciler::pending(); if ( $pending ) : ?><p><strong><?php echo esc_html(sprintf(_n('%d cliente en cola de revisión.', '%d clientes en cola de revisión.', $pending, 'mad-oficina'), $pending)); ?></strong></p><?php endif; ?>
+        <?php echo AdminUi::form_open('followup_run', 'madof-inline'); ?><input type="hidden" name="job" value="review"><button class="madof-btn"><?php esc_html_e('Ordenar ahora las tareas de todos los clientes', 'mad-oficina'); ?></button></form>
+    </section>
+
+    <section class="madof-card">
         <span class="madof-kicker"><?php esc_html_e('Probar ahora', 'mad-oficina'); ?></span>
         <p class="description"><?php echo $next ? esc_html(sprintf(__('Se revisa sola cada hora y con cada aviso del Apps Script. Próxima revisión de WP-Cron: %s.', 'mad-oficina'), wp_date('j M H:i', $next))) : esc_html__('Se revisa sola cada hora y con cada aviso del Apps Script.', 'mad-oficina'); ?></p>
         <div class="madof-actions">

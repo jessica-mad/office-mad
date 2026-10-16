@@ -55,6 +55,15 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_approval_form_' . $type, ['MAD_Oficina\\Followup\\Coordinator', 'render_client_reminder_form'], 10, 2);
         add_filter('madoficina_chat_action', ['MAD_Oficina\\Followup\\Coordinator', 'chat_action'], 10, 5);
 
+        // Valle keeps each client's tasks clean after every new contact (approved meeting or WhatsApp).
+        $review = \MAD_Oficina\Followup\Reconciler::ACTION;
+        add_filter('madoficina_approval_handler_' . $review, fn() => ['MAD_Oficina\\Followup\\Reconciler', 'approve']);
+        add_filter('madoficina_approval_form_' . $review, ['MAD_Oficina\\Followup\\Reconciler', 'render_form'], 10, 2);
+        add_action('madoficina_meeting_approved', function($meeting_id){
+            $m = class_exists('MAD_Oficina\\Meetings\\Meetings') ? \MAD_Oficina\Meetings\Meetings::get((int) $meeting_id) : null;
+            if ( $m && $m['client_id'] ) \MAD_Oficina\Followup\Reconciler::enqueue((int) $m['client_id']);
+        }, 20);
+
         add_action('admin_post_madof_followup_settings', [$this, 'handle_settings']);
         add_action('admin_post_madof_followup_run', [$this, 'handle_run']);
         add_action('admin_post_madof_idea_resolve', [$this, 'handle_idea_resolve']);
@@ -100,6 +109,11 @@ return new class($core) implements MAD_Oficina_Module {
             case 'client_reminders': $n = $c->client_reminders($today); $msg = sprintf(__('Recordatorios a clientes propuestos en la bandeja: %d.', 'mad-oficina'), $n); break;
             case 'ideas': $n = $c->surface_ideas($today); $msg = sprintf(__('Ideas enviadas a tu Chat: %d.', 'mad-oficina'), $n); break;
             case 'briefs': $n = $c->briefs(time()); $msg = sprintf(__('Fichas de reunión enviadas: %d (cada reunión recibe una sola).', 'mad-oficina'), $n); break;
+            case 'review':
+                $n = \MAD_Oficina\Followup\Reconciler::enqueue_all();
+                $done = (new \MAD_Oficina\Followup\Reconciler())->run_queue();
+                $msg = sprintf(__('Valle repasa las tareas de %1$d clientes: %2$d ya revisados; el resto en las próximas pasadas del cartero (unos minutos). Te avisa por Chat de lo que cambie.', 'mad-oficina'), $n, $done);
+                break;
             case 'weekly': $n = $c->weekly_summary($today); $msg = $n ? __('Resumen semanal enviado a tu Chat.', 'mad-oficina') : __('No he podido enviar el resumen (mira el registro).', 'mad-oficina'); break;
             default: $this->back(__('Acción desconocida.', 'mad-oficina'), 'error');
         }
