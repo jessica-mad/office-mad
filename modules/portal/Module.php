@@ -98,11 +98,7 @@ return new class($core) implements MAD_Oficina_Module {
             'assets_v' => $this->game_assets_version(),
         ];
         if ( ! empty($extra['visitor']) ) {
-            $characters = [];
-            foreach ( \MAD_Oficina\Core\Agents\Characters::all() as $slug => $c ) {
-                $characters[$slug] = ['name' => $c['name'], 'role' => $c['role'], 'room' => $c['room'], 'ai' => $c['ai']];
-            }
-            $config += $extra + ['characters' => $characters];
+            $config += $extra + ['characters' => \MAD_Oficina\Core\Agents\Characters::public_data()];
         }
         return '<div id="mad-oficina" class="madof-app" data-config="' . esc_attr(wp_json_encode($config)) . '">'
             . '<p class="madof-app-loading">' . esc_html__('Abriendo la oficina…', 'mad-oficina') . '</p>'

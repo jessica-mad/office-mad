@@ -18,12 +18,13 @@ $current = Characters::all();
 
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Personajes', 'mad-oficina'); ?></span>
-            <p class="description"><?php esc_html_e('Nombres y cargos que ve el cliente. Los sprites siguen el formato de 112×96 px (7 columnas de 16 px × 3 filas de 32 px: abajo, arriba, derecha; columnas: caminar 1-3, teclear 1-2, leer 1-2) en assets/game/characters/{slug}.png.', 'mad-oficina'); ?></p>
+            <p class="description"><?php esc_html_e('Nombres, cargos y saludos que ve el cliente ({nombre} = el nombre de quien entra). Los sprites siguen el formato de 112×96 px (7 columnas de 16 px × 3 filas de 32 px: abajo, arriba, derecha; columnas: caminar 1-3, teclear 1-2, leer 1-2) en assets/game/characters/{slug}.png.', 'mad-oficina'); ?></p>
             <table class="madof-table">
                 <thead><tr>
                     <th scope="col"><?php esc_html_e('Sala', 'mad-oficina'); ?></th>
                     <th scope="col"><?php esc_html_e('Nombre', 'mad-oficina'); ?></th>
                     <th scope="col"><?php esc_html_e('Cargo', 'mad-oficina'); ?></th>
+                    <th scope="col"><?php esc_html_e('Saludo en su primer plano', 'mad-oficina'); ?></th>
                     <th scope="col"><?php esc_html_e('Tipo', 'mad-oficina'); ?></th>
                 </tr></thead>
                 <tbody>
@@ -32,6 +33,11 @@ $current = Characters::all();
                         <td><?php echo esc_html(Characters::ROOMS[$c['room']]); ?></td>
                         <td><input type="text" name="characters[<?php echo esc_attr($slug); ?>][name]" value="<?php echo esc_attr($c['name']); ?>" placeholder="<?php echo esc_attr($defaults[$slug]['name']); ?>"></td>
                         <td><input type="text" name="characters[<?php echo esc_attr($slug); ?>][role]" value="<?php echo esc_attr($c['role']); ?>" placeholder="<?php echo esc_attr($defaults[$slug]['role']); ?>"></td>
+                        <td><input type="text" maxlength="140" name="characters[<?php echo esc_attr($slug); ?>][greeting]" value="<?php echo esc_attr($c['greeting'] ?? ''); ?>" placeholder="<?php echo esc_attr($defaults[$slug]['greeting'] ?? ''); ?>" aria-label="<?php echo esc_attr(sprintf(__('Saludo de %s', 'mad-oficina'), $c['name'])); ?>">
+                            <?php if ( isset(Characters::ALT_GREETING[$slug]) ) : ?>
+                                <small><?php echo esc_html(Characters::ALT_GREETING[$slug]); ?></small>
+                                <input type="text" maxlength="140" name="characters[<?php echo esc_attr($slug); ?>][greeting_alt]" value="<?php echo esc_attr($c['greeting_alt'] ?? ''); ?>" placeholder="<?php echo esc_attr($defaults[$slug]['greeting_alt'] ?? ''); ?>" aria-label="<?php echo esc_attr(sprintf(__('Saludo de %1$s: %2$s', 'mad-oficina'), $c['name'], mb_strtolower(Characters::ALT_GREETING[$slug]))); ?>">
+                            <?php endif; ?></td>
                         <td><span class="madof-pill <?php echo $c['ai'] ? '' : 'is-on'; ?>"><?php echo $c['ai'] ? esc_html__('IA', 'mad-oficina') : esc_html__('Persona', 'mad-oficina'); ?></span></td>
                     </tr>
                 <?php endforeach; ?>

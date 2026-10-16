@@ -33,6 +33,26 @@ final class Rest {
         register_rest_route(self::NS, '/me', [
             'methods' => 'GET', 'callback' => [$this, 'me'], 'permission_callback' => [$this, 'can_portal'],
         ]);
+        // Gerencia only: what each agent waiting in the antechamber brings, and the answer from
+        // the office (the same as «Aprobar tal cual» / «Descartar» in Chat; editing stays in the inbox).
+        $manager = fn() => current_user_can(Roles::CAP_MANAGE) ? true : new \WP_Error('rest_forbidden', __('Solo para gerencia.', 'mad-oficina'), ['status' => rest_authorization_required_code()]);
+        register_rest_route(self::NS, '/office/waiting', [
+            'methods' => 'GET', 'callback' => fn() => rest_ensure_response(['characters' => self::waiting()]), 'permission_callback' => $manager,
+        ]);
+        register_rest_route(self::NS, '/office/approvals/(?P<id>\d+)', [
+            'methods' => 'POST', 'permission_callback' => $manager,
+            'args' => ['decision' => ['required' => true, 'type' => 'string', 'enum' => ['approve', 'reject']]],
+            'callback' => function(\WP_REST_Request $r){
+                $a = \MAD_Oficina\Core\Approvals::get((int) $r['id']);
+                if ( ! $a ) return new \WP_Error('madof_not_found', __('Esa petición ya no existe.', 'mad-oficina'), ['status' => 404]);
+                $approve = $r['decision'] === 'approve';
+                $input = $approve ? (array) apply_filters('madoficina_approval_default_input_' . $a['action_type'], [], $a) : [];
+                $res = \MAD_Oficina\Core\Approvals::resolve($a['id'], $r['decision'], $input, get_current_user_id(), 'portal');
+                if ( is_wp_error($res) ) return $res;
+                return rest_ensure_response(['message' => is_array($res) && ! empty($res['message']) ? $res['message'] : ($approve ? __('Aprobado.', 'mad-oficina') : __('Descartado.', 'mad-oficina')), 'characters' => self::waiting()]);
+            },
+        ]);
+
         register_rest_route(self::NS, '/office/state', [
             'methods' => 'GET', 'callback' => fn() => rest_ensure_response(['characters' => OfficeState::compute()]),
             'permission_callback' => [$this, 'can_portal'],
@@ -76,6 +96,22 @@ final class Rest {
         ]);
     }
 
+    /** Pending requests by character (the agent that waits for Jessica). */
+    public static function waiting(){
+        $types = \MAD_Oficina\Core\Approvals::types();
+        $out = [];
+        foreach ( \MAD_Oficina\Core\Approvals::pending(100) as $a ) {
+            $slug = OfficeState::AGENT_TO_CHARACTER[$a['agent']] ?? null;
+            if ( ! $slug || $a['status'] !== 'pending' || count($out[$slug] ?? []) >= 10 ) continue;
+            $out[$slug][] = [
+                'id' => (int) $a['id'], 'title' => $a['title'], 'summary' => (string) $a['summary'], 'type' => $types[$a['action_type']]['label'] ?? '',
+                'external' => ! empty($types[$a['action_type']]['external']),
+                'url' => admin_url('admin.php?page=mad-oficina-bandeja#approval-' . (int) $a['id']),
+            ];
+        }
+        return (object) $out;
+    }
+
     public function can_portal(){
         if ( ! is_user_logged_in() ) return new \WP_Error('rest_not_logged_in', __('Inicia sesión para entrar en la oficina.', 'mad-oficina'), ['status' => 401]);
         if ( ! current_user_can(Roles::CAP_PORTAL) ) return new \WP_Error('rest_forbidden', __('Tu usuario no tiene acceso a la oficina.', 'mad-oficina'), ['status' => 403]);
@@ -107,10 +143,7 @@ final class Rest {
             if ( $c ) $client = ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']];
         }
 
-        $characters = [];
-        foreach ( Characters::all() as $slug => $c ){
-            $characters[$slug] = ['name' => $c['name'], 'role' => $c['role'], 'room' => $c['room'], 'ai' => $c['ai']];
-        }
+        $characters = Characters::public_data();
 
         $data = [
             'user'       => ['name' => $user->first_name ?: $user->display_name],

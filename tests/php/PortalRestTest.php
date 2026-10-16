@@ -120,4 +120,51 @@ class PortalRestTest extends MADOF_TestCase {
         $this->assertSame('idle', $states['recepcionista']);
         $this->assertSame('trabajando', $states['liz']);
     }
+
+    private function post($route, array $body){
+        $req = new WP_REST_Request('POST', '/mad-oficina/v1' . $route);
+        foreach ( $body as $k => $v ) $req->set_param($k, $v);
+        return rest_do_request($req);
+    }
+
+    public function test_antechamber_is_for_the_manager_only(){
+        $done = new ArrayObject();
+        add_filter('madoficina_approval_handler_test_wait', fn() => function($a, $input) use ($done){ $done[] = $input; return ['message' => 'Hecho']; });
+        add_filter('madoficina_approval_default_input_test_wait', fn() => ['as_is' => 1]);
+        $id = \MAD_Oficina\Core\Approvals::create('accountant', 'test_wait', '¿Envío la factura de Prueba SL?', ['x' => 1], ['summary' => 'Por 100 €']);
+        \MAD_Oficina\Core\Approvals::create('coordinator', 'test_wait', 'Recordatorio', []);
+
+        wp_set_current_user($this->user_a);
+        $this->assertSame(403, $this->get('/office/waiting')->get_status(), 'a client never sees what an agent brings to Jessica');
+        $this->assertSame(403, $this->post('/office/approvals/' . $id, ['decision' => 'approve'])->get_status());
+        $this->assertSame([], $done->getArrayCopy());
+
+        wp_set_current_user($this->make_admin());
+        $w = (array) $this->get('/office/waiting')->get_data()['characters'];
+        $this->assertSame(['¿Envío la factura de Prueba SL?'], array_column($w['contable'], 'title'));
+        $this->assertSame('Por 100 €', $w['contable'][0]['summary']);
+        $this->assertStringEndsWith('#approval-' . $id, $w['contable'][0]['url']);
+        $this->assertArrayHasKey('coordinadora', $w);
+
+        $res = $this->post('/office/approvals/' . $id, ['decision' => 'approve']);
+        $this->assertSame(200, $res->get_status());
+        $this->assertSame('Hecho', $res->get_data()['message']);
+        $this->assertSame([['as_is' => 1]], $done->getArrayCopy(), 'approved as is, like from Chat');
+        $this->assertArrayNotHasKey('contable', (array) $res->get_data()['characters']);
+        $this->assertSame(409, $this->post('/office/approvals/' . $id, ['decision' => 'reject'])->get_status(), 'already resolved');
+        $this->assertSame(400, $this->post('/office/approvals/' . $id, ['decision' => 'maybe'])->get_status());
+    }
+
+    public function test_greetings_are_editable(){
+        $c = \MAD_Oficina\Core\Agents\Characters::public_data();
+        $this->assertSame('¡Hola, {nombre}! ¿Qué necesitas hoy?', $c['recepcionista']['greeting']);
+        $this->assertSame('¡Hola! ¿En qué te ayudamos?', $c['recepcionista']['greeting_alt']);
+        $this->assertSame('', $c['secretaria']['greeting_alt']);
+        \MAD_Oficina\Core\Agents\Characters::save(['secretaria' => ['greeting' => 'Te cuento lo que <b>acordamos</b>.']]);
+        $c = \MAD_Oficina\Core\Agents\Characters::public_data();
+        $this->assertSame('Te cuento lo que acordamos.', $c['secretaria']['greeting']);
+        $this->assertSame('Valle', $c['coordinadora']['name']);
+        wp_set_current_user($this->user_a);
+        $this->assertSame('Te cuento lo que acordamos.', $this->get('/me')->get_data()['characters']['secretaria']['greeting']);
+    }
 }
