@@ -91,6 +91,21 @@ class BankTest extends MADOF_TestCase {
         $this->assertSame([['date' => '2026-02-03', 'value_date' => null, 'concept' => 'Pago Google Ads', 'amount' => -50.5, 'balance' => null]], $st['rows']);
     }
 
+    public function test_old_binary_xls_like_santanders(){
+        // Invented statement with the same shape as a Santander export (title lines, IBAN, then the table).
+        $st = BankStatement::read(dirname(__DIR__) . '/fixtures/banco-inventado.xls', 'transactions.xls');
+        $this->assertIsArray($st, is_wp_error($st) ? $st->get_error_message() : '');
+        $this->assertSame('…1234', $st['account'], 'the account comes from the lines above the table');
+        $this->assertCount(3, $st['rows']);
+        $this->assertSame(['2026-10-14', 121.0, 1000.0], [$st['rows'][0]['date'], $st['rows'][0]['amount'], $st['rows'][0]['balance']]);
+        $this->assertStringContainsString('ñandú', $st['rows'][0]['concept']);
+        $this->assertSame(-24.19, $st['rows'][1]['amount']);
+
+        $a = $this->invoice(['total' => 121, 'issue_date' => '2026-10-01']);
+        $this->assertSame(1, Bank::match(Bank::import($st)['ids'])['matched']);
+        $this->assertSame(1, (int) $this->inv($a)['paid']);
+    }
+
     public function test_norma_43_and_html_xls(){
         $n43 = "11" . str_repeat('0', 8) . "0000001234" . str_repeat(' ', 60) . "\n"
             . '22' . '    ' . '0000' . '260203' . '260203' . '02' . '000' . '2' . '00000000012100' . '0000000000' . str_pad('LUZCLARA', 12) . str_pad('F-2026-011', 16) . "\n"

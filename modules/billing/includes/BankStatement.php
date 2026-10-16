@@ -19,9 +19,7 @@ final class BankStatement {
 
         if ( substr($raw, 0, 2) === 'PK' ) return self::table(self::xlsx($path));
         if ( preg_match('/^11\d{18}/', $raw) || in_array($ext, ['n43', 'aeb', 'q43'], true) ) return self::norma43($raw);
-        if ( substr($raw, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" ) {
-            return new \WP_Error('madof_bank_xls', __('Es un Excel antiguo (.xls). Ábrelo y guárdalo como .xlsx o CSV, o descarga del banco el formato Norma 43, y vuelve a subirlo.', 'mad-oficina'));
-        }
+        if ( substr($raw, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" ) return self::table(XlsReader::rows($raw)); // old Excel (.xls), e.g. Santander
         $text = self::utf8($raw);
         if ( stripos(ltrim($text), '<') === 0 || stripos($text, '<table') !== false ) return self::table(self::html($text));
         return self::table(self::csv($text));
@@ -160,7 +158,18 @@ final class BankStatement {
             ];
         }
         if ( ! $out ) return new \WP_Error('madof_bank_rows', __('He encontrado las columnas pero ningún movimiento con fecha e importe.', 'mad-oficina'));
-        return ['account' => '', 'rows' => $out];
+        return ['account' => self::account(array_slice($rows, 0, $map['header'])), 'rows' => $out];
+    }
+
+    /** «Santander …6227» from the lines above the table (bank name and IBAN), if they are there. */
+    private static function account(array $top){
+        $text = implode(' ', array_map(fn($r) => implode(' ', array_map('strval', $r)), $top));
+        $iban = preg_match('/\b[A-Z]{2}\d{2}[ ]?(?:\d{4}[ ]?){4,5}\d{0,4}\b/', $text, $m) ? '…' . substr(preg_replace('/\s+/', '', $m[0]), -4) : '';
+        $bank = '';
+        foreach ( ['Santander', 'BBVA', 'CaixaBank', 'Sabadell', 'ING', 'Bankinter', 'Unicaja', 'Kutxabank', 'Abanca', 'Ibercaja', 'Openbank', 'Revolut', 'Wise', 'N26', 'Cajamar', 'Triodos'] as $b ) {
+            if ( stripos($text, $b) !== false ) { $bank = $b; break; }
+        }
+        return trim($bank . ' ' . $iban);
     }
 
     public static function date($v){
