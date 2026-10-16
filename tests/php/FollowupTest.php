@@ -79,12 +79,18 @@ class FollowupTest extends MADOF_TestCase {
         $ran = $this->coordinator(['briefs' => false, 'client_reminders' => false, 'ideas' => false])->run($noon);
         $this->assertSame(2, $ran['reminders']);
 
-        $mine = $this->sent_to('spaces/JESSDM')[0]['body']['text'];
-        $this->assertStringContainsString('LN · Subir anuncios — hoy', $mine);
+        $mine = wp_json_encode($this->sent_to('spaces/JESSDM')[0]['body'], JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('1 · LN · hoy', $mine, 'numbered lines');
+        $this->assertStringContainsString('Subir anuncios', $mine);
+        $this->assertStringContainsString('task_list_done', $mine, 'a «Hecha» button per line');
         $this->assertStringNotContainsString('Dentro de un mes', $mine);
         $this->assertStringNotContainsString('Ya hecha', $mine);
         $this->assertStringNotContainsString('Montar el vídeo', $mine, "Liz's tasks go to Liz");
-        $this->assertStringContainsString('Montar el vídeo — vencida', $this->sent_to('spaces/LIZDM')[0]['body']['text']);
+        $liz = wp_json_encode($this->sent_to('spaces/LIZDM')[0]['body'], JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('Montar el vídeo', $liz);
+        $this->assertStringContainsString('vencida', $liz);
+        $this->assertCount(1, \MAD_Oficina\Chat\TaskList::last('jessica@imad.example')['ids'], 'remembered for answers by number');
+        $this->assertCount(1, \MAD_Oficina\Chat\TaskList::last('liz@imad.example')['ids']);
 
         $this->sent = [];
         $this->coordinator(['briefs' => false])->run($noon + 3600);

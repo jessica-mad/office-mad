@@ -1,5 +1,6 @@
 <?php
 use MAD_Oficina\Chat\GoogleJwt;
+use MAD_Oficina\Chat\TaskList;
 use MAD_Oficina\Core\Approvals;
 use MAD_Oficina\Core\Crypto;
 use MAD_Oficina\Core\Repo\Clients;
@@ -152,6 +153,90 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame('open', $wpdb->get_var("SELECT status FROM " . Schema::table('action_items') . " WHERE id = {$other}"));
         $this->click('task_done', ['task_id' => (string) $mine], 'liz@imad.example');
         $this->assertSame('done', $wpdb->get_var("SELECT status FROM " . Schema::table('action_items') . " WHERE id = {$mine}"));
+    }
+
+    /* ───────── marking tasks done from Chat ───────── */
+
+    private function say($text, $email = 'jessica@imad.example'){
+        return $this->event(['type' => 'MESSAGE', 'user' => ['email' => $email], 'space' => ['name' => 'spaces/JESSDM', 'type' => 'DM'],
+            'message' => ['text' => $text, 'argumentText' => $text]])->get_data();
+    }
+
+    private function status($id){
+        return $GLOBALS['wpdb']->get_var('SELECT status FROM ' . Schema::table('action_items') . ' WHERE id = ' . (int) $id);
+    }
+
+    public function test_words_are_read_without_ai(){
+        $p = fn($t) => TaskList::parse($t);
+        $this->assertSame(['action' => 'done', 'nums' => [2, 5]], $p('La 2 y la 5 están hechas'));
+        $this->assertSame(['action' => 'done', 'nums' => [1, 2, 3]], $p('1-3 listas'));
+        $this->assertSame(['action' => 'done', 'nums' => [1, 4]], $p('1, 4'));
+        $this->assertSame(['action' => 'done', 'nums' => 'all'], $p('Todas hechas!'));
+        $this->assertSame(['action' => 'undo', 'nums' => [3]], $p('deshacer la 3'));
+        $this->assertSame('list', $p('¿qué tareas tengo?')['action']);
+        $this->assertSame('ask', $p('ya está hecho')['action']);
+        $this->assertNull($p('hola, ¿qué tal?')['action']);
+        $this->assertNull($p('ok, te escribo a las 5')['action']);
+        $this->assertNull($p('mándame la factura de los 2 meses')['action'], 'numbers in a sentence are not an answer');
+    }
+
+    public function test_jessica_marks_tasks_done_by_number_from_her_last_list(){
+        $a = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Subir anuncios', 'owner' => 'jessica', 'status' => 'open', 'due_date' => '2026-10-10']);
+        $b = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Revisar textos', 'owner' => 'mad', 'status' => 'in_progress', 'due_date' => '2026-10-11']);
+        $c = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Llamar a Rosa', 'owner' => 'jessica', 'status' => 'open', 'due_date' => '2026-10-12']);
+        $lizs = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Montar vídeo', 'owner' => 'liz', 'team_member_id' => $this->liz, 'status' => 'open']);
+
+        $this->assertStringContainsString('ninguna lista', wp_json_encode($this->say('la 1 hecha'), JSON_UNESCAPED_UNICODE));
+        $this->assertSame('open', $this->status($a));
+
+        $list = wp_json_encode($this->say('tareas'), JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('1 · LN', $list);
+        $this->assertStringNotContainsString('Montar vídeo', $list, "Liz's tasks are not in Jessica's list");
+
+        $res = wp_json_encode($this->say('la 1 y la 3 hechas, y la 9'), JSON_UNESCAPED_UNICODE);
+        $this->assertSame(['done', 'in_progress', 'done', 'open'], [$this->status($a), $this->status($b), $this->status($c), $this->status($lizs)]);
+        $this->assertStringContainsString('Marcadas como hechas', $res);
+        $this->assertStringContainsString('No hay número 9', $res);
+        $this->assertStringContainsString('task_undo', $res);
+
+        // «Deshacer» restores how it was.
+        $this->click('task_undo', ['prev' => "{$a}:open,{$c}:open"], 'jessica@imad.example');
+        $this->assertSame(['open', 'open'], [$this->status($a), $this->status($c)]);
+
+        $this->say('todas hechas');
+        $this->assertSame(['done', 'done', 'done'], [$this->status($a), $this->status($b), $this->status($c)]);
+        $this->say('deshacer la 2');
+        $this->assertSame('open', $this->status($b));
+    }
+
+    public function test_liz_only_touches_her_own_list_and_tasks(){
+        $hers = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Montar vídeo', 'owner' => 'liz', 'team_member_id' => $this->liz, 'status' => 'open']);
+        $jess = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Margen', 'owner' => 'jessica', 'status' => 'open']);
+        $this->say('tareas', 'liz@imad.example');
+        $this->say('todas hechas', 'liz@imad.example');
+        $this->assertSame(['done', 'open'], [$this->status($hers), $this->status($jess)]);
+
+        // A forged click on someone else's task from a list does nothing.
+        $res = $this->click('task_list_done', ['task_id' => (string) $jess, 'ids' => "{$hers},{$jess}"], 'liz@imad.example');
+        $this->assertStringContainsString('no es tuya', $res->get_data()['text']);
+        $this->assertSame('open', $this->status($jess));
+        // And a stranger cannot mark anything by words.
+        TaskList::remember('rosa@lanasnorte.example', [$jess]);
+        $this->say('todas hechas', 'rosa@lanasnorte.example');
+        $this->assertSame('open', $this->status($jess));
+    }
+
+    public function test_the_hecha_button_redraws_the_same_numbered_list(){
+        $a = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Primera', 'owner' => 'jessica', 'status' => 'open']);
+        $b = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Segunda', 'owner' => 'jessica', 'status' => 'open']);
+        $res = $this->click('task_list_done', ['task_id' => (string) $b, 'ids' => "{$a},{$b}", 'title' => 'Tus tareas'], 'jessica@imad.example')->get_data();
+        $this->assertSame('UPDATE_MESSAGE', $res['actionResponse']['type']);
+        $json = wp_json_encode($res, JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('2 · LN · HECHA', $json);
+        $this->assertStringContainsString('1 · LN', $json);
+        $this->assertSame('done', $this->status($b));
+        $this->click('task_list_undo', ['task_id' => (string) $b, 'ids' => "{$a},{$b}"], 'jessica@imad.example');
+        $this->assertSame('open', $this->status($b));
     }
 
     /* ───────── outgoing messages ───────── */

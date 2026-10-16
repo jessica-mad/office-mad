@@ -68,7 +68,8 @@ final class Events {
 
             case 'MESSAGE':
                 if ( $is_dm ) $this->remember_dm($email, $space['name'] ?? '');
-                return $this->text($this->answer($email, $is_dm));
+                $out = $this->answer($email, $is_dm, (string) ($e['message']['argumentText'] ?? $e['message']['text'] ?? ''));
+                return is_array($out) ? rest_ensure_response($out) : $this->text($out);
 
             case 'CARD_CLICKED':
                 $fn = $e['common']['invokedFunction'] ?? ($e['action']['actionMethodName'] ?? '');
@@ -110,22 +111,63 @@ final class Events {
         }
     }
 
-    private function answer($email, $is_dm){
+    /** @return string|array a plain reply or a message with a card */
+    private function answer($email, $is_dm, $text = ''){
         if ( ! $is_dm ) return __('Soy el asistente automático de MAD. Para cualquier cosa, escribid a Jessica.', 'mad-oficina');
-        if ( $email === $this->manager_email() ) {
+        $is_manager = $email !== '' && $email === $this->manager_email();
+        $member = $is_manager ? null : $this->member_by_email($email);
+        if ( $is_manager || $member ) {
+            $tasks = $this->tasks_answer($email, $text, $member);
+            if ( $tasks !== null ) return $tasks;
+        }
+        if ( $is_manager ) {
             $pending = Approvals::pending(5);
             if ( ! $pending ) return __('No tienes nada pendiente en la bandeja. Todo en orden.', 'mad-oficina');
             $lines = array_map(fn($a) => '• ' . $a['title'], $pending);
             return sprintf(_n('Tienes %d petición pendiente:', 'Tienes %d peticiones pendientes:', count($pending), 'mad-oficina'), Approvals::count_pending())
-                . "\n" . implode("\n", $lines) . "\n\n" . admin_url('admin.php?page=mad-oficina-bandeja');
+                . "\n" . implode("\n", $lines) . "\n\n" . admin_url('admin.php?page=mad-oficina-bandeja')
+                . "\n\n" . __('Escríbeme «tareas» para ver las tuyas y marcarlas.', 'mad-oficina');
         }
-        $member = $this->member_by_email($email);
-        if ( $member ) {
-            global $wpdb;
-            $titles = $wpdb->get_col($wpdb->prepare('SELECT title FROM ' . Schema::table('action_items') . " WHERE team_member_id = %d AND status IN ('open','in_progress') ORDER BY (due_date IS NULL), due_date LIMIT 10", $member['id']));
-            return $titles ? __('Tus tareas abiertas:', 'mad-oficina') . "\n• " . implode("\n• ", $titles) : __('No tienes tareas abiertas. ¡Bien!', 'mad-oficina');
-        }
+        if ( $member ) return $this->task_list_message($email, $member);
         return __('Hola, soy el asistente automático de MAD Oficina.', 'mad-oficina');
+    }
+
+    /**
+     * «tareas», «la 2 y la 5 hechas», «todas hechas», «deshacer la 3». The numbers refer
+     * to the last list this same person was sent. @return string|array|null null = not about tasks
+     */
+    private function tasks_answer($email, $text, ?array $member){
+        $p = TaskList::parse($text);
+        if ( $p['action'] === null ) return null;
+        if ( $p['action'] === 'list' ) return $this->task_list_message($email, $member);
+        $last = TaskList::last($email);
+        if ( $p['action'] === 'ask' || ! $last ) {
+            return $last
+                ? __('¿Cuáles? Dime los números de la lista: «la 2 y la 5 hechas» o «todas hechas».', 'mad-oficina')
+                : __('No tengo ninguna lista tuya reciente. Escríbeme «tareas» y te la paso numerada.', 'mad-oficina');
+        }
+        $ids = $last['ids'];
+        $missing = [];
+        if ( $p['nums'] !== 'all' ) {
+            $pick = [];
+            foreach ( $p['nums'] as $n ) isset($ids[$n - 1]) ? $pick[] = $ids[$n - 1] : $missing[] = $n;
+            $ids = $pick;
+        }
+        $rows = array_values(TaskList::rows($ids));
+        if ( $p['action'] === 'undo' ) {
+            $r = TaskList::reopen($rows, array_fill_keys($ids, 'open'), $email, $this->manager_email());
+            return TaskList::result_card($r, true, $missing);
+        }
+        if ( $p['nums'] === 'all' ) $rows = array_values(array_filter($rows, fn($t) => in_array($t['status'], TaskList::STATUSES_OPEN, true)));
+        return TaskList::result_card(TaskList::mark($rows, $email, $this->manager_email()), false, $missing);
+    }
+
+    /** Open tasks as a numbered card (and remembered, for answers by number). */
+    private function task_list_message($email, ?array $member){
+        $ids = TaskList::open_ids($member ? (int) $member['id'] : null);
+        if ( ! $ids ) return __('No tienes tareas abiertas. ¡Bien!', 'mad-oficina');
+        TaskList::remember($email, $ids);
+        return TaskList::card(__('Tus tareas abiertas', 'mad-oficina'), $ids);
     }
 
     private function member_by_email($email){
@@ -149,11 +191,31 @@ final class Events {
             global $wpdb;
             $task = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . Schema::table('action_items') . ' WHERE id = %d', (int) ($params['task_id'] ?? 0)), ARRAY_A);
             if ( ! $task ) return $this->text(__('Esa tarea ya no existe.', 'mad-oficina'));
-            $member = $task['team_member_id'] ? Team::get((int) $task['team_member_id']) : null;
-            $allowed = $email === $this->manager_email() || ($member && strtolower((string) $member['workspace_email']) === $email);
-            if ( ! $allowed ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
+            if ( ! TaskList::allowed($task, $email, $this->manager_email()) ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
             $wpdb->update(Schema::table('action_items'), ['status' => 'done', 'completed_at' => Time::now(), 'updated_at' => Time::now()], ['id' => $task['id']]);
             return $this->update(Cards::task_done($task));
+        }
+
+        // A line of a numbered list: tick or untick it and re-draw the same list.
+        if ( in_array($fn, ['task_list_done', 'task_list_undo'], true) ) {
+            $id = (int) ($params['task_id'] ?? 0);
+            $ids = TaskList::parse_ids($params['ids'] ?? '');
+            if ( ! in_array($id, $ids, true) ) $ids[] = $id;
+            $rows = array_values(TaskList::rows([$id]));
+            if ( ! $rows ) return $this->text(__('Esa tarea ya no existe.', 'mad-oficina'));
+            $r = $fn === 'task_list_done'
+                ? TaskList::mark($rows, $email, $this->manager_email())
+                : TaskList::reopen($rows, [$id => (string) ($params['prev'] ?? 'open')], $email, $this->manager_email());
+            if ( $r['denied'] ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
+            $title = sanitize_text_field((string) ($params['title'] ?? '')) ?: __('Tus tareas', 'mad-oficina');
+            return $this->update(TaskList::card($title, $ids));
+        }
+
+        // «Deshacer» after marking by words.
+        if ( $fn === 'task_undo' ) {
+            $prev = TaskList::parse_prev($params['prev'] ?? '');
+            $r = TaskList::reopen(array_values(TaskList::rows(array_keys($prev))), $prev, $email, $this->manager_email());
+            return $this->update(TaskList::result_card($r, true));
         }
         // Other modules' buttons (e.g. ideas from the Coordinadora). They return a
         // message array (updates the card) or a string (plain reply).

@@ -2,6 +2,7 @@
 namespace MAD_Oficina\Followup;
 
 use MAD_Oficina\Chat\Cards;
+use MAD_Oficina\Chat\TaskList;
 use MAD_Oficina\Core\Approvals;
 use MAD_Oficina\Core\Repo\Clients;
 use MAD_Oficina\Core\Repo\Team;
@@ -120,18 +121,22 @@ final class Coordinator {
 
         $mine = $this->open_tasks("t.owner IN ('jessica','mad') AND t.team_member_id IS NULL AND t.due_date IS NOT NULL AND t.due_date <= %s", [$limit]);
         if ( $mine ) {
-            $text = '*' . __('Tus tareas para estos días', 'mad-oficina') . "*\n" . implode("\n", array_map(fn($t) => self::line($t, $today), $mine));
-            $r = $messenger->to_manager(['text' => $text]);
-            is_wp_error($r) ? $this->log('reminder_error', ['to' => 'jessica', 'error' => $r->get_error_message()]) : $sent++;
+            // A numbered card: she ticks lines or answers «la 2 y la 5 hechas».
+            $ids = array_map(fn($t) => (int) $t['id'], array_slice($mine, 0, TaskList::MAX));
+            $r = $messenger->to_manager(['text' => __('Tus tareas para estos días:', 'mad-oficina')] + TaskList::card(__('Tus tareas para estos días', 'mad-oficina'), $ids, $today));
+            if ( is_wp_error($r) ) $this->log('reminder_error', ['to' => 'jessica', 'error' => $r->get_error_message()]);
+            else { TaskList::remember($messenger->manager_email(), $ids); $sent++; }
         }
 
         foreach ( Team::all(true) as $member ) {
             $tasks = $this->open_tasks('t.team_member_id = %d AND t.due_date IS NOT NULL AND t.due_date <= %s', [$member['id'], $limit]);
             if ( ! $tasks ) continue;
-            $text = sprintf(__('Hola, %s. Tus tareas para estos días:', 'mad-oficina'), $member['name']) . "\n" . implode("\n", array_map(fn($t) => self::line($t, $today), $tasks))
-                . "\n\n" . sprintf(__('Las tienes todas en la oficina: %s', 'mad-oficina'), $this->portal_url());
-            $r = $messenger->to_team_member($member, ['text' => $text]);
-            is_wp_error($r) ? $this->log('reminder_error', ['to' => $member['slug'], 'error' => $r->get_error_message()]) : $sent++;
+            $ids = array_map(fn($t) => (int) $t['id'], array_slice($tasks, 0, TaskList::MAX));
+            $text = sprintf(__('Hola, %s. Tus tareas para estos días:', 'mad-oficina'), $member['name']);
+            $card = TaskList::card(__('Tus tareas para estos días', 'mad-oficina'), $ids, $today, sprintf(__('Las tienes todas en la oficina: %s', 'mad-oficina'), $this->portal_url()));
+            $r = $messenger->to_team_member($member, ['text' => $text] + $card);
+            if ( is_wp_error($r) ) $this->log('reminder_error', ['to' => $member['slug'], 'error' => $r->get_error_message()]);
+            else { TaskList::remember($member['workspace_email'], $ids); $sent++; }
         }
         return $sent;
     }
@@ -375,7 +380,7 @@ final class Coordinator {
         if ( $ideas ) $out .= "\n" . sprintf(_n('Esta semana vuelve %d idea.', 'Esta semana vuelven %d ideas.', $ideas, 'mad-oficina'), $ideas) . "\n";
         $pending = Approvals::count_pending();
         if ( $pending ) $out .= "\n" . sprintf(_n('Tienes %d cosa en la bandeja.', 'Tienes %d cosas en la bandeja.', $pending, 'mad-oficina'), $pending) . ' ' . admin_url('admin.php?page=mad-oficina-bandeja') . "\n";
-        $out .= "\n_" . __('Facturas a emitir y facturas de proveedores llegarán aquí con la fase de contabilidad.', 'mad-oficina') . '_';
+        $out .= "\n_" . __('Escríbeme «tareas» para ver las tuyas numeradas y marcarlas.', 'mad-oficina') . '_';
 
         $r = $messenger->to_manager(['text' => $out]);
         if ( is_wp_error($r) ) { $this->log('weekly_error', ['error' => $r->get_error_message()]); return 0; }
