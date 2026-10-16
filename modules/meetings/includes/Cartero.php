@@ -12,7 +12,7 @@ final class Cartero {
 
     const OPTION = 'madoficina_cartero';
     /** Code.gs version this plugin expects (apps-script/Code.gs → CARTERO_VERSION). */
-    const VERSION = '2026-10-17';
+    const VERSION = '2026-10-18';
     const RUN_MINUTES = 10;
 
     public static function get(){

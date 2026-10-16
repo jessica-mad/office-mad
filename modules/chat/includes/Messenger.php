@@ -96,7 +96,8 @@ final class Messenger {
                 if ( ! $emails ) return new \WP_Error('madof_chat_email', __('Ningún contacto del cliente recibe resúmenes.', 'mad-oficina'));
                 $from = fn() => 'MAD Oficina · Asistente';
                 add_filter('wp_mail_from_name', $from);
-                $ok = wp_mail($emails, $subject ?: __('Resumen de la reunión con MAD', 'mad-oficina'), str_replace(['*', '_'], '', $text));
+                $copy = \MAD_Oficina\Core\ClientCopy::address($client);
+                $ok = wp_mail($emails, $subject ?: __('Resumen de la reunión con MAD', 'mad-oficina'), str_replace(['*', '_'], '', $text), $copy ? ['Bcc: ' . $copy] : []);
                 remove_filter('wp_mail_from_name', $from);
                 return $ok ? $this->log($client, 'email', $text, implode(',', $emails)) : new \WP_Error('madof_chat_email', __('No se pudo enviar el email.', 'mad-oficina'));
         }

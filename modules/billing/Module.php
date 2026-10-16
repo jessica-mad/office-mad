@@ -318,6 +318,8 @@ return new class($core) implements MAD_Oficina_Module {
         $s['payment_days'] = max(0, min(365, (int) ($p['payment_days'] ?? 15)));
         $s['email_subject'] = sanitize_text_field($p['email_subject'] ?? '');
         $s['email_body'] = sanitize_textarea_field($p['email_body'] ?? '');
+        $copy = \MAD_Oficina\Core\ClientCopy::save(! empty($p['client_copy_on']), sanitize_text_field($p['client_copy'] ?? ''));
+        if ( is_wp_error($copy) ) $this->back(['tab' => 'settings'], $copy->get_error_message(), 'error');
         update_option(MAD_Oficina_Core::option_key($this->slug()), $s, false);
         $this->back(['tab' => 'settings'], __('Datos del emisor guardados.', 'mad-oficina'));
     }

@@ -62,7 +62,7 @@ function install() {
 
 /** Main trigger: send new meetings, then carry out approved orders. */
 // Must match MAD Oficina (Cartero::VERSION): the website shows when this code is outdated.
-var CARTERO_VERSION = '2026-10-17';
+var CARTERO_VERSION = '2026-10-18';
 var RUN_STARTED = 0, EXPENSES_CFG = null, REPORT = null;
 
 /** What this run did, sent to the website with the tick (Jessica sees it in «El cartero»). */
@@ -392,7 +392,9 @@ function archiveInvoice_(p) {
   if (p.email && p.email.to) {
     var key = 'SENT_INVOICE_' + p.invoice_id, props = props_();
     if (!props.getProperty(key)) {
-      MailApp.sendEmail({ to: p.email.to, subject: p.email.subject, body: p.email.body, attachments: [file.getBlob()] });
+      var mail = { to: p.email.to, subject: p.email.subject, body: p.email.body, attachments: [file.getBlob()] };
+      if (p.email.bcc) mail.bcc = p.email.bcc; // hidden copy to Jessica+c.<cliente>, to follow each client in Gmail
+      MailApp.sendEmail(mail);
       props.setProperty(key, new Date().toISOString());
     }
     sent = true;

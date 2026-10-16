@@ -318,6 +318,10 @@ $status_pill = function($inv){
             <label><?php esc_html_e('Asunto', 'mad-oficina'); ?><input type="text" name="email_subject" value="<?php echo esc_attr($settings['email_subject'] ?? '') ?>" placeholder="<?php echo esc_attr(\MAD_Oficina\Billing\Issuing::DEFAULT_SUBJECT); ?>"></label>
             <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="email_body" rows="8" placeholder="<?php echo esc_attr(\MAD_Oficina\Billing\Issuing::DEFAULT_BODY); ?>"><?php echo esc_textarea($settings['email_body'] ?? ''); ?></textarea>
                 <small><?php esc_html_e('Puedes usar {numero}, {cliente}, {total}, {mes} y {vencimiento}. Vacío = el texto de ejemplo. Sale desde tu Gmail con el PDF adjunto; cada envío lo apruebas tú.', 'mad-oficina'); ?></small></label>
+            <?php $copy = \MAD_Oficina\Core\ClientCopy::settings(); ?>
+            <label class="madof-check"><input type="checkbox" name="client_copy_on" value="1" <?php checked(! empty($copy['on'])); ?>> <?php esc_html_e('Mandarme una copia oculta de cada email a un cliente', 'mad-oficina'); ?></label>
+            <label><?php esc_html_e('Dirección de la copia', 'mad-oficina'); ?><input type="text" name="client_copy" value="<?php echo esc_attr($copy['template']); ?>">
+                <small><?php echo esc_html(sprintf(__('{cliente} es el nombre del cliente en minúsculas y con guiones; también puedes usar {codigo}. Ejemplo: %s. Vale para las facturas y los resúmenes que salen por email; en Gmail puedes buscar o filtrar por «to:» esa dirección para ver todo lo que se le ha enviado a cada cliente.', 'mad-oficina'), \MAD_Oficina\Core\ClientCopy::address(['name' => 'Lanas del Norte, S.L.', 'code' => 'LN']) ?: '—')); ?></small></label>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>
     </form>

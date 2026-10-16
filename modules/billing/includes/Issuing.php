@@ -261,6 +261,7 @@ final class Issuing {
     }
 
     public function queue_archive(array $inv, ?array $email){
+        if ( $email && ($copy = \MAD_Oficina\Core\ClientCopy::for_invoice($inv)) && stripos($email['to'], $copy) === false ) $email['bcc'] = $copy;
         return Orders::queue('invoice_archive', [
             'invoice_id' => (int) $inv['id'],
             'number' => $inv['number'],
