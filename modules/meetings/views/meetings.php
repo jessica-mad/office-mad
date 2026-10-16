@@ -66,6 +66,7 @@ $clients = Clients::all();
             <tr><td><code>MAD_SECRET</code></td><td><?php if ( $secret ) : ?><code class="madof-copy"><?php echo esc_html($secret); ?></code><?php else : ?><em><?php esc_html_e('Guarda los ajustes para generarlo.', 'mad-oficina'); ?></em><?php endif; ?></td></tr>
         </tbody></table>
     </section>
+    <?php echo \MAD_Oficina\Meetings\Cartero::render(); // phpcs:ignore -- escaped inside ?>
     <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form">
         <?php wp_nonce_field('madof_meetings_settings'); ?>
         <input type="hidden" name="action" value="madof_meetings_settings">

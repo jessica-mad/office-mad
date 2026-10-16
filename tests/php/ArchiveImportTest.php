@@ -184,6 +184,10 @@ class ArchiveImportTest extends MADOF_TestCase {
         $cfg = $this->hook('GET', '/hooks/expenses/config')->get_data();
         $this->assertSame('ARCHIVE_ROOT_ID_1', $cfg['archive_root']);
         $this->assertSame(['active' => true, 'since' => 2025, 'folders' => ['ARCHIVE_ROOT_ID_1', 'PERSONAL_ROOT']], $cfg['drive_import'], 'the archive first');
+        // «Pausar la lectura» does not stop the import: files wait in «Leyendo» without spending.
+        update_option(MAD_Oficina_Core::option_key('suppliers'), ['paused' => true] + get_option(MAD_Oficina_Core::option_key('suppliers')));
+        sleep(1); // the same signed request in the same second would be a replay
+        $this->assertTrue($this->hook('GET', '/hooks/expenses/config')->get_data()['drive_import']['active']);
 
         $this->next = $this->x();
         $res = $this->hook('POST', '/hooks/expenses', ['source' => 'drive', 'file_id' => 'F1', 'folder' => 'Facturas Compras IMAD/2025/T1', 'in_archive' => false, 'filename' => 'a.pdf', 'base64' => base64_encode('%PDF-1.4 drive one')])->get_data();

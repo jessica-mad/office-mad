@@ -328,7 +328,8 @@ return new class($core) implements MAD_Oficina_Module {
     /** What the cartero imports from Drive: folders (the archive itself always first), since which year. */
     public function drive_import(){
         $imp = $this->settings()['drive_import'] ?? [];
-        return ['active' => ! empty($imp['active']) && empty($this->settings()['paused']), 'since' => (int) ($imp['since'] ?? 2025), 'folders' => array_values(array_unique(array_filter(array_merge([$this->intake()->archive_root()], (array) ($imp['folders'] ?? [])))))];
+        // Not stopped by «Pausar la lectura»: files keep arriving and wait in «Leyendo» without spending.
+        return ['active' => ! empty($imp['active']), 'since' => (int) ($imp['since'] ?? 2025), 'folders' => array_values(array_unique(array_filter(array_merge([$this->intake()->archive_root()], (array) ($imp['folders'] ?? [])))))];
     }
 
     /** «Importar tu archivo de Drive»: start or stop. */

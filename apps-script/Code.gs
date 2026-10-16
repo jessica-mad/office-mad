@@ -61,7 +61,13 @@ function install() {
 }
 
 /** Main trigger: send new meetings, then carry out approved orders. */
-var RUN_STARTED = 0, EXPENSES_CFG = null;
+// Must match MAD Oficina (Cartero::VERSION): the website shows when this code is outdated.
+var CARTERO_VERSION = '2026-10-17';
+var RUN_STARTED = 0, EXPENSES_CFG = null, REPORT = null;
+
+/** What this run did, sent to the website with the tick (Jessica sees it in «El cartero»). */
+function note_(key, n) { if (REPORT) REPORT[key] = (REPORT[key] || 0) + (n === undefined ? 1 : n); }
+function oops_(msg) { console.warn(msg); if (REPORT && REPORT.errors.length < 10) REPORT.errors.push(String(msg).slice(0, 300)); }
 
 /** The expenses configuration, asked once per run (two identical signed requests in the same second would be taken as a replay). */
 function expensesConfig_() {
@@ -73,10 +79,11 @@ function run() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
   RUN_STARTED = Date.now(); EXPENSES_CFG = null;
+  REPORT = { meetings: 0, gmail: 0, drive: null, orders_done: 0, orders_failed: 0, errors: [] };
   try {
-    try { scan(); } catch (e) { console.error(e); }
-    try { scanInvoices_(); } catch (e) { console.error('facturas: ' + e); }
-    try { importDrive_(); } catch (e) { console.error('archivo de Drive: ' + e); }
+    try { scan(); } catch (e) { oops_('Reuniones: ' + e); }
+    try { scanInvoices_(); } catch (e) { oops_('Facturas de Gmail: ' + e); }
+    try { importDrive_(); } catch (e) { oops_('Archivo de Drive: ' + e); }
     processOrders(); tick_();
   } finally {
     lock.releaseLock();
@@ -183,6 +190,7 @@ function sendMeeting_(key, title, startsAt, files) {
     'https://drive.google.com/drive/folders/' + files.folderId,
     files.notes ? files.notes.getUrl() : '', files.recording ? files.recording.getUrl() : '', key, '']);
 
+  note_('meetings');
   var res = signedFetch_('post', '/hooks/meetings', {
     source_key: key,
     title: title,
@@ -256,7 +264,9 @@ function calendarEventId_(doc) {
 
 /** Asks the website to process waiting meetings (it answers at once and works in the background). */
 function tick_() {
-  try { signedFetch_('post', '/hooks/tick', {}); }
+  var body = {};
+  if (REPORT) { REPORT.seconds = Math.round((Date.now() - RUN_STARTED) / 1000); body = { report: REPORT }; }
+  try { signedFetch_('post', '/hooks/tick', body); }
   catch (e) { console.warn('tick: ' + e); } // a slow answer is fine: the website keeps working
 }
 
@@ -279,8 +289,10 @@ function processOrders() {
       var result = handlers[order.type] ? handlers[order.type](order.payload) : null;
       if (!result) throw new Error('Tipo de orden desconocido: ' + order.type);
       signedFetch_('post', '/hooks/orders/' + order.id + '/done', { ok: true, result: result });
+      note_('orders_done');
     } catch (e) {
-      console.error(e);
+      note_('orders_failed');
+      oops_('Encargo ' + order.type + ': ' + e);
       signedFetch_('post', '/hooks/orders/' + order.id + '/done', { ok: false, error: String(e) });
     }
   });
@@ -443,9 +455,10 @@ function scanInvoices_() {
         if (unknown.indexOf(f.hash) < 0) return;
         try {
           signedFetch_('post', '/hooks/expenses', { message_id: m.id, from: head.from, subject: head.subject, date: new Date(Number(m.internalDate)).toISOString(), filename: f.name, base64: Utilities.base64Encode(f.bytes) });
+          note_('gmail');
         } catch (e) {
           // One bad file never stops the rest: it is logged and the scan goes on.
-          console.warn('No he podido entregar «' + f.name + '» (' + (head.subject || m.id) + '): ' + e);
+          oops_('No he podido entregar «' + f.name + '» (' + (head.subject || m.id) + '): ' + e);
         }
       });
     }
@@ -534,7 +547,7 @@ function importDrive_() {
   var root = cfg.archive_root || '', max = cfg.max_bytes || 4194304, files = [], errors = 0, skipped = 0;
   imp.folders.forEach(function (id) {
     try { walk_(DriveApp.getFolderById(id), [], id === root, imp.since || 2025, files, 0); }
-    catch (e) { errors++; console.warn('No puedo abrir la carpeta ' + id + ': ' + e); }
+    catch (e) { errors++; oops_('No puedo abrir la carpeta de Drive ' + id + ': ' + e); }
   });
   var unknown = {};
   for (var i = 0; i < files.length; i += 400) {
@@ -554,10 +567,11 @@ function importDrive_() {
       sent++;
     } catch (e) {
       errors++;
-      console.warn('No he podido entregar «' + f.name + '» (' + f.path + '): ' + e);
+      oops_('No he podido entregar «' + f.name + '» (' + f.path + '): ' + e);
     }
   }
   var pending = todo.length - sent - skipped - errors;
+  if (REPORT) REPORT.drive = { files: files.length, sent: sent, pending: Math.max(0, pending), errors: errors + skipped };
   signedFetch_('post', '/hooks/expenses/import', { files: files.length, sent: sent, pending: Math.max(0, pending), errors: errors + skipped, done: !cut && pending <= 0 });
 }
 
@@ -696,7 +710,7 @@ function signedFetch_(method, path, body) {
   var sig = raw.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
   var opts = {
     method: method, muteHttpExceptions: true, contentType: 'application/json; charset=utf-8',
-    headers: { 'X-Mad-Timestamp': ts, 'X-Mad-Signature': sig },
+    headers: { 'X-Mad-Timestamp': ts, 'X-Mad-Signature': sig, 'X-Mad-Version': CARTERO_VERSION },
   };
   if (body) opts.payload = payload;
   var res = UrlFetchApp.fetch(endpoint + path, opts);

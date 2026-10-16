@@ -42,7 +42,10 @@ final class Hooks {
         ]);
         register_rest_route(self::NS, '/hooks/tick', [
             'methods' => 'POST', 'permission_callback' => [$this, 'verify'],
-            'callback' => fn() => rest_ensure_response($this->on_tick ? call_user_func($this->on_tick) : ['processed' => 0]),
+            'callback' => function(\WP_REST_Request $req){
+                Cartero::report($req->get_json_params()); // what it did in this run
+                return rest_ensure_response($this->on_tick ? call_user_func($this->on_tick) : ['processed' => 0]);
+            },
         ]);
         register_rest_route(self::NS, '/hooks/orders/(?P<id>\d+)/done', [
             'methods' => 'POST', 'callback' => [$this, 'order_done'], 'permission_callback' => [$this, 'verify'],
@@ -70,6 +73,7 @@ final class Hooks {
         $replay_key = 'madof_hook_' . substr($sig, 0, 40);
         if ( get_transient($replay_key) ) return new \WP_Error('madof_hook_replay', 'Replayed request', ['status' => 409]);
         set_transient($replay_key, 1, self::MAX_SKEW * 2);
+        Cartero::seen($req);
         return true;
     }
 

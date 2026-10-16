@@ -265,8 +265,9 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
             <label><?php esc_html_e('Desde el año', 'mad-oficina'); ?> <input type="number" name="since" min="2000" max="<?php echo (int) current_time('Y'); ?>" value="<?php echo (int) ($imp['since'] ?? 2025); ?>" style="width:90px"></label>
             <p class="description"><?php esc_html_e('La carpeta del archivo se recorre siempre la primera. Las subcarpetas de años anteriores se saltan.', 'mad-oficina'); ?></p>
             <?php if ( ! empty($imp['active']) ) : ?>
+                <?php if ( ! empty($settings['paused']) ) : ?><p class="madof-warn"><?php esc_html_e('La lectura de facturas está en pausa (Ajustes): los archivos llegan y esperan en «Leyendo» sin gastar nada; se leerán cuando quites la pausa.', 'mad-oficina'); ?></p><?php endif; ?>
                 <p><strong><?php esc_html_e('En marcha.', 'mad-oficina'); ?></strong>
-                    <?php if ( ! empty($imp['last']) ) echo esc_html(sprintf(__('Última pasada %1$s: %2$d archivos en las carpetas, %3$d enviados, %4$d por enviar, %5$d errores.', 'mad-oficina'), mysql2date('j M H:i', $imp['last']['at']), $imp['last']['files'], $imp['last']['sent'], $imp['last']['pending'], $imp['last']['errors'])); else esc_html_e('Esperando la primera pasada del cartero.', 'mad-oficina'); ?></p>
+                    <?php if ( ! empty($imp['last']) ) echo esc_html(sprintf(__('Última pasada %1$s: %2$d archivos en las carpetas, %3$d enviados, %4$d por enviar, %5$d errores.', 'mad-oficina'), mysql2date('j M H:i', $imp['last']['at']), $imp['last']['files'], $imp['last']['sent'], $imp['last']['pending'], $imp['last']['errors'])); else esc_html_e('Esperando la primera pasada del cartero con el código nuevo (mira «El cartero», aquí debajo).', 'mad-oficina'); ?></p>
                 <button class="madof-btn is-ghost" name="do" value="stop"><?php esc_html_e('Parar la importación', 'mad-oficina'); ?></button>
             <?php else : ?>
                 <?php if ( ! empty($imp['finished']) ) echo '<p>' . esc_html(sprintf(__('Terminada el %s.', 'mad-oficina'), mysql2date('j M Y H:i', $imp['finished']))) . '</p>'; ?>
@@ -278,6 +279,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
                 $by['registered'] ?? 0, $by['payment'] ?? 0, $by['tax'] ?? 0, $by['review'] ?? 0, $by['queued'] ?? 0, $by['not_mine'] ?? 0, $by['ignored'] ?? 0)); ?></p>
         <?php endif; ?>
     </section>
+    <?php if ( class_exists('MAD_Oficina\\Meetings\\Cartero') ) echo \MAD_Oficina\Meetings\Cartero::render(); // phpcs:ignore -- escaped inside ?>
     <section class="madof-card">
         <span class="madof-kicker"><?php esc_html_e('Subir facturas', 'mad-oficina'); ?></span>
         <p class="description"><?php esc_html_e('Para las que se descargan del panel del proveedor, los justificantes de pago (también capturas de pantalla) o los recibos de impuestos. Pasan por lo mismo que las de Gmail.', 'mad-oficina'); ?></p>

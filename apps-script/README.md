@@ -63,6 +63,16 @@ El cartero también lee tu Gmail, **solo para leer**: no cambia, borra ni marca 
 
 Los PDF de más de 4 MB no se envían: súbelos a mano en **Gastos → Subir o importar**.
 
+## Ver qué hace el cartero
+
+En **Reuniones → Apps Script y ajustes** y en **Gastos → Subir o importar** está la tarjeta **«El cartero»**. Muestra:
+- **Última pasada:** si pasa cada 10 minutos o si lleva tiempo sin pasar. Si no pasa, revisa en Apps Script → Activadores que haya uno para `run`, y en «Ejecuciones» qué error da.
+- **Versión del código:** si tu `Code.gs` es antiguo, te lo dice. Sin el código nuevo no se importa el archivo de Drive ni se cuenta lo que hace.
+- **Última pasada:** reuniones enviadas, facturas recogidas de Gmail, archivos de Drive enviados y pendientes, y encargos hechos o fallidos.
+- **Errores recientes,** con el motivo.
+
+Cada vez que actualices el plugin, **pega también el `Code.gs` nuevo** en Apps Script y guarda; no hace falta volver a ejecutar `install`.
+
 ## Importar tu archivo de Drive (histórico)
 
 Para meter de una vez lo que ya tienes guardado en Drive (facturas, justificantes de pago y recibos de impuestos):
@@ -76,6 +86,8 @@ Qué hace el cartero en cada pasada (cada 10 minutos, unos 4 minutos de trabajo)
 - **Tus carpetas antiguas solo se leen**: lo tuyo se copia, ordenado y renombrado, al archivo.
 - Lo que ya estaba en la carpeta del archivo se mueve y renombra allí mismo. Si es una copia de algo ya registrado, va a `Duplicados/`. **No se borra nada.**
 - Cuando una pasada no encuentra nada nuevo, la importación se da por terminada sola.
+
+La pausa de lectura (Gastos → Ajustes) no frena la importación: los archivos llegan y esperan en «Leyendo» sin gastar nada hasta que quites la pausa.
 
 Si tenías otro script que copiaba facturas a esa carpeta, desactívalo para que no se mezclen los dos sistemas.
 
