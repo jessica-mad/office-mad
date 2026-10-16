@@ -169,6 +169,23 @@ class BankTest extends MADOF_TestCase {
         $this->assertSame([], array_column(Bank::unpaid_expenses(), 'id'), 'the Adobe one was paid');
     }
 
+    public function test_own_transfers_in_bulk_and_by_rule(){
+        $imp = Bank::import(['account' => '', 'rows' => [
+            ['date' => '2026-03-01', 'value_date' => null, 'concept' => 'Transferencia a favor de Ana Prueba Gómez', 'amount' => -500.0, 'balance' => null],
+            ['date' => '2026-03-05', 'value_date' => null, 'concept' => 'Transferencia de ANA PRUEBA GOMEZ', 'amount' => 300.0, 'balance' => null],
+            ['date' => '2026-03-06', 'value_date' => null, 'concept' => 'Pago con tarjeta en Papelería', 'amount' => -8.0, 'balance' => null],
+        ]]);
+        Bank::match($imp['ids']);
+        $found = Bank::movements('unmatched', 300, 'ana prueba gomez');
+        $this->assertCount(2, $found, 'the search ignores accents and case');
+        $this->assertCount(1, Bank::movements('unmatched', 300, 'ana prueba', 'in'));
+
+        $this->assertSame(2, Bank::ignore_many(array_column($found, 'id'), 'own', 'Mis cuentas', 'ana prueba gomez'));
+        $this->assertCount(1, Bank::movements('unmatched'), 'only the card payment is left');
+        $next = Bank::import(['account' => '', 'rows' => [['date' => '2026-04-02', 'value_date' => null, 'concept' => 'TRANSFERENCIA A FAVOR DE ANA PRUEBA GÓMEZ', 'amount' => -200.0, 'balance' => null]]]);
+        $this->assertSame(1, Bank::match($next['ids'])['ignored'], 'next statements: settled by the rule');
+    }
+
     /* ───────── cobros ───────── */
 
     public function test_due_and_not_collected_asks_jessica_once_a_week_argentina_included(){

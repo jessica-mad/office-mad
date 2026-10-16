@@ -48,16 +48,49 @@ $pattern = function($concept){
 </nav>
 
 <section class="madof-card">
-<?php if ( in_array($view, ['unmatched', 'matched', 'ignored'], true) ) : $rows = Bank::movements($view); ?>
+<?php if ( in_array($view, ['unmatched', 'matched', 'ignored'], true) ) :
+    $q = sanitize_text_field(wp_unslash($_GET['q'] ?? ''));
+    $sign = in_array($_GET['sign'] ?? '', ['in', 'out'], true) ? $_GET['sign'] : '';
+    $rows = Bank::movements($view, 300, $q, $sign);
+    $bulk = $view === 'unmatched'; ?>
+    <form method="get" class="madof-inline madof-bank-filter">
+        <input type="hidden" name="page" value="<?php echo esc_attr($_GET['page'] ?? ''); ?>"><input type="hidden" name="tab" value="bank"><input type="hidden" name="view" value="<?php echo esc_attr($view); ?>">
+        <input type="search" name="q" value="<?php echo esc_attr($q); ?>" placeholder="<?php esc_attr_e('Buscar en el concepto (p. ej. transferencia, tu nombre…)', 'mad-oficina'); ?>" aria-label="<?php esc_attr_e('Buscar', 'mad-oficina'); ?>">
+        <select name="sign" aria-label="<?php esc_attr_e('Entradas o salidas', 'mad-oficina'); ?>"><option value=""><?php esc_html_e('Entradas y salidas', 'mad-oficina'); ?></option><option value="in" <?php selected($sign, 'in'); ?>><?php esc_html_e('Solo entradas', 'mad-oficina'); ?></option><option value="out" <?php selected($sign, 'out'); ?>><?php esc_html_e('Solo salidas', 'mad-oficina'); ?></option></select>
+        <button class="madof-btn is-small is-ghost"><?php esc_html_e('Filtrar', 'mad-oficina'); ?></button>
+        <?php if ( $q || $sign ) : ?><a href="<?php echo esc_url($url . $view); ?>"><?php esc_html_e('Quitar filtro', 'mad-oficina'); ?></a><?php endif; ?>
+    </form>
+    <?php if ( $bulk && $rows ) : ?>
+    <?php echo str_replace('<form ', '<form id="madof-bank-bulk" ', AdminUi::form_open('billing_bank_action', 'madof-bank-bulk')); ?>
+        <input type="hidden" name="do" value="bulk">
+        <label class="madof-check"><input type="checkbox" id="madof-bank-all"> <?php esc_html_e('Seleccionar todos', 'mad-oficina'); ?> <span class="madof-muted" id="madof-bank-count" aria-live="polite"></span></label>
+        <select name="kind" aria-label="<?php esc_attr_e('Qué son', 'mad-oficina'); ?>"><?php foreach ( Bank::KINDS as $k => $l ) echo '<option value="' . esc_attr($k) . '"' . selected($k, 'own', false) . '>' . esc_html__($l, 'mad-oficina') . '</option>'; ?></select>
+        <input type="text" name="label" placeholder="<?php esc_attr_e('Nota (opcional)', 'mad-oficina'); ?>">
+        <label class="madof-check"><input type="checkbox" name="remember" value="1" <?php checked($q !== ''); ?>> <?php esc_html_e('Y a partir de ahora, los que contengan:', 'mad-oficina'); ?></label>
+        <input type="text" name="pattern" value="<?php echo esc_attr(Bank::norm($q)); ?>" placeholder="<?php esc_attr_e('texto', 'mad-oficina'); ?>">
+        <button class="madof-btn is-small"><?php esc_html_e('Marcar los seleccionados', 'mad-oficina'); ?></button>
+    </form>
+    <script>
+    (function(){
+        var all = document.getElementById('madof-bank-all'), count = document.getElementById('madof-bank-count');
+        var boxes = function(){ return Array.prototype.slice.call(document.querySelectorAll('.madof-bank-pick')); };
+        var update = function(){ var n = boxes().filter(function(b){ return b.checked; }).length; count.textContent = n ? '(' + n + ')' : ''; };
+        all.addEventListener('change', function(){ boxes().forEach(function(b){ b.checked = all.checked; }); update(); });
+        document.addEventListener('change', function(e){ if ( e.target.classList && e.target.classList.contains('madof-bank-pick') ) update(); });
+    })();
+    </script>
+    <?php endif; ?>
     <?php if ( ! $rows ) : ?>
         <p><?php echo esc_html($view === 'unmatched' ? ($from ? __('Todo cuadra. Nada pendiente.', 'mad-oficina') : __('Sube tu primer extracto.', 'mad-oficina')) : __('Nada por aquí.', 'mad-oficina')); ?></p>
     <?php else : ?>
     <table class="madof-table madof-bank"><thead><tr>
+        <?php if ( $bulk ) : ?><th scope="col"><span class="screen-reader-text"><?php esc_html_e('Seleccionar', 'mad-oficina'); ?></span></th><?php endif; ?>
         <th scope="col"><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th scope="col"><?php esc_html_e('Concepto', 'mad-oficina'); ?></th>
         <th scope="col" class="num"><?php esc_html_e('Importe', 'mad-oficina'); ?></th><th scope="col"><?php echo esc_html($view === 'unmatched' ? __('Qué hago', 'mad-oficina') : __('Con qué va', 'mad-oficina')); ?></th>
     </tr></thead><tbody>
     <?php foreach ( $rows as $m ) : ?>
         <tr>
+            <?php if ( $bulk ) : ?><td><input type="checkbox" class="madof-bank-pick" name="ids[]" value="<?php echo (int) $m['id']; ?>" form="madof-bank-bulk" aria-label="<?php esc_attr_e('Seleccionar', 'mad-oficina'); ?>"></td><?php endif; ?>
             <td><?php echo esc_html(date_i18n('j/m/Y', strtotime($m['date']))); ?><?php if ( $m['account'] ) echo '<br><small class="madof-muted">' . esc_html($m['account']) . '</small>'; ?></td>
             <td><?php echo esc_html($m['concept']); ?><?php if ( $m['note'] && $view === 'unmatched' ) echo '<br><small>' . esc_html($m['note']) . '</small>'; ?></td>
             <td class="num <?php echo (float) $m['amount'] < 0 ? 'is-out' : 'is-in'; ?>"><strong><?php echo esc_html(Money::format($m['amount'])); ?></strong></td>
@@ -109,7 +142,14 @@ $pattern = function($concept){
     <?php endforeach; ?></tbody></table><?php endif; ?>
 
 <?php else : $rules = Bank::rules(); ?>
-    <p class="description"><?php esc_html_e('Cuando un movimiento contiene este texto, lo doy por resuelto sin preguntarte.', 'mad-oficina'); ?></p>
+    <p class="description"><?php esc_html_e('Cuando un movimiento contiene este texto, lo doy por resuelto sin preguntarte (entrando o saliendo, en este extracto y en los siguientes). Para tus traspasos, pon tu nombre tal como sale en el banco o los últimos dígitos de tus otras cuentas.', 'mad-oficina'); ?></p>
+    <?php echo AdminUi::form_open('billing_bank_action', 'madof-inline'); ?>
+        <input type="hidden" name="do" value="add_rule">
+        <input type="text" name="pattern" required minlength="3" placeholder="<?php esc_attr_e('Texto (p. ej. tu nombre)', 'mad-oficina'); ?>" aria-label="<?php esc_attr_e('Texto', 'mad-oficina'); ?>">
+        <select name="kind" aria-label="<?php esc_attr_e('Qué son', 'mad-oficina'); ?>"><?php foreach ( Bank::KINDS as $k => $l ) echo '<option value="' . esc_attr($k) . '"' . selected($k, 'own', false) . '>' . esc_html__($l, 'mad-oficina') . '</option>'; ?></select>
+        <input type="text" name="label" placeholder="<?php esc_attr_e('Nota (opcional)', 'mad-oficina'); ?>">
+        <button class="madof-btn is-small"><?php esc_html_e('Añadir', 'mad-oficina'); ?></button>
+    </form>
     <?php if ( ! $rules ) : ?><p><?php esc_html_e('Todavía nada.', 'mad-oficina'); ?></p><?php else : ?>
     <table class="madof-table"><tbody>
     <?php foreach ( $rules as $r ) : ?>

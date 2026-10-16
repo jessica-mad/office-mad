@@ -421,6 +421,16 @@ return new class($core) implements MAD_Oficina_Module {
         } elseif ( $do === 'rematch' ) {
             $r = \MAD_Oficina\Billing\Bank::match();
             $this->back(['tab' => 'bank'], sprintf(__('Vuelto a cruzar: %1$d cuadran ahora, %2$d siguen sin cuadrar.', 'mad-oficina'), $r['matched'] + $r['ignored'], $r['unmatched']));
+        } elseif ( $do === 'bulk' ) {
+            $ids = array_map('absint', (array) ($p['ids'] ?? []));
+            if ( ! $ids ) $this->back(['tab' => 'bank'], __('Marca primero los movimientos.', 'mad-oficina'), 'error');
+            $n = \MAD_Oficina\Billing\Bank::ignore_many($ids, sanitize_key($p['kind'] ?? ''), sanitize_text_field($p['label'] ?? ''), ! empty($p['remember']) ? sanitize_text_field($p['pattern'] ?? '') : '');
+            $this->back(['tab' => 'bank'], sprintf(_n('%d movimiento resuelto.', '%d movimientos resueltos.', $n, 'mad-oficina'), $n));
+        } elseif ( $do === 'add_rule' ) {
+            $ok = \MAD_Oficina\Billing\Bank::add_rule(sanitize_text_field($p['pattern'] ?? ''), sanitize_key($p['kind'] ?? ''), sanitize_text_field($p['label'] ?? ''));
+            if ( ! $ok ) $this->back(['tab' => 'bank', 'view' => 'rules'], __('Escribe al menos 3 letras.', 'mad-oficina'), 'error');
+            $m = \MAD_Oficina\Billing\Bank::match();
+            $this->back(['tab' => 'bank', 'view' => 'rules'], sprintf(_n('Regla guardada: %d movimiento resuelto con ella.', 'Regla guardada: %d movimientos resueltos con ella.', $m['ignored'], 'mad-oficina'), $m['ignored']));
         } elseif ( $do === 'delete_rule' ) {
             \MAD_Oficina\Billing\Bank::delete_rule(sanitize_text_field($p['pattern'] ?? '')); $r = true;
         } else $r = new \WP_Error('madof_bank', __('Acción desconocida.', 'mad-oficina'));

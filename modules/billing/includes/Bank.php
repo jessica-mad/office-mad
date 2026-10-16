@@ -278,9 +278,31 @@ final class Bank {
 
     /* ───────── what she sees ───────── */
 
-    public static function movements($status, $limit = 300){
+    /** @param string $q words of the concept (all of them), $sign 'in'|'out'|'' */
+    public static function movements($status, $limit = 300, $q = '', $sign = ''){
         global $wpdb;
-        return $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE status = %s ORDER BY date DESC, id DESC LIMIT %d', $status, $limit), ARRAY_A);
+        $where = $wpdb->prepare('status = %s', $status);
+        if ( $sign === 'in' ) $where .= ' AND amount > 0';
+        if ( $sign === 'out' ) $where .= ' AND amount < 0';
+        $words = array_filter(explode(' ', self::norm($q)));
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . " WHERE {$where} ORDER BY date DESC, id DESC LIMIT %d", $words ? 5000 : $limit), ARRAY_A);
+        if ( ! $words ) return $rows;
+        // Compared without accents or case («comisión» = «COMISION»).
+        $rows = array_filter($rows, function($r) use ($words){ $c = self::norm($r['concept']); foreach ( $words as $w ) if ( strpos($c, $w) === false ) return false; return true; });
+        return array_slice(array_values($rows), 0, $limit);
+    }
+
+    /** Several at once (e.g. all the transfers between her own accounts). @return int how many */
+    public static function ignore_many(array $ids, $kind, $label = '', $remember = ''){
+        $n = 0;
+        foreach ( array_unique(array_map('intval', $ids)) as $id ) {
+            $m = self::get($id);
+            if ( ! $m || $m['status'] !== 'unmatched' || ! isset(self::KINDS[$kind]) ) continue;
+            self::set($m, 'ignored', 'manual', [], self::KINDS[$kind] . ($label ? ' · ' . sanitize_text_field($label) : ''));
+            $n++;
+        }
+        if ( trim((string) $remember) !== '' && self::add_rule($remember, $kind, $label) ) $n += self::match()['ignored'];
+        return $n;
     }
 
     public static function counts(){
