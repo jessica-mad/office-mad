@@ -1,8 +1,15 @@
 # Oficina v2 · Rediseño de la oficina pixel art
 
-Encargo para rehacer la escena de la oficina (`game/`). **Solo cambia el aspecto y la planta**: los paneles, la API, los estados y el portal se quedan como están.
+Encargo para rehacer la oficina del portal (`game/`). La API, los permisos, los estados y el contenido de los paneles no cambian. Cambian la escena, cómo se muestra en móvil y escritorio, y cómo se habla con cada personaje.
+
+Tiene dos partes. Hazlas en este orden y enséñame cada una antes de seguir:
+
+- **Parte A · Escena:** planta vertical compacta, kit gráfico nuevo y personajes.
+- **Parte B · Pantallas y primer plano:** reparto de la pantalla en móvil y escritorio, y primer plano de cada personaje con su tabla de acciones.
 
 Antes de escribir código, propón el plan (archivos que tocas, orden y riesgos) y espera mi OK, como en el resto de bloques.
+
+# Parte A · Escena
 
 ## Referencias
 
@@ -150,10 +157,81 @@ Actualiza también el texto de ajustes en `modules/portal/views/settings.php` y 
 - `game/src/office/index.js` y `game/src/portal.css`: lienzo de 18×28 y relación 18/28. En móvil, ancho completo con scroll vertical, sin recortar.
 - `modules/portal/Module.php`: el cálculo de versión de assets (`glob`) debe incluir los PNG nuevos del kit.
 
-## Comprobación antes de cerrar
+## Comprobación de la parte A
 
 - Abre la oficina en navegador, en escritorio y en móvil (390 px), y compárala con `oficina-v2-referencia.png`.
 - Cada sala y cada personaje se puede pulsar y abre el mismo panel que hoy.
 - La vista de visitante sigue oscureciendo todo menos la recepción.
 - Fuerza un `esperando_gerencia` (con el seeder) y comprueba que el agente va al banco y vuelve a su mesa al resolverse.
 - Commits pequeños, uno por paso.
+
+# Parte B · Pantallas y primer plano
+
+Referencia visual: tableros «08 · Primer plano» y «09 · Tabla de interacciones» del lienzo de diseño, más `game/design/retrato-recepcionista-provisional.png`.
+
+## Reparto de la pantalla
+
+**Escritorio (más de 760 px de ancho):**
+- La oficina va a la izquierda, a su altura natural (el mapa es vertical).
+- A la derecha va una columna fija de unos 420-480 px: el **panel lateral**. Al entrar muestra la recepción (saludo y menú); al tocar un personaje o una sala, su primer plano.
+- Los paneles ya no tapan la oficina: dejan de ser un diálogo modal centrado y pasan a esa columna. La oficina sigue viva al lado.
+
+**Móvil (760 px o menos):**
+- La oficina ocupa todo el ancho y se recorre con scroll vertical, sin recortar.
+- Al tocar un personaje o una sala, el primer plano sube como una hoja a pantalla completa, con «‹ Oficina» arriba para volver al mismo punto del scroll.
+- Debajo del mapa se mantiene la fila de botones de salas (`.madof-rooms`), para quien prefiera no buscar en el mapa.
+- **Cambio de norma:** hasta ahora la vista clásica era la de por defecto en móvil (CLAUDE.md, sección 4.5). Con la planta vertical, la oficina pasa a ser la vista por defecto también en móvil. La vista clásica sigue disponible con el botón de siempre y sigue siendo la de por defecto con `prefers-reduced-motion`. Actualiza esa línea de CLAUDE.md.
+
+## Primer plano del personaje
+
+Al tocar un personaje (o su sala):
+1. La cámara se acerca a su mesa (unos 300 ms) y el panel lateral, o la hoja en móvil, muestra su primer plano.
+2. **Retrato:** ilustración de su busto en su sala. El bocadillo de debajo lleva su nombre, la pastilla «IA» si es un agente y el saludo, que se escribe letra a letra (sin animación con `prefers-reduced-motion`).
+3. **Tabla:** debajo del retrato (en móvil) o a su lado (en escritorio, si cabe):
+   - una **ficha destacada** con la acción principal y un resumen de una línea;
+   - una **rejilla de casillas** de 3 columnas, cada una con su icono pixel de 12×12 y su texto;
+   - **pestañas**, solo cuando un personaje tenga más de 9 casillas.
+4. Al tocar una casilla se abre el panel que ya existe (`PANELS[...]` de `panels.js`) dentro de la misma columna u hoja, con «‹ Volver» a la tabla.
+
+Cada casilla es un `<button>` de verdad. Hay que poder recorrer todo con teclado y el foco vuelve al personaje al cerrar. El saludo va en una región `aria-live="polite"`.
+
+### Retratos
+
+- PNG de **96×72 px**, que se muestra a ×4-×6 con `image-rendering: pixelated`.
+- Ruta: `assets/game/portraits/{slug}.png`. Opcionalmente, `{slug}-hablando.png` y `{slug}-contenta.png` para animar el bocadillo.
+- Si falta el retrato, se usa el sprite del personaje ampliado sobre el color de su sala.
+- `retrato-recepcionista-provisional.png` es solo una muestra del encuadre: Jessica dibujará los definitivos.
+
+### Tabla de cada personaje
+
+Las casillas abren paneles que ya existen. No inventes datos nuevos ni endpoints.
+
+| Personaje | Saludo | Casillas (panel que abren) | Quién |
+|---|---|---|---|
+| Recepcionista | «¡Hola, {nombre}! ¿Qué necesitas hoy?» | Mi proyecto (`proyecto`), Reuniones (`reuniones`), Tareas (`tareas`), Ideas (`ideas`), Documentos (`documentos`), Facturas (`facturas`), Pedir reunión (`reunion`), Nuevo encargo (`encargo`), Escribir (`chat`) | Clientes |
+| Recepcionista (visitante) | «¡Hola! ¿En qué te ayudamos?» | Qué hacemos (`que-hacemos`), Primera reunión (`primera-reunion`), Dejar un brief (`brief`) | Visitantes |
+| Secretaria de actas | «Aquí tienes todo lo que hablamos.» | Mis reuniones (`reuniones`) | Clientes |
+| Coordinadora | «Esto es lo que tenemos en marcha.» | Cómo va mi proyecto (`proyecto`), Tareas en compromiso (`tareas`), Ideas para el futuro (`ideas`) | Clientes |
+| Liz | «Mira lo que estoy diseñando para ti.» | Encargos de diseño y vídeo (`estudio`). Para Liz: Mis encargos (`mis-tareas`) | Clientes y Liz |
+| Archivera | «Tus documentos, bien ordenados.» | Mis documentos (`documentos`) | Clientes |
+| Contable | «Facturas y presupuestos, al día.» | Mis facturas y presupuestos (`facturas`) | Clientes |
+| Analista | «Muy pronto te enseño tus campañas.» | Mis campañas · Pronto (`campanas`) | Clientes |
+| Jessica | Para Jessica: «¿Qué revisamos hoy?» · Para el cliente: «Está trabajando.» | Para Jessica: Bandeja (`bandeja`). Para el cliente: Pedir reunión (`reunion`) | Gerencia y clientes |
+
+Se respetan las reglas que ya existen:
+- `canSee()` oculta las casillas de áreas que el cliente no tiene.
+- Los visitantes solo pueden hablar con la recepcionista; los demás personajes muestran «Solo clientes».
+- El despacho de gerencia sigue siendo privado.
+
+Los saludos son editables junto a los nombres, en Ajustes → Oficina.
+
+### Agente esperando a gerencia
+
+Si Jessica toca a un agente que está en la antesala (`esperando_gerencia`), su primer plano muestra la pregunta que le trae, con los mismos botones de aprobar o responder de la bandeja. Al cliente ese agente le muestra su tabla normal.
+
+## Comprobación de la parte B
+
+- Escritorio a 1280 y 1440 px: oficina y panel lateral a la vez, sin scroll horizontal.
+- Móvil a 390 px: oficina a todo el ancho, el primer plano como hoja y «‹ Oficina» que vuelve al mismo punto.
+- Con teclado: llegar a una casilla, abrir su panel y volver.
+- Visitante, cliente, Liz y gerencia ven cada uno sus casillas y nada más.
