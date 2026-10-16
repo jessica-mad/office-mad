@@ -75,6 +75,10 @@ $status_pill = function($inv){
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
                 <button class="madof-btn is-ghost"><?php esc_html_e('Marcar como emitida en Argentina', 'mad-oficina'); ?></button>
             </form><?php endif; ?>
+            <?php echo AdminUi::form_open('billing_draft_delete', 'madof-inline'); ?>
+                <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+                <button class="madof-btn is-ghost" onclick="return confirm('<?php echo esc_js(__('¿Borrar este borrador?', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar borrador', 'mad-oficina'); ?></button>
+            </form>
         <?php endif; ?>
         <?php if ( $inv['number'] && $inv['series'] === 'F' ) : echo AdminUi::form_open('billing_rectify', 'madof-inline'); ?>
             <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
@@ -348,11 +352,18 @@ $status_pill = function($inv){
     <?php endif; ?>
     <?php if ( $for_client ) : ?><p class="madof-lead"><?php echo esc_html(sprintf(__('Facturas de %s, todos los años.', 'mad-oficina'), $for_client['name'])); ?> <a href="<?php echo esc_url($base); ?>"><?php esc_html_e('Ver todas', 'mad-oficina'); ?></a></p><?php endif; ?>
     <?php if ( $unpaid ) : ?><p class="madof-warn"><?php echo esc_html(sprintf(_n('Últimos 12 meses: %1$d factura sin cobrar (%2$s).', 'Últimos 12 meses: %1$d facturas sin cobrar (%2$s).', count($unpaid), 'mad-oficina'), count($unpaid), Money::format(array_sum(array_column($unpaid, 'total'))))); ?> <a href="<?php echo esc_url($base . '&tab=unpaid'); ?>"><?php esc_html_e('Ver cuáles', 'mad-oficina'); ?></a></p><?php endif; ?>
+    <?php $drafts_here = array_filter($list, fn($i) => $i['status'] === 'draft'); if ( $drafts_here ) : ?>
+    <?php echo str_replace('<form ', '<form id="madof-drafts-form" ', AdminUi::form_open('billing_draft_delete', 'madof-bulk')); ?>
+        <span class="madof-bulk-count"><?php echo esc_html(sprintf(_n('%d borrador en esta lista', '%d borradores en esta lista', count($drafts_here), 'mad-oficina'), count($drafts_here))); ?></span>
+        <button class="madof-btn is-small is-ghost" id="madof-drafts-del" onclick="if(!document.querySelector('.madof-draft-pick:checked')){alert('<?php echo esc_js(__('Marca los borradores que quieres borrar.', 'mad-oficina')); ?>');return false;}return confirm('<?php echo esc_js(__('¿Borrar los borradores marcados? Las facturas emitidas no se tocan.', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar los borradores marcados', 'mad-oficina'); ?></button>
+    </form>
+    <?php endif; ?>
     <table class="madof-table">
-        <thead><tr><th><?php esc_html_e('Número', 'mad-oficina'); ?></th><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Estado', 'mad-oficina'); ?></th></tr></thead>
+        <thead><tr><?php if ( $drafts_here ) echo '<th><span class="screen-reader-text">' . esc_html__('Marcar', 'mad-oficina') . '</span></th>'; ?><th><?php esc_html_e('Número', 'mad-oficina'); ?></th><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Estado', 'mad-oficina'); ?></th></tr></thead>
         <tbody>
         <?php foreach ( $list as $inv ) : ?>
             <tr>
+                <?php if ( $drafts_here ) : ?><td><?php if ( $inv['status'] === 'draft' ) : ?><input type="checkbox" class="madof-draft-pick" form="madof-drafts-form" name="ids[]" value="<?php echo (int) $inv['id']; ?>" aria-label="<?php echo esc_attr(sprintf(__('Marcar el borrador de %s', 'mad-oficina'), $inv['client_name'])); ?>"><?php endif; ?></td><?php endif; ?>
                 <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a>
                     <?php if ( ! $inv['number'] && ( $when = \MAD_Oficina\Billing\Calendar::scheduled_for($inv) ) ) echo '<br><small>' . esc_html(sprintf($inv['series'] === 'AR' ? __('te lo recuerdo el %s', 'mad-oficina') : __('se envía el %s (con tu OK)', 'mad-oficina'), date_i18n('j/m', strtotime($when)))) . '</small>'; ?></td>
                 <td><?php echo esc_html(mysql2date('j M Y', $inv['issue_date'])); ?></td>

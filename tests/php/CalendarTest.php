@@ -148,4 +148,18 @@ class CalendarTest extends MADOF_TestCase {
         Calendar::postpone($id, 7);
         $this->assertSame('scheduled', Invoices::get($id)['source']);
     }
+
+    public function test_a_deleted_calendar_draft_does_not_come_back_on_its_own(){
+        $this->cal()->run($this->ts('2026-11-25 10:00'));
+        $draft = Invoices::all(['status' => 'draft'])[0];
+        $this->assertTrue(Issuing::delete_draft($draft['id']));
+        $this->assertTrue(Calendar::dismissed($this->profile, '2026-11'));
+        delete_option(Calendar::RUN_OPTION);
+        $this->assertSame(0, $this->cal()->run($this->ts('2026-11-26 10:00'))['prepared'], 'not prepared again the next morning');
+        $this->assertSame([], Invoices::all(['status' => 'draft']));
+        // «Preparar ahora» (what the calendar button does) brings it back.
+        Calendar::dismiss($this->profile, ['2026-11'], false);
+        $this->assertGreaterThan(0, $this->cal()->prepare_one(Profiles::get($this->profile), '2026-11'));
+        $this->assertFalse(Issuing::delete_draft(999999), 'nothing to delete');
+    }
 }

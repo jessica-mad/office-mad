@@ -119,6 +119,9 @@ final class Issuing {
         global $wpdb;
         $inv = Invoices::get($id);
         if ( ! $inv || $inv['status'] !== 'draft' || $inv['number'] ) return false;
+        // A draft the calendar made would come back the next morning: it is not prepared again on its own.
+        $months = array_values(array_unique(array_filter(array_column($inv['lines'], 'item_month'))));
+        if ( $months && $inv['profile_id'] ) Calendar::dismiss((int) $inv['profile_id'], $months);
         foreach ( Approvals::for_object('invoice', $id) as $a ) {
             if ( $a['status'] === Approvals::PENDING ) Approvals::resolve($a['id'], 'reject', [], get_current_user_id());
         }

@@ -352,10 +352,15 @@ return new class($core) implements MAD_Oficina_Module {
         $this->back(['edit' => $saved], __('Borrador guardado.', 'mad-oficina'));
     }
 
+    /** One draft (editor, card, list) or several marked in the list. */
     public function handle_billing_draft_delete(){
         $this->guard('billing_draft_delete');
-        $ok = \MAD_Oficina\Billing\Issuing::delete_draft(absint($_POST['invoice_id'] ?? 0));
-        $this->back([], $ok ? __('Borrador eliminado.', 'mad-oficina') : __('Solo se pueden borrar borradores sin número.', 'mad-oficina'), $ok ? 'success' : 'error');
+        $ids = array_filter(array_map('absint', isset($_POST['ids']) ? (array) $_POST['ids'] : [$_POST['invoice_id'] ?? 0]));
+        $done = 0;
+        foreach ( $ids as $id ) if ( \MAD_Oficina\Billing\Issuing::delete_draft($id) ) $done++;
+        if ( ! $done ) $this->back([], __('No he borrado nada: solo se borran borradores (las facturas emitidas se rectifican).', 'mad-oficina'), 'error');
+        $this->back([], sprintf(_n('Borrador eliminado.', '%d borradores eliminados.', $done, 'mad-oficina'), $done)
+            . ' ' . __('Los que preparó el calendario ya no vuelven solos; si quieres rehacer uno, Calendario → «Preparar ahora».', 'mad-oficina'));
     }
 
     public function handle_billing_rectify(){
@@ -462,6 +467,7 @@ return new class($core) implements MAD_Oficina_Module {
         $profile = \MAD_Oficina\Billing\Profiles::get(absint($_POST['profile_id'] ?? 0));
         $month = \MAD_Oficina\Billing\Months::valid($_POST['month'] ?? '');
         if ( ! $profile || ! $month ) $this->back(['tab' => 'calendar'], __('No sé qué preparar.', 'mad-oficina'), 'error');
+        \MAD_Oficina\Billing\Calendar::dismiss($profile['id'], [$month], false); // she asked for it again
         $id = $this->calendar()->prepare_one($profile, $month);
         if ( is_wp_error($id) ) $this->back(['tab' => 'calendar', 'month' => $month], $id->get_error_message(), 'error');
         if ( ! $id ) $this->back(['tab' => 'calendar', 'month' => $month], __('Ese mes ya estaba todo facturado.', 'mad-oficina'));

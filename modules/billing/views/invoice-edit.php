@@ -132,7 +132,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
     <?php if ( $draft ) : ?>
     <?php echo AdminUi::form_open('billing_draft_delete', 'madof-inline'); ?>
         <input type="hidden" name="invoice_id" value="<?php echo (int) $draft['id']; ?>">
-        <button class="madof-link" onclick="return confirm('<?php echo esc_js(__('¿Borrar este borrador?', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar borrador', 'mad-oficina'); ?></button>
+        <button class="madof-btn is-small is-ghost" onclick="return confirm('<?php echo esc_js(__('¿Borrar este borrador? Si lo preparó el calendario, no vuelve solo.', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar borrador', 'mad-oficina'); ?></button>
     </form>
     <?php endif; ?>
 

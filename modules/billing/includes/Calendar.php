@@ -21,6 +21,8 @@ final class Calendar {
     const SCHEDULED = 'scheduled';
     const SKIPS_OPTION = 'madoficina_billing_skips';
     const RUN_OPTION = 'madoficina_billing_calendar_day';
+    /** Calendar drafts Jessica deleted: not prepared again on their own (only with «Preparar ahora»). */
+    const DISMISSED_OPTION = 'madoficina_billing_dismissed';
     const DEFAULT_LEAD_DAYS = 3;
     const DEFAULT_HOUR = 9;
 
@@ -57,6 +59,21 @@ final class Calendar {
     /** Billing date of a profile in a month (its day; the last day in shorter months). */
     public function date_for(array $profile, $month){
         return $this->issuing->default_issue_date($profile, $month . '-01');
+    }
+
+    public static function dismissed($profile_id, $month){
+        $d = get_option(self::DISMISSED_OPTION, []);
+        return isset($d[(int) $profile_id . '|' . $month]);
+    }
+
+    /** A calendar draft was deleted: remember it for its client and months (or forget, with $on = false). */
+    public static function dismiss($profile_id, array $months, $on = true){
+        $d = get_option(self::DISMISSED_OPTION, []);
+        foreach ( $months as $m ) {
+            if ( $on ) $d[(int) $profile_id . '|' . $m] = current_time('Y-m-d');
+            else unset($d[(int) $profile_id . '|' . $m]);
+        }
+        update_option(self::DISMISSED_OPTION, $d, false);
     }
 
     public static function skipped($item_id, $month){
@@ -130,6 +147,7 @@ final class Calendar {
             if ( $month < $from ) continue;
             foreach ( $this->month($month) as $row ) {
                 if ( ! $row['pending'] ) continue;
+                if ( self::dismissed($row['profile']['id'], $month) ) continue; // she deleted it: not again on its own
                 if ( gmdate('Y-m-d', strtotime($row['date'] . ' -' . $this->lead_days() . ' days')) > $today ) continue;
                 $r = $this->prepare_one($row['profile'], $month);
                 if ( ! is_wp_error($r) && $r ) $n++;
