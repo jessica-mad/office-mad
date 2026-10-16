@@ -30,7 +30,7 @@
 .madof-stage{background:var(--k) var(--madof-dots-dark);background-size:22px 22px;position:relative}
 .madof-stage:fullscreen{display:flex;align-items:center;justify-content:center}
 .madof-office{padding:12px}
-.madof-canvas{width:100%;aspect-ratio:48/30;max-height:78vh;display:flex;justify-content:center}
+.madof-canvas{width:100%;max-width:576px;margin:0 auto;aspect-ratio:18/28;display:flex;justify-content:center} /* vertical plan: full width on a phone, scrolled, never cropped */
 .madof-canvas canvas{border-radius:12px;image-rendering:auto!important;background:#0B0B0B} /* opaque behind the canvas: semi-transparent overlays must not show the page through */
 .madof-canvas .madof-app-loading{color:var(--y);align-self:center}
 .madof-rooms{display:flex;flex-wrap:wrap;gap:6px;padding:10px 2px 2px;justify-content:center}
@@ -113,6 +113,8 @@
   .madof-bar{padding:10px 12px;gap:10px}
   .madof-bar-actions{margin-left:0;width:100%;justify-content:space-between}
   .madof-classic{padding:12px}
+  .madof-office{padding:0}
+  .madof-canvas canvas{border-radius:0}
   .madof-reception{padding:18px}
   .madof-menu{grid-template-columns:1fr}
   .madof-cols2{grid-template-columns:1fr}

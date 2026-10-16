@@ -13,9 +13,10 @@ export async function createOffice(container, { assets, v, me, onRoom, onCharact
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: container,
-      // Rendered at 2× (camera zoom) so pixel text stays sharp; the browser scales the canvas to fit.
-      width: 48 * 16 * 2,
-      height: 30 * 16 * 2,
+      // The 18×28 plan rendered at 2× (camera zoom) so pixel text stays sharp: 576×896.
+      // On desktop it shows 1:1; on a phone the browser scales it to the full width.
+      width: 18 * 16 * 2,
+      height: 28 * 16 * 2,
       roundPixels: true,
       pixelArt: true,
       backgroundColor: '#0B0B0B',
