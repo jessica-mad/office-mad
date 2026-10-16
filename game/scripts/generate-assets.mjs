@@ -1,376 +1,340 @@
-// Generates the provisional pixel art for the office:
-//   public/tileset.png          16×16 tiles (8 columns)
-//   public/characters/{slug}.png 128×192 spritesheets (4 cols × 6 rows of 32×32)
-//   public/office.json          Tiled map (orthogonal, JSON) — editable in Tiled
+// Oficina v2 (docs/oficina-v2.md): builds the office from the pixel-agents kit in public/kit/,
+// recoloured to the MAD palette. Port of game/design/prototipo_oficina_v2.py (the source of the
+// positions). Writes:
+//   public/tileset.png            floor tiles (tinted) + the wall base tile, 16×16
+//   public/walls.png              the kit's wall sheet tinted: 16 pieces of 16×32 (index = N1|E2|S4|W8)
+//   public/props/*.png            furniture that needs its own colour (mustard counter, MAD sign)
+//   public/characters/{slug}.png  112×96 sheets (7 cols of 16 px × 3 rows of 32 px: down, up, right)
+//   public/office.json            Tiled map: floor, walls, props (objects), rooms, spots
 //
-// Spritesheet rows: 0 walk down · 1 walk left · 2 walk right · 3 walk up (4 frames each)
-//                   4 idle  (down, left, right, up) · 5 sitting (down, left, right, up)
-// Anchor point: (16, 30) — centre of the feet.
-//
-// Everything uses the MAD palette plus a few neutral shades. All characters are original.
+// A character sheet Jessica drew herself is never overwritten: only files this script wrote
+// (recorded in characters/.generated.json) or the old 128×192 format are replaced.
 import { PNG } from 'pngjs';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'public');
-
-/* ───────────────────────── palette ───────────────────────── */
-const P = {
-  y: '#FBB62F', y2: '#D99419', y3: '#FFD27A',
-  k: '#0B0B0B', k2: '#2B2B2B', k3: '#4A4A4A',
-  c: '#FDF8EA', c2: '#EFE6CC',
-  g: '#F2F2DC', g2: '#DADAB8', g3: '#C2C29C',
-  wood: '#B98149', wood2: '#8F5D2E',
-  leaf: '#6F8F3A', leaf2: '#4D6A26',
-  grey: '#9C9C94', grey2: '#76766E',
-  screen: '#24312B', screen2: '#3E5C47',
-  red: '#B5482B',
-};
-const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
-
-class Canvas {
-  constructor(w, h) { this.w = w; this.h = h; this.png = new PNG({ width: w, height: h }); this.png.data.fill(0); }
-  px(x, y, color) {
-    if (x < 0 || y < 0 || x >= this.w || y >= this.h || !color) return;
-    const [r, g, b, a] = hex(color); const i = (y * this.w + x) * 4;
-    this.png.data[i] = r; this.png.data[i + 1] = g; this.png.data[i + 2] = b; this.png.data[i + 3] = a;
-  }
-  get(x, y) { const i = (y * this.w + x) * 4; return this.png.data[i + 3]; }
-  rect(x, y, w, h, color) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) this.px(x + i, y + j, color); }
-  save(file) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, PNG.sync.write(this.png)); }
-}
-
-/* ───────────────────────── tiles ───────────────────────── */
-// Each tile draws into a 16×16 cell at (ox, oy). `collides` feeds the pathfinding grid.
-const TILES = [];
-const tile = (name, collides, draw) => TILES.push({ name, collides, draw });
-
-const dotsFloor = (c, ox, oy, base, dot) => {
-  c.rect(ox, oy, 16, 16, base);
-  for (let y = 2; y < 16; y += 6) for (let x = 2; x < 16; x += 6) c.px(ox + x + ((y / 6) % 2 ? 3 : 0), oy + y, dot);
-};
-
-tile('floor', false, (c, x, y) => { c.rect(x, y, 16, 16, P.c); c.px(x + 15, y + 15, P.c2); c.px(x, y + 15, P.c2); });
-tile('floor_green', false, (c, x, y) => { c.rect(x, y, 16, 16, P.g); for (let i = 0; i < 16; i += 4) c.px(x + i, y + 15, P.g2); });
-tile('rug_yellow', false, (c, x, y) => dotsFloor(c, x, y, P.y, P.y2));
-tile('rug_black', false, (c, x, y) => dotsFloor(c, x, y, P.k2, P.y2));
-tile('wall_top', true, (c, x, y) => { c.rect(x, y, 16, 16, P.k); c.rect(x, y + 14, 16, 2, P.k2); });
-tile('wall_face', true, (c, x, y) => { c.rect(x, y, 16, 16, P.g2); c.rect(x, y + 12, 16, 4, P.g3); c.rect(x, y, 16, 2, P.y); });
-tile('wall_window', true, (c, x, y) => {
-  c.rect(x, y, 16, 16, P.g2); c.rect(x, y, 16, 2, P.y); c.rect(x + 2, y + 3, 12, 8, P.k); c.rect(x + 3, y + 4, 10, 6, '#BFD8D2');
-  c.rect(x + 8, y + 4, 1, 6, P.k); c.px(x + 4, y + 5, P.c); c.rect(x, y + 12, 16, 4, P.g3);
-});
-tile('wall_board', true, (c, x, y) => {
-  c.rect(x, y, 16, 16, P.g2); c.rect(x, y, 16, 2, P.y); c.rect(x + 1, y + 3, 14, 9, P.k); c.rect(x + 2, y + 4, 12, 7, P.c);
-  c.rect(x + 3, y + 5, 3, 2, P.y); c.rect(x + 7, y + 5, 5, 1, P.k3); c.rect(x + 7, y + 7, 4, 1, P.k3); c.rect(x + 3, y + 8, 3, 2, P.red); c.rect(x, y + 12, 16, 4, P.g3);
-});
-tile('desk_l', true, (c, x, y) => { c.rect(x, y + 2, 16, 11, P.wood); c.rect(x, y + 2, 16, 1, P.y3); c.rect(x, y + 13, 16, 2, P.wood2); c.rect(x + 1, y + 15, 2, 1, P.k); });
-tile('desk_r', true, (c, x, y) => { c.rect(x, y + 2, 16, 11, P.wood); c.rect(x, y + 2, 16, 1, P.y3); c.rect(x, y + 13, 16, 2, P.wood2); c.rect(x + 13, y + 15, 2, 1, P.k); });
-tile('desk_pc', true, (c, x, y) => {
-  c.rect(x, y + 2, 16, 11, P.wood); c.rect(x, y + 2, 16, 1, P.y3); c.rect(x, y + 13, 16, 2, P.wood2);
-  c.rect(x + 3, y, 10, 8, P.k); c.rect(x + 4, y + 1, 8, 6, P.screen); c.rect(x + 5, y + 2, 4, 1, P.screen2); c.rect(x + 5, y + 4, 6, 1, P.screen2);
-  c.rect(x + 7, y + 8, 2, 2, P.k2); c.rect(x + 4, y + 10, 8, 2, P.k3);
-});
-tile('desk_papers', true, (c, x, y) => {
-  c.rect(x, y + 2, 16, 11, P.wood); c.rect(x, y + 2, 16, 1, P.y3); c.rect(x, y + 13, 16, 2, P.wood2);
-  c.rect(x + 2, y + 4, 6, 7, P.c); c.rect(x + 3, y + 5, 4, 1, P.k3); c.rect(x + 3, y + 7, 3, 1, P.k3); c.rect(x + 9, y + 5, 4, 5, P.y); c.px(x + 12, y + 3, P.k);
-});
-tile('chair', false, (c, x, y) => { c.rect(x + 4, y + 3, 8, 9, P.k); c.rect(x + 5, y + 4, 6, 7, P.k3); c.rect(x + 7, y + 12, 2, 2, P.k2); c.rect(x + 5, y + 14, 6, 1, P.k2); });
-tile('plant', true, (c, x, y) => {
-  c.rect(x + 4, y + 10, 8, 5, P.y2); c.rect(x + 4, y + 10, 8, 1, P.y); c.rect(x + 5, y + 15, 6, 1, P.k2);
-  const leaves = [[7, 1], [5, 3], [9, 3], [3, 5], [7, 5], [11, 5], [5, 7], [9, 7], [7, 8]];
-  for (const [lx, ly] of leaves) { c.rect(x + lx, y + ly, 3, 2, P.leaf); c.px(x + lx, y + ly + 1, P.leaf2); }
-});
-tile('shelf', true, (c, x, y) => {
-  c.rect(x + 1, y, 14, 16, P.wood2); c.rect(x + 2, y + 1, 12, 14, P.wood);
-  for (const sy of [5, 10]) c.rect(x + 2, y + sy, 12, 1, P.wood2);
-  const books = [P.y, P.k, P.c, P.red, P.g3, P.y2];
-  for (let i = 0; i < 6; i++) { c.rect(x + 3 + i * 2, y + 2, 1, 3, books[i]); c.rect(x + 3 + i * 2, y + 7, 1, 3, books[(i + 2) % 6]); c.rect(x + 3 + i * 2, y + 12, 1, 3, books[(i + 4) % 6]); }
-});
-tile('cabinet', true, (c, x, y) => {
-  c.rect(x + 2, y + 1, 12, 15, P.grey2); c.rect(x + 3, y + 2, 10, 13, P.grey);
-  for (const sy of [2, 7, 11]) { c.rect(x + 3, y + sy + 3, 10, 1, P.grey2); c.rect(x + 7, y + sy + 1, 2, 1, P.k); }
-});
-tile('boxes', true, (c, x, y) => {
-  c.rect(x + 1, y + 7, 9, 8, P.wood); c.rect(x + 1, y + 7, 9, 1, P.y3); c.rect(x + 4, y + 9, 3, 1, P.wood2);
-  c.rect(x + 7, y + 2, 8, 7, P.c2); c.rect(x + 7, y + 2, 8, 1, P.c); c.rect(x + 9, y + 4, 4, 2, P.y);
-});
-tile('table_tl', true, (c, x, y) => { c.rect(x + 2, y + 4, 14, 12, P.wood); c.rect(x + 2, y + 4, 14, 1, P.y3); c.rect(x + 2, y + 4, 1, 12, P.wood2); });
-tile('table_tr', true, (c, x, y) => { c.rect(x, y + 4, 14, 12, P.wood); c.rect(x, y + 4, 14, 1, P.y3); c.rect(x + 13, y + 4, 1, 12, P.wood2); c.rect(x + 3, y + 7, 5, 4, P.c); });
-tile('table_bl', true, (c, x, y) => { c.rect(x + 2, y, 14, 11, P.wood); c.rect(x + 2, y, 1, 11, P.wood2); c.rect(x + 2, y + 11, 14, 2, P.wood2); c.rect(x + 8, y + 3, 5, 4, P.c); });
-tile('table_br', true, (c, x, y) => { c.rect(x, y, 14, 11, P.wood); c.rect(x + 13, y, 1, 11, P.wood2); c.rect(x, y + 11, 14, 2, P.wood2); c.rect(x + 3, y + 2, 3, 3, P.y); });
-tile('counter', true, (c, x, y) => { c.rect(x, y + 3, 16, 12, P.k); c.rect(x, y + 3, 16, 3, P.y); for (let i = 1; i < 16; i += 4) c.px(x + i, y + 9, P.y2); });
-tile('sofa_l', true, (c, x, y) => { c.rect(x + 1, y + 4, 15, 10, P.y2); c.rect(x + 1, y + 4, 15, 4, P.y); c.rect(x + 1, y + 4, 3, 10, P.y2); c.rect(x + 1, y + 14, 15, 1, P.k2); });
-tile('sofa_r', true, (c, x, y) => { c.rect(x, y + 4, 15, 10, P.y2); c.rect(x, y + 4, 15, 4, P.y); c.rect(x + 12, y + 4, 3, 10, P.y2); c.rect(x, y + 14, 15, 1, P.k2); });
-tile('printer', true, (c, x, y) => { c.rect(x + 2, y + 5, 12, 9, P.c2); c.rect(x + 2, y + 5, 12, 2, P.c); c.rect(x + 4, y + 2, 8, 4, P.c); c.rect(x + 4, y + 10, 8, 1, P.k); c.px(x + 12, y + 8, P.y); });
-tile('screens', true, (c, x, y) => {
-  c.rect(x, y + 2, 16, 11, P.wood); c.rect(x, y + 13, 16, 2, P.wood2);
-  c.rect(x + 1, y, 7, 7, P.k); c.rect(x + 2, y + 1, 5, 5, P.screen); c.rect(x + 2, y + 4, 1, 2, P.y); c.rect(x + 4, y + 3, 1, 3, P.y); c.rect(x + 6, y + 2, 1, 4, P.y);
-  c.rect(x + 8, y, 7, 7, P.k); c.rect(x + 9, y + 1, 5, 5, P.screen); c.rect(x + 10, y + 2, 3, 3, P.screen2);
-});
-tile('easel', true, (c, x, y) => {
-  c.rect(x + 3, y + 1, 10, 10, P.c); c.rect(x + 3, y + 1, 10, 1, P.k); c.rect(x + 5, y + 3, 4, 4, P.y); c.rect(x + 8, y + 5, 3, 3, P.red);
-  c.px(x + 4, y + 12, P.wood2); c.px(x + 4, y + 13, P.wood2); c.px(x + 11, y + 12, P.wood2); c.px(x + 11, y + 13, P.wood2); c.rect(x + 7, y + 11, 2, 4, P.wood2);
-});
-tile('mat', false, (c, x, y) => { c.rect(x, y + 1, 16, 14, P.k2); for (let i = 1; i < 16; i += 2) c.rect(x + i, y + 2, 1, 12, P.k3); });
-tile('coffee', true, (c, x, y) => { c.rect(x + 2, y + 6, 12, 9, P.wood2); c.rect(x + 3, y + 1, 7, 7, P.k); c.rect(x + 4, y + 2, 5, 3, P.k3); c.rect(x + 10, y + 4, 3, 3, P.c); c.px(x + 11, y + 3, P.c2); });
-
-const tileIndex = Object.fromEntries(TILES.map((t, i) => [t.name, i + 1])); // Tiled gids start at 1
-
-function writeTileset() {
-  const cols = 8; const rows = Math.ceil(TILES.length / cols);
-  const c = new Canvas(cols * 16, rows * 16);
-  TILES.forEach((t, i) => t.draw(c, (i % cols) * 16, Math.floor(i / cols) * 16));
-  c.save(path.join(OUT, 'tileset.png'));
-  return { cols, rows };
-}
+const KIT = path.join(OUT, 'kit');
+const T = 16;
 
 /* ───────────────────────── map ───────────────────────── */
-const W = 48, H = 30;
-const grid = (fill = 0) => Array.from({ length: H }, () => Array(W).fill(fill));
-const floor = grid(), walls = grid(), furniture = grid();
-const set = (layer, x, y, name) => { layer[y][x] = tileIndex[name]; };
-
-// Rooms: [slug, label, x0, y0, x1, y1] (inner floor, inclusive)
-const ROOMS = [
-  ['reuniones', 'Sala de reuniones', 1, 2, 11, 10],
-  ['proyectos', 'Sala de proyectos', 13, 2, 23, 10],
-  ['estudio', 'Estudio creativo', 25, 2, 35, 10],
-  ['campanas', 'Sala de campañas', 37, 2, 46, 10],
-  ['archivo', 'Archivo', 1, 18, 11, 28],
-  ['recepcion', 'Recepción', 13, 18, 23, 28],
-  ['administracion', 'Administración', 25, 18, 35, 28],
-  ['gerencia', 'Despacho de gerencia', 37, 18, 46, 28],
+// W wall · p parquet · g open plan · c cream tiles · h corridor · d reception carpet · e doormat
+const MAP = [
+  'WWWWWWWWWWWWWWWWWW',
+  'WWWWWWWWWWWWWWWWWW',
+  'WpppppppWppppppppW',
+  'WpppppppWppppppppW',
+  'WpppppppWppppppppW',
+  'WpppppppWppppppppW',
+  'WpppppppWppppppppW',
+  'WWWppWWWWWWWppWWWW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WggggggggggggggggW',
+  'WWWWWWhhWWWWWWWWWW',
+  'WccccWhhWccccccccW',
+  'WccccWhhWccccccccW',
+  'WcccchhhWccccccccW',
+  'WccccWhhWccccccccW',
+  'WccccWhhWccccccccW',
+  'WWWWWWddWWWWddWWWW',
+  'WddddddddddddddddW',
+  'WddddddddddddddddW',
+  'WddddddddddddddddW',
+  'WddddddddddddddddW',
+  'WddddddddddddddddW',
+  'WWWWWWWWeeWWWWWWWW',
 ];
-const DOORS_X = { reuniones: 6, proyectos: 18, estudio: 30, campanas: 41, archivo: 6, recepcion: 18, administracion: 30, gerencia: 41 };
+const H = MAP.length, W = MAP[0].length;
+if (!MAP.every((r) => r.length === W)) throw new Error('MAP rows differ in length');
 
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) set(walls, x, y, 'wall_top');
-const carve = (x0, y0, x1, y1, tileName) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { walls[y][x] = 0; set(floor, x, y, tileName); } };
-// corridor
-carve(1, 12, 46, 15, 'floor_green');
-for (const [slug, , x0, y0, x1, y1] of ROOMS) {
-  carve(x0, y0, x1, y1, slug === 'gerencia' || slug === 'estudio' ? 'floor_green' : 'floor');
-  // wall face (north) one row above the floor
-  for (let x = x0; x <= x1; x++) set(walls, x, y0 - 1, (x - x0) % 4 === 2 ? 'wall_window' : 'wall_face');
-  // door to the corridor (2 tiles wide)
-  const dx = DOORS_X[slug];
-  if (y0 < 12) { carve(dx, 11, dx + 1, 11, 'floor'); }
-  else { carve(dx, 16, dx + 1, 17, 'floor'); }
-}
-// entrance in reception (south wall)
-carve(18, 29, 19, 29, 'floor');
-set(furniture, 18, 28, 'mat'); set(furniture, 19, 28, 'mat');
-// boards on some north walls
-set(walls, 3, 1, 'wall_board'); set(walls, 4, 1, 'wall_board');
-set(walls, 15, 1, 'wall_board'); set(walls, 16, 1, 'wall_board');
-set(walls, 43, 1, 'wall_board');
-
-const SPOTS = []; // {name, x, y, face}
-const spot = (name, x, y, face = 'down') => SPOTS.push({ name, x, y, face });
-const desk = (x, y, kind = 'desk_pc') => { set(furniture, x, y, 'desk_l'); set(furniture, x + 1, y, kind); };
-
-// Sala de reuniones: big table + chairs
-set(furniture, 5, 5, 'table_tl'); set(furniture, 6, 5, 'table_tr'); set(furniture, 5, 6, 'table_bl'); set(furniture, 6, 6, 'table_br');
-for (const [cx, cy] of [[5, 4], [6, 4], [5, 7], [6, 7], [4, 5], [7, 6]]) set(furniture, cx, cy, 'chair');
-desk(9, 3, 'desk_papers'); set(furniture, 10, 4, 'chair'); spot('desk_secretaria', 10, 4, 'up');
-set(furniture, 1, 2, 'plant'); set(furniture, 11, 10, 'plant');
-spot('wander_reuniones_1', 7, 8); spot('wander_reuniones_2', 3, 8);
-
-// Sala de proyectos
-desk(15, 4); set(furniture, 16, 5, 'chair'); spot('desk_coordinadora', 16, 5, 'up');
-desk(19, 4, 'desk_papers'); set(furniture, 20, 5, 'chair');
-set(furniture, 23, 2, 'plant'); set(furniture, 13, 10, 'cabinet');
-spot('wander_proyectos_1', 18, 8); spot('wander_proyectos_2', 21, 8);
-
-// Estudio creativo (Liz)
-for (let x = 27; x <= 33; x++) for (let y = 6; y <= 9; y++) set(floor, x, y, 'rug_yellow');
-desk(28, 3); set(furniture, 29, 4, 'chair'); spot('desk_liz', 29, 4, 'up');
-set(furniture, 33, 3, 'easel'); set(furniture, 25, 2, 'plant'); set(furniture, 35, 10, 'plant'); set(furniture, 25, 10, 'boxes');
-spot('wander_estudio_1', 32, 5); spot('wander_estudio_2', 30, 8);
-
-// Sala de campañas
-set(furniture, 40, 3, 'desk_l'); set(furniture, 41, 3, 'screens'); set(furniture, 42, 3, 'desk_r'); set(furniture, 41, 4, 'chair'); spot('desk_analista', 41, 4, 'up');
-set(furniture, 46, 2, 'plant'); set(furniture, 37, 10, 'cabinet');
-spot('wander_campanas_1', 39, 8); spot('wander_campanas_2', 44, 7);
-
-// Archivo
-for (let x = 1; x <= 11; x += 2) set(furniture, x, 18, 'shelf');
-set(furniture, 1, 22, 'shelf'); set(furniture, 1, 23, 'shelf'); set(furniture, 1, 24, 'shelf');
-set(furniture, 10, 26, 'boxes'); set(furniture, 11, 27, 'boxes'); set(furniture, 11, 21, 'cabinet');
-desk(5, 23, 'desk_papers'); set(furniture, 6, 24, 'chair'); spot('desk_archivera', 6, 24, 'up');
-spot('wander_archivo_1', 8, 20); spot('wander_archivo_2', 3, 27);
-
-// Recepción
-for (let x = 14; x <= 22; x++) for (let y = 24; y <= 27; y++) set(floor, x, y, 'rug_black');
-for (let x = 16; x <= 20; x++) set(furniture, x, 21, 'counter');
-set(furniture, 18, 20, 'chair'); spot('desk_recepcionista', 18, 20, 'down');
-set(furniture, 13, 25, 'sofa_l'); set(furniture, 14, 25, 'sofa_r');
-set(furniture, 13, 18, 'plant'); set(furniture, 23, 18, 'plant'); set(furniture, 23, 27, 'plant'); set(furniture, 22, 18, 'coffee');
-spot('wander_recepcion_1', 15, 22); spot('wander_recepcion_2', 21, 23); spot('entrance', 18, 27, 'up');
-
-// Administración
-desk(28, 22, 'desk_papers'); set(furniture, 29, 23, 'chair'); spot('desk_contable', 29, 23, 'up');
-set(furniture, 25, 18, 'cabinet'); set(furniture, 26, 18, 'cabinet'); set(furniture, 35, 18, 'printer'); set(furniture, 35, 28, 'plant');
-spot('wander_administracion_1', 32, 26); spot('wander_administracion_2', 27, 27);
-
-// Despacho de gerencia (Jessica)
-for (let x = 39; x <= 45; x++) for (let y = 21; y <= 25; y++) set(floor, x, y, 'rug_yellow');
-desk(41, 21); set(furniture, 42, 20, 'chair'); spot('desk_jessica', 42, 20, 'down');
-set(furniture, 37, 18, 'plant'); set(furniture, 46, 18, 'shelf'); set(furniture, 45, 27, 'sofa_l'); set(furniture, 46, 27, 'sofa_r');
-spot('gerencia_wait_1', 40, 24, 'up'); spot('gerencia_wait_2', 42, 24, 'up'); spot('gerencia_wait_3', 44, 24, 'up');
-
-// corridor wander points (coffee chats)
-for (const [px, py] of [[1, 12], [46, 12], [16, 15], [33, 15]]) set(furniture, px, py, 'plant');
-set(furniture, 24, 12, 'coffee');
-spot('wander_pasillo_1', 10, 13); spot('wander_pasillo_2', 24, 14); spot('wander_pasillo_3', 36, 13);
-
-function writeMap({ cols, rows }) {
-  const layer = (id, name, data) => ({ id, name, type: 'tilelayer', width: W, height: H, x: 0, y: 0, opacity: 1, visible: true, data: data.flat() });
-  const objects = [];
-  let oid = 1;
-  for (const [slug, label, x0, y0, x1, y1] of ROOMS) {
-    objects.push({ id: oid++, name: slug, type: 'room', x: x0 * 16, y: (y0 - 1) * 16, width: (x1 - x0 + 1) * 16, height: (y1 - y0 + 2) * 16, rotation: 0, visible: true,
-      properties: [{ name: 'label', type: 'string', value: label }] });
+/* ───────────────────────── png helpers ───────────────────────── */
+const read = (file) => PNG.sync.read(fs.readFileSync(file)); // always RGBA
+const blank = (w, h) => { const p = new PNG({ width: w, height: h }); p.data.fill(0); return p; };
+const save = (png, file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, PNG.sync.write(png)); };
+const hexc = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const each = (png, fn) => { for (let i = 0; i < png.data.length; i += 4) if (png.data[i + 3]) fn(png.data, i); return png; };
+const copy = (src, sx, sy, w, h, dst, dx, dy) => {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const s = ((sy + y) * src.width + sx + x) * 4, d = ((dy + y) * dst.width + dx + x) * 4;
+    for (let k = 0; k < 4; k++) dst.data[d + k] = src.data[s + k];
   }
-  const spots = SPOTS.map((s) => ({ id: oid++, name: s.name, type: 'spot', point: true, x: s.x * 16 + 8, y: s.y * 16 + 8, width: 0, height: 0, rotation: 0, visible: true,
-    properties: [{ name: 'face', type: 'string', value: s.face }] }));
+};
+const blend = (png, x, y, [r, g, b], a) => {
+  const i = (y * png.width + x) * 4, k = a / 255;
+  png.data[i] = Math.trunc(r * k + png.data[i] * (1 - k));
+  png.data[i + 1] = Math.trunc(g * k + png.data[i + 1] * (1 - k));
+  png.data[i + 2] = Math.trunc(b * k + png.data[i + 2] * (1 - k));
+};
 
+/** Colorize: grey luminance → gradient between two colours (keeps alpha). */
+const tint = (png, dark, light) => {
+  const d = hexc(dark), l = hexc(light);
+  return each(png, (px, i) => {
+    const v = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
+    for (let k = 0; k < 3; k++) px[i + k] = Math.trunc(d[k] + (l[k] - d[k]) * v);
+  });
+};
+
+// colorsys (Python) HLS, so the clothes shift exactly as in the prototype.
+const rgbToHls = (r, g, b) => {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, l, 0];
+  const s = l <= 0.5 ? (mx - mn) / (mx + mn) : (mx - mn) / (2 - mx - mn);
+  const rc = (mx - r) / (mx - mn), gc = (mx - g) / (mx - mn), bc = (mx - b) / (mx - mn);
+  let h = r === mx ? bc - gc : g === mx ? 2 + rc - bc : 4 + gc - rc;
+  h = ((h / 6) % 1 + 1) % 1;
+  return [h, l, s];
+};
+const v_ = (m1, m2, h) => {
+  h = ((h % 1) + 1) % 1;
+  if (h < 1 / 6) return m1 + (m2 - m1) * h * 6;
+  if (h < 0.5) return m2;
+  if (h < 2 / 3) return m1 + (m2 - m1) * (2 / 3 - h) * 6;
+  return m1;
+};
+const hlsToRgb = (h, l, s) => {
+  if (!s) return [l, l, l];
+  const m2 = l <= 0.5 ? l * (1 + s) : l + s - l * s, m1 = 2 * l - m2;
+  return [v_(m1, m2, h + 1 / 3), v_(m1, m2, h), v_(m1, m2, h - 1 / 3)];
+};
+/** Shifts the hue of the clothes only: greys, skin and brown hair (reds/oranges) stay. */
+const hue = (png, deg) => each(png, (px, i) => {
+  const [h, l, s] = rgbToHls(px[i] / 255, px[i + 1] / 255, px[i + 2] / 255);
+  if (s < 0.15 || h < 0.14 || h > 0.95) return;
+  const rgb = hlsToRgb((h + deg / 360) % 1, l, s);
+  for (let k = 0; k < 3; k++) px[i + k] = Math.trunc(rgb[k] * 255);
+});
+
+/* ───────────────────────── tiles ───────────────────────── */
+const floor = (i) => read(path.join(KIT, 'floors', `floor_${i}.png`));
+const FLOORS = {
+  p: tint(floor(6), '#7A4E26', '#D9A867'),
+  c: tint(floor(4), '#CFC6A8', '#FBF5E4'),
+  g: tint(floor(3), '#B9B993', '#F2F2DC'),
+  h: tint(floor(1), '#C9B98F', '#EFE3C4'),
+  d: tint(floor(0), '#151515', '#2B2B2B'),
+  e: tint(floor(0), '#D99419', '#FBB62F'),
+};
+// MAD dots on the reception carpet.
+for (const [x, y] of [[3, 3], [11, 3], [7, 11], [15, 11]]) blend(FLOORS.d, x, y, [251, 182, 47], 150);
+const TILE_ORDER = ['p', 'c', 'g', 'h', 'd', 'e', 'W'];
+const TILE_NAMES = { p: 'parquet', c: 'baldosa', g: 'planta', h: 'pasillo', d: 'moqueta', e: 'felpudo', W: 'muro' };
+const gid = (ch) => TILE_ORDER.indexOf(ch) + 1;
+
+function writeTileset() {
+  const out = blank(TILE_ORDER.length * T, T);
+  TILE_ORDER.forEach((ch, i) => {
+    if (ch === 'W') { for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) { const d = (y * out.width + i * T + x) * 4; out.data.set([11, 11, 11, 255], d); } }
+    else copy(FLOORS[ch], 0, 0, T, T, out, i * T, 0);
+  });
+  save(out, path.join(OUT, 'tileset.png'));
+  save(tint(read(path.join(KIT, 'walls', 'wall_0.png')), '#1C1C1C', '#E8E2C8'), path.join(OUT, 'walls.png'));
+}
+
+/* ───────────────────────── furniture ───────────────────────── */
+// From the kit manifests: footprint in tiles, rows at the back you can stand on (bg),
+// whether it stands on the floor and blocks the way (solid).
+const F = {
+  LARGE_PAINTING: ['LARGE_PAINTING/LARGE_PAINTING', 2, 2, 0, false],
+  SMALL_PAINTING: ['SMALL_PAINTING/SMALL_PAINTING', 1, 2, 0, false],
+  SMALL_PAINTING_2: ['SMALL_PAINTING_2/SMALL_PAINTING_2', 1, 2, 0, false],
+  CLOCK: ['CLOCK/CLOCK', 1, 2, 0, false],
+  HANGING_PLANT: ['HANGING_PLANT/HANGING_PLANT', 1, 2, 0, false],
+  WHITEBOARD: ['WHITEBOARD/WHITEBOARD', 2, 2, 0, false],
+  DOUBLE_BOOKSHELF: ['DOUBLE_BOOKSHELF/DOUBLE_BOOKSHELF', 2, 2, 0, false],
+  DESK_FRONT: ['DESK/DESK_FRONT', 3, 2, 1, true],
+  TABLE_FRONT: ['TABLE_FRONT/TABLE_FRONT', 3, 4, 1, true],
+  SMALL_TABLE_FRONT: ['SMALL_TABLE/SMALL_TABLE_FRONT', 2, 2, 1, true],
+  PC_SIDE: ['PC/PC_SIDE', 1, 2, 1, false],
+  PC_FRONT_ON_1: ['PC/PC_FRONT_ON_1', 1, 2, 1, false],
+  COFFEE: ['COFFEE/COFFEE', 1, 1, 0, false],
+  PLANT: ['PLANT/PLANT', 1, 2, 1, true],
+  PLANT_2: ['PLANT_2/PLANT_2', 1, 2, 1, true],
+  CACTUS: ['CACTUS/CACTUS', 1, 2, 1, true],
+  BIN: ['BIN/BIN', 1, 1, 0, true],
+  SOFA_FRONT: ['SOFA/SOFA_FRONT', 2, 1, 0, true],
+  SOFA_SIDE: ['SOFA/SOFA_SIDE', 1, 2, 0, true],
+  WOODEN_BENCH: ['WOODEN_BENCH/WOODEN_BENCH', 1, 1, 0, true],
+  CUSHIONED_CHAIR_SIDE: ['CUSHIONED_CHAIR/CUSHIONED_CHAIR_SIDE', 1, 1, 0, true],
+  WOODEN_CHAIR_SIDE: ['WOODEN_CHAIR/WOODEN_CHAIR_SIDE', 1, 2, 1, true],
+};
+const PC_FRAMES = ['kit/furniture/PC/PC_FRONT_ON_1.png', 'kit/furniture/PC/PC_FRONT_ON_2.png', 'kit/furniture/PC/PC_FRONT_ON_3.png'];
+
+const PROPS = []; // { id, image, col, row, w, h, fw, fh, bg, solid, flip, depth, frames }
+const put = (id, col, row, o = {}) => {
+  const [file, fw, fh, bg, solid] = F[id];
+  const image = o.image || `kit/furniture/${file}.png`;
+  const png = read(path.join(OUT, image));
+  PROPS.push({ id, image, col, row, w: png.width, h: png.height, fw, fh, bg, solid, flip: !!o.flip, depth: o.z ?? (row + fh) * T, frames: o.frames || null });
+};
+const ON_DESK = (row) => (row + 2) * T + 1; // things on a desk are drawn over it
+
+function writeProps() {
+  // Reception counter: two desks in mustard.
+  save(tint(read(path.join(KIT, 'furniture', 'DESK', 'DESK_FRONT.png')), '#7A5410', '#FFD27A'), path.join(OUT, 'props', 'DESK_FRONT_mostaza.png'));
+  // MAD sign over the reception wall (same geometry as the prototype, until the real logo).
+  const sign = blank(61, 23);
+  const fill = (x0, y0, x1, y1, c) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) sign.data.set([...c, 255], (y * sign.width + x) * 4); };
+  fill(0, 0, 60, 22, [11, 11, 11]); fill(1, 1, 59, 21, [251, 182, 47]);
+  for (const x0 of [10, 24, 38]) fill(x0, 5, x0 + 8, 17, [11, 11, 11]);
+  save(sign, path.join(OUT, 'props', 'MAD_SIGN.png'));
+}
+
+function furnish() {
+  const mustard = { image: 'props/DESK_FRONT_mostaza.png' };
+  // Estudio (Liz)
+  put('LARGE_PAINTING', 2, 0); put('CLOCK', 5, 0); put('HANGING_PLANT', 7, 0);
+  put('DESK_FRONT', 2, 4); put('PC_SIDE', 2, 4, { z: ON_DESK(4) });
+  put('PLANT', 6, 5); put('CACTUS', 1, 6);
+  // Gerencia (Jessica)
+  put('LARGE_PAINTING', 10, 0); put('SMALL_PAINTING_2', 14, 0); put('HANGING_PLANT', 16, 0);
+  put('DESK_FRONT', 11, 4); put('PC_SIDE', 13, 4, { z: ON_DESK(4), flip: true }); put('COFFEE', 11, 4, { z: ON_DESK(4) });
+  put('SOFA_FRONT', 14, 6); put('PLANT_2', 9, 5);
+  // Planta abierta + antesala/café. The bench is one tile to the right of the prototype
+  // (x13-16) so the door of gerencia (x12-13) stays free; the plant goes down to make room.
+  put('WHITEBOARD', 5, 6); put('CLOCK', 9, 6);
+  put('DESK_FRONT', 1, 10); put('PC_SIDE', 1, 10, { z: ON_DESK(10) });
+  put('DESK_FRONT', 5, 10); put('PC_FRONT_ON_1', 7, 10, { z: ON_DESK(10), frames: PC_FRAMES });
+  put('DESK_FRONT', 9, 10); put('PC_SIDE', 11, 10, { z: ON_DESK(10), flip: true });
+  for (const x of [13, 14, 15, 16]) put('WOODEN_BENCH', x, 8);
+  put('SMALL_TABLE_FRONT', 13, 12); put('COFFEE', 13, 12, { z: (14) * T + 1 }); put('COFFEE', 14, 12, { z: (14) * T + 1 });
+  put('CUSHIONED_CHAIR_SIDE', 12, 13); put('CUSHIONED_CHAIR_SIDE', 15, 13, { flip: true });
+  put('PLANT', 16, 11); put('PLANT_2', 1, 13); put('BIN', 4, 14);
+  // Archivo
+  put('DOUBLE_BOOKSHELF', 1, 14); put('DOUBLE_BOOKSHELF', 3, 14);
+  put('DESK_FRONT', 1, 18); put('BIN', 4, 20);
+  // Pasillo
+  put('PLANT', 7, 16);
+  // Reuniones
+  put('LARGE_PAINTING', 11, 14); put('HANGING_PLANT', 16, 14);
+  put('TABLE_FRONT', 11, 16);
+  for (const r of [17, 18]) { put('WOODEN_CHAIR_SIDE', 10, r); put('WOODEN_CHAIR_SIDE', 14, r, { flip: true }); }
+  put('PLANT_2', 9, 19);
+  // Recepción
+  put('CLOCK', 3, 20); put('SMALL_PAINTING', 15, 20);
+  put('DESK_FRONT', 6, 23, mustard); put('DESK_FRONT', 9, 23, mustard);
+  put('SOFA_SIDE', 1, 24); put('SOFA_SIDE', 16, 24, { flip: true });
+  put('PLANT', 1, 22); put('PLANT_2', 16, 22);
+  // The sign is drawn over everything around it, as in the prototype.
+  PROPS.push({ id: 'MAD_SIGN', image: 'props/MAD_SIGN.png', col: 8, row: 20, w: 61, h: 23, fw: 4, fh: 2, bg: 0, solid: false, flip: false, depth: 22 * T, frames: null, px: 8 * T + 2, py: 20 * T + 4 });
+}
+
+/* ───────────────────────── rooms & spots ───────────────────────── */
+// Open-plan rooms are zones without walls: only their rectangles (clicks, labels, visitor veil).
+const ROOMS = [
+  ['estudio', 'Estudio creativo', 1, 0, 7, 7],
+  ['gerencia', 'Despacho de gerencia', 9, 0, 8, 7],
+  ['proyectos', 'Sala de proyectos', 1, 8, 4, 7],
+  ['campanas', 'Sala de campañas', 5, 8, 4, 7],
+  ['administracion', 'Administración', 9, 8, 3, 7],
+  ['archivo', 'Archivo', 1, 15, 4, 6],
+  ['reuniones', 'Sala de reuniones', 9, 15, 8, 6],
+  ['recepcion', 'Recepción', 1, 21, 16, 6],
+];
+const SPOTS = [
+  ['desk_liz', 3, 4, 'down'], ['desk_jessica', 12, 4, 'down'],
+  ['desk_coordinadora', 2, 10, 'down'], ['desk_analista', 6, 10, 'down'], ['desk_contable', 10, 10, 'down'],
+  ['desk_archivera', 2, 18, 'down'], ['desk_secretaria', 15, 18, 'left'], ['desk_recepcionista', 8, 23, 'down'],
+  ['gerencia_wait_1', 13, 9, 'up'], ['gerencia_wait_2', 14, 9, 'up'], ['gerencia_wait_3', 15, 9, 'up'], ['gerencia_wait_4', 16, 9, 'up'],
+  ['entrance', 8, 26, 'up'],
+  // Two free floor tiles per room, never in the row right above a wall (hidden by it in 3/4 view).
+  ['wander_estudio_1', 5, 3, 'down'], ['wander_estudio_2', 1, 5, 'right'],
+  ['wander_gerencia_1', 10, 3, 'down'], ['wander_gerencia_2', 15, 3, 'down'],
+  ['wander_proyectos_1', 2, 8, 'down'], ['wander_proyectos_2', 3, 13, 'down'],
+  ['wander_campanas_1', 8, 8, 'down'], ['wander_campanas_2', 6, 13, 'down'],
+  ['wander_administracion_1', 11, 8, 'down'], ['wander_administracion_2', 10, 13, 'down'],
+  ['wander_archivo_1', 3, 16, 'down'], ['wander_archivo_2', 4, 17, 'left'],
+  ['wander_reuniones_1', 16, 16, 'down'], ['wander_reuniones_2', 9, 17, 'right'],
+  ['wander_recepcion_1', 4, 25, 'down'], ['wander_recepcion_2', 13, 25, 'down'],
+  ['wander_pasillo_1', 6, 17, 'down'], ['wander_pasillo_2', 6, 19, 'up'],
+];
+
+function writeMap() {
+  const floorData = [], wallData = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ch = MAP[y][x];
+    floorData.push(ch === 'W' ? 0 : gid(ch));
+    wallData.push(ch === 'W' ? gid('W') : 0);
+  }
+  // Every spot must be on free floor: the scene walks there.
+  const solid = new Set();
+  for (const p of PROPS) if (p.solid) for (let y = p.row + p.bg; y < p.row + p.fh; y++) for (let x = p.col; x < p.col + p.fw; x++) solid.add(`${x},${y}`);
+  for (const [name, x, y] of SPOTS) if (MAP[y][x] === 'W' || solid.has(`${x},${y}`)) throw new Error(`spot ${name} (${x},${y}) is not free`);
+
+  let oid = 1;
+  const prop = (k, v) => ({ name: k, type: typeof v === 'boolean' ? 'bool' : typeof v === 'number' ? 'int' : 'string', value: v });
+  const tileLayer = (id, name, data) => ({ id, name, type: 'tilelayer', width: W, height: H, x: 0, y: 0, opacity: 1, visible: true, data });
+  const props = PROPS.map((p) => {
+    const bottom = (p.row + p.fh) * T;
+    return {
+      id: oid++, name: p.id, type: 'prop', x: p.px ?? p.col * T, y: p.py ?? bottom - p.h, width: p.w, height: p.h, rotation: 0, visible: true,
+      properties: [prop('image', p.image), prop('col', p.col), prop('row', p.row), prop('fw', p.fw), prop('fh', p.fh), prop('bg', p.bg),
+        prop('solid', p.solid), prop('flip', p.flip), prop('depth', p.depth), ...(p.frames ? [prop('frames', p.frames.join(','))] : [])],
+    };
+  });
+  const rooms = ROOMS.map(([slug, label, x, y, w, h]) => ({ id: oid++, name: slug, type: 'room', x: x * T, y: y * T, width: w * T, height: h * T, rotation: 0, visible: true, properties: [prop('label', label)] }));
+  const spots = SPOTS.map(([name, x, y, face]) => ({ id: oid++, name, type: 'spot', point: true, x: x * T + T / 2, y: y * T + T / 2, width: 0, height: 0, rotation: 0, visible: true, properties: [prop('face', face)] }));
   const map = {
     type: 'map', version: '1.10', tiledversion: '1.11.0', orientation: 'orthogonal', renderorder: 'right-down',
-    width: W, height: H, tilewidth: 16, tileheight: 16, infinite: false, nextlayerid: 6, nextobjectid: oid,
+    width: W, height: H, tilewidth: T, tileheight: T, infinite: false, nextlayerid: 6, nextobjectid: oid,
     layers: [
-      layer(1, 'floor', floor), layer(2, 'walls', walls), layer(3, 'furniture', furniture),
-      { id: 4, name: 'rooms', type: 'objectgroup', draworder: 'topdown', opacity: 1, visible: true, x: 0, y: 0, objects },
+      tileLayer(1, 'floor', floorData), tileLayer(2, 'walls', wallData),
+      { id: 3, name: 'props', type: 'objectgroup', draworder: 'index', opacity: 1, visible: true, x: 0, y: 0, objects: props },
+      { id: 4, name: 'rooms', type: 'objectgroup', draworder: 'topdown', opacity: 1, visible: true, x: 0, y: 0, objects: rooms },
       { id: 5, name: 'spots', type: 'objectgroup', draworder: 'topdown', opacity: 1, visible: true, x: 0, y: 0, objects: spots },
     ],
     tilesets: [{
-      firstgid: 1, name: 'mad-office', image: 'tileset.png', imagewidth: cols * 16, imageheight: rows * 16,
-      tilewidth: 16, tileheight: 16, tilecount: TILES.length, columns: cols, margin: 0, spacing: 0,
-      tiles: TILES.map((t, i) => ({ id: i, properties: [{ name: 'name', type: 'string', value: t.name }, { name: 'collides', type: 'bool', value: t.collides }] })),
+      firstgid: 1, name: 'mad-office', image: 'tileset.png', imagewidth: TILE_ORDER.length * T, imageheight: T,
+      tilewidth: T, tileheight: T, tilecount: TILE_ORDER.length, columns: TILE_ORDER.length, margin: 0, spacing: 0,
+      tiles: TILE_ORDER.map((ch, i) => ({ id: i, properties: [prop('name', TILE_NAMES[ch]), prop('collides', ch === 'W')] })),
     }],
   };
   fs.writeFileSync(path.join(OUT, 'office.json'), JSON.stringify(map));
 }
 
 /* ───────────────────────── characters ───────────────────────── */
+// Provisional cast from the kit until Jessica draws hers on the same template.
 const CAST = {
-  recepcionista: { skin: '#F1C9A5', hair: P.k, hairStyle: 'bob', shirt: P.y, shirt2: P.y2, pants: P.k2, extra: 'headset' },
-  secretaria: { skin: '#D9A47A', hair: '#8E3B1F', hairStyle: 'bun', shirt: P.g2, shirt2: P.g3, pants: P.wood2, extra: 'glasses' },
-  coordinadora: { skin: '#F1C9A5', hair: '#E3B95C', hairStyle: 'ponytail', shirt: P.k2, shirt2: P.k, pants: P.k3, extra: 'headband' },
-  liz: { skin: '#E8B98F', hair: '#4A2C1A', hairStyle: 'long', shirt: P.c, shirt2: P.c2, pants: P.k2, extra: 'beret' },
-  archivera: { skin: '#C98E66', hair: P.grey, hairStyle: 'bun', shirt: P.wood, shirt2: P.wood2, pants: P.k3, extra: 'glasses' },
-  contable: { skin: '#A66E4A', hair: P.k, hairStyle: 'short', shirt: P.c, shirt2: P.y2, pants: P.k2, extra: 'vest' },
-  analista: { skin: '#F1C9A5', hair: '#8E3B1F', hairStyle: 'short', shirt: P.leaf, shirt2: P.leaf2, pants: P.k2, extra: 'headphones' },
-  jessica: { skin: '#E8B98F', hair: '#2B1A10', hairStyle: 'long', shirt: P.k, shirt2: P.y, pants: P.k, extra: 'blazer' },
+  liz: [1, 0], jessica: [2, 0], coordinadora: [0, 0], analista: [4, 0], contable: [5, 0],
+  archivera: [3, 120], secretaria: [1, 210], recepcionista: [5, 170],
 };
 
-// Draws one 32×32 frame. dir: down|left|right|up · pose: walk0..3 | idle | sit
-function drawCharacter(c, ox, oy, s, dir, pose) {
-  const flip = dir === 'left'; // side views are drawn facing right
-  const side = dir === 'left' || dir === 'right';
-  const P_ = (x, y, col) => c.px(ox + (flip ? 31 - x : x), oy + y, col);
-  const R = (x, y, w, h, col) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) P_(x + i, y + j, col); };
-  const walkPhase = pose.startsWith('walk') ? Number(pose.slice(4)) : -1;
-  const bob = walkPhase === 1 || walkPhase === 3 ? 1 : 0;
-  const sit = pose === 'sit';
-  const dy = (sit ? 3 : 0) + bob;
-
-  // legs
-  if (!sit) {
-    if (!side) {
-      const lOff = walkPhase === 1 ? -1 : walkPhase === 3 ? 1 : 0;
-      R(12, 25, 3, 4 + Math.max(0, lOff), s.pants); R(17, 25, 3, 4 + Math.max(0, -lOff), s.pants);
-      R(12, 29 + Math.max(0, lOff), 3, 1, P.k); R(17, 29 + Math.max(0, -lOff), 3, 1, P.k);
-    } else {
-      if (walkPhase === 1 || walkPhase === 3) { R(12, 25, 3, 4, s.pants); R(17, 25, 3, 4, s.pants); R(11, 29, 4, 1, P.k); R(17, 29, 4, 1, P.k); }
-      else { R(14, 25, 4, 4, s.pants); R(14, 29, 5, 1, P.k); }
-    }
-  } else if (dir === 'down') {
-    R(12, 26, 3, 2, s.pants); R(17, 26, 3, 2, s.pants); R(12, 28, 3, 1, P.k); R(17, 28, 3, 1, P.k);
-  }
-
-  // body
-  const bx = side ? 12 : 10, bw = side ? 8 : 12;
-  R(bx, 16 + dy, bw, 9 - (sit ? 1 : 0), s.shirt);
-  R(bx, 23 + dy - (sit ? 1 : 0), bw, 1, s.shirt2);
-  if (s.extra === 'vest' || s.extra === 'blazer') {
-    if (!side && dir === 'down') { R(10, 16 + dy, 3, 8, s.shirt2); R(19, 16 + dy, 3, 8, s.shirt2); }
-    else if (side) R(bx + 2, 16 + dy, 4, 8, s.shirt2);
-    else R(10, 16 + dy, 12, 2, s.shirt2);
-  }
-  // arms
-  const swing = walkPhase === 1 ? 1 : walkPhase === 3 ? -1 : 0;
-  if (!side) {
-    R(9, 17 + dy + swing, 2, 6, s.shirt); R(21, 17 + dy - swing, 2, 6, s.shirt);
-    R(9, 23 + dy + swing, 2, 1, s.skin); R(21, 23 + dy - swing, 2, 1, s.skin);
-  } else {
-    R(14 + swing, 17 + dy, 3, 6, s.shirt2); R(14 + swing, 23 + dy, 3, 1, s.skin);
-  }
-
-  // head
-  const hy = 4 + dy;
-  R(10, hy + 2, 12, 10, s.skin);
-  R(11, hy + 1, 10, 1, s.skin); R(11, hy + 12, 10, 1, s.skin);
-  // hair base (top + back)
-  R(10, hy, 12, 4, s.hair); R(9, hy + 2, 1, 6, s.hair); R(22, hy + 2, 1, 6, s.hair);
-  if (dir === 'up') { R(10, hy, 12, 12, s.hair); R(11, hy + 12, 10, 1, s.hair); }
-  if (side) { R(10, hy, 5, 11, s.hair); R(15, hy, 7, 3, s.hair); }
-  switch (s.hairStyle) {
-    case 'bob': R(9, hy + 2, 2, 9, s.hair); R(21, hy + 2, 2, 9, s.hair); break;
-    case 'long': R(9, hy + 2, 2, 14, s.hair); R(21, hy + 2, 2, 14, s.hair); if (dir === 'up' || side) R(10, hy + 10, side ? 5 : 12, 6, s.hair); break;
-    case 'bun': R(13, hy - 3, 6, 3, s.hair); break;
-    case 'ponytail': if (dir === 'up') R(14, hy + 12, 4, 5, s.hair); else if (side) R(8, hy + 4, 3, 7, s.hair); break;
-    default: break; // short
-  }
-  // face
-  if (dir === 'down') {
-    R(13, hy + 7, 1, 2, P.k); R(18, hy + 7, 1, 2, P.k);
-    P_(12, hy + 10, '#E89A8A'); P_(19, hy + 10, '#E89A8A'); R(15, hy + 10, 2, 1, P.k3);
-  } else if (side) {
-    R(19, hy + 7, 1, 2, P.k); P_(20, hy + 10, '#E89A8A'); P_(21, hy + 8, s.skin);
-  }
-  // accessories
-  if (s.extra === 'glasses' && dir !== 'up') {
-    if (dir === 'down') { R(12, hy + 6, 3, 3, P.k); R(17, hy + 6, 3, 3, P.k); R(13, hy + 7, 1, 1, '#BFD8D2'); R(18, hy + 7, 1, 1, '#BFD8D2'); R(15, hy + 7, 2, 1, P.k); }
-    else { R(18, hy + 6, 3, 3, P.k); P_(19, hy + 7, '#BFD8D2'); }
-  }
-  if (s.extra === 'headset' || s.extra === 'headphones') {
-    R(10, hy - 1, 12, 1, P.k); R(9, hy + 5, 2, 4, P.k); R(21, hy + 5, 2, 4, P.k);
-    if (s.extra === 'headset' && dir === 'down') { R(9, hy + 9, 1, 2, P.k); R(10, hy + 11, 2, 1, P.y2); }
-  }
-  if (s.extra === 'headband') R(10, hy + 2, 12, 1, P.y);
-  if (s.extra === 'beret') { R(10, hy - 2, 12, 3, P.y); R(9, hy - 1, 2, 2, P.y); R(15, hy - 3, 2, 1, P.y2); }
-}
-
-function outline(c) {
-  const add = [];
-  for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
-    if (c.get(x, y)) continue;
-    const fx = Math.floor(x / 32) * 32, fy = Math.floor(y / 32) * 32; // never bleed across frames
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < fx || ny < fy || nx >= fx + 32 || ny >= fy + 32) continue;
-      if (c.get(nx, ny)) { add.push([x, y]); break; }
-    }
-  }
-  for (const [x, y] of add) c.px(x, y, P.k);
-}
-
 function writeCharacters() {
-  const DIRS = ['down', 'left', 'right', 'up'];
-  for (const [slug, s] of Object.entries(CAST)) {
-    const c = new Canvas(128, 192);
-    DIRS.forEach((dir, row) => { for (let f = 0; f < 4; f++) drawCharacter(c, f * 32, row * 32, s, dir, 'walk' + f); });
-    DIRS.forEach((dir, col) => drawCharacter(c, col * 32, 4 * 32, s, dir, 'idle'));
-    DIRS.forEach((dir, col) => drawCharacter(c, col * 32, 5 * 32, s, dir, 'sit'));
-    outline(c);
-    c.save(path.join(OUT, 'characters', `${slug}.png`));
+  const dir = path.join(OUT, 'characters');
+  const recordFile = path.join(dir, '.generated.json');
+  const record = fs.existsSync(recordFile) ? JSON.parse(fs.readFileSync(recordFile, 'utf8')) : {};
+  const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+  const kept = [];
+  for (const [slug, [n, shift]] of Object.entries(CAST)) {
+    const file = path.join(dir, `${slug}.png`);
+    if (fs.existsSync(file)) {
+      const buf = fs.readFileSync(file);
+      const { width, height } = PNG.sync.read(buf);
+      const oldFormat = width !== 112 || height !== 96;
+      if (!oldFormat && record[slug] !== sha(buf)) { kept.push(slug); continue; } // drawn by Jessica
+    }
+    const png = read(path.join(KIT, 'characters', `char_${n}.png`));
+    if (shift) hue(png, shift);
+    const buf = PNG.sync.write(png);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, buf);
+    record[slug] = sha(buf);
   }
+  fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + '\n');
+  return kept;
 }
 
-const sheet = writeTileset();
-writeMap(sheet);
-writeCharacters();
-console.log(`tileset: ${TILES.length} tiles · map ${W}×${H} · ${Object.keys(CAST).length} characters`);
+writeTileset();
+writeProps();
+furnish();
+writeMap();
+const kept = writeCharacters();
+console.log(`map ${W}×${H} · ${PROPS.length} props · ${Object.keys(CAST).length} characters${kept.length ? ' (kept: ' + kept.join(', ') + ')' : ''}`);
