@@ -28,24 +28,49 @@ final class Assistant {
         return (string) apply_filters('madoficina_chat_assistant_model', 'claude-opus-5-5');
     }
 
+    const STATUS = 'madoficina_chat_assistant_status';
+
+    /** The server's way to answer Google first and keep working (PHP-FPM, LiteSpeed), or null. */
+    public static function finisher(){
+        foreach ( ['fastcgi_finish_request', 'litespeed_finish_request'] as $fn ) if ( function_exists($fn) ) return $fn;
+        return null;
+    }
+
     /**
-     * Runs after answering Google (Chat waits 30 s at most): on PHP-FPM right after the
-     * response, otherwise in the background queue.
+     * Chat waits 30 s at most. Where the server can answer Google first (PHP-FPM,
+     * LiteSpeed), the work runs right after; elsewhere it runs within the request.
+     * Either way the reply goes as a new message, never through a queue that may not run.
      */
     public static function defer($email, $text, ?array $voice){
         $args = [(string) $email, (string) $text, $voice ?: []];
-        $mode = apply_filters('madoficina_chat_assistant_mode', function_exists('fastcgi_finish_request') ? 'shutdown' : 'queue');
-        if ( $mode === 'inline' ) { do_action(self::HOOK, ...$args); return; }
-        if ( $mode === 'shutdown' ) {
-            register_shutdown_function(function() use ($args){
-                if ( function_exists('fastcgi_finish_request') ) fastcgi_finish_request();
-                ignore_user_abort(true);
+        self::status('received', $voice ? 'voice' : 'text');
+        $finish = self::finisher();
+        $mode = apply_filters('madoficina_chat_assistant_mode', $finish ? 'shutdown' : 'inline');
+        $work = function() use ($args){
+            ignore_user_abort(true);
+            if ( function_exists('set_time_limit') ) @set_time_limit(180);
+            try {
                 do_action(self::HOOK, ...$args);
+            } catch ( \Throwable $e ) {
+                self::status('error', $e->getMessage());
+            }
+        };
+        if ( $mode === 'shutdown' ) {
+            register_shutdown_function(function() use ($work, $finish){
+                if ( $finish ) $finish();
+                $work();
             });
             return;
         }
-        if ( function_exists('as_enqueue_async_action') ) as_enqueue_async_action(self::HOOK, $args, 'mad-oficina');
-        else { wp_schedule_single_event(time(), self::HOOK, $args); spawn_cron(); }
+        $work();
+    }
+
+    /** What happened with the last message (for Chat → ajustes). */
+    public static function status($what, $detail = ''){
+        $s = get_option(self::STATUS, []);
+        $s = is_array($s) ? $s : [];
+        $s[$what] = ['at' => time(), 'detail' => mb_substr(sanitize_text_field((string) $detail), 0, 300)];
+        update_option(self::STATUS, $s, false);
     }
 
     /* ───────── the work ───────── */
@@ -114,8 +139,10 @@ final class Assistant {
     }
 
     private function reply(?array $member, array $message){
+        unset($message['fallback']);
         $r = $member ? $this->messenger->to_team_member($member, $message) : $this->messenger->to_manager($message);
-        if ( is_wp_error($r) ) $this->log('reply_error', ['error' => $r->get_error_message()]);
+        if ( is_wp_error($r) ) { $this->log('reply_error', ['error' => $r->get_error_message()]); self::status('error', $r->get_error_message()); }
+        else self::status('answered');
         return is_wp_error($r) ? $r : $message;
     }
 

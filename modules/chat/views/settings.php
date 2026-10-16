@@ -77,6 +77,16 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
             __('Para los audios: si Google no le pasa al bot su propia transcripción, el bot transcribe el audio con Speech-to-Text (hasta 1 minuto). Para eso, en Google Cloud (proyecto %1$s): activa «Cloud Speech-to-Text API» y, en IAM, da a %2$s el rol «Cloud Speech Client». Cuesta unos céntimos al mes.', 'mad-oficina'),
             $sa ? ($sa->project_id() ?: '—') : '—', $sa ? $sa->email() : __('la cuenta de servicio del bot', 'mad-oficina')
         )); ?></p>
+        <?php
+        $ast = get_option(\MAD_Oficina\Chat\Assistant::STATUS, []);
+        $ago = fn($k) => ! empty($ast[$k]['at']) ? sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $ast[$k]['at'])) : __('nunca', 'mad-oficina');
+        if ( $ast ) : ?>
+            <p><?php echo esc_html(sprintf(__('Último mensaje que entendí: recibido %1$s · contestado %2$s.', 'mad-oficina'), $ago('received'), $ago('answered'))); ?>
+            <?php if ( ! empty($ast['error']) && (int) $ast['error']['at'] >= (int) ($ast['answered']['at'] ?? 0) ) : ?>
+                <br><span class="madof-warn"><?php echo esc_html(sprintf(__('Último error (%1$s): %2$s', 'mad-oficina'), $ago('error'), $ast['error']['detail'])); ?></span>
+            <?php endif; ?></p>
+        <?php endif; ?>
+        <p class="description"><?php echo esc_html(\MAD_Oficina\Chat\Assistant::finisher() ? __('Tu servidor contesta a Google primero y trabaja después: perfecto para audios largos.', 'mad-oficina') : __('Tu servidor trabaja mientras Google espera (máximo 30 s): si un audio tarda más, Chat puede decir que el bot no responde, pero la respuesta te llega igual unos segundos después.', 'mad-oficina')); ?></p>
         <?php $shape = get_option(\MAD_Oficina\Chat\Transcriber::SHAPE_OPTION); if ( $shape ) : ?>
             <p class="description"><?php echo esc_html(sprintf(__('Último audio recibido %s.', 'mad-oficina'), sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $shape['at'])))); ?></p>
         <?php endif; ?>

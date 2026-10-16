@@ -49,6 +49,7 @@ class ChatTest extends MADOF_TestCase {
         delete_transient('madof_chat_token_' . md5('bot@proj.iam.gserviceaccount.com'));
         delete_transient('madof_chat_token_' . md5('bot@proj.iam.gserviceaccount.com|' . \MAD_Oficina\Chat\ServiceAccount::SCOPE_CLOUD));
         delete_option(TaskList::OPTION);
+        delete_option(\MAD_Oficina\Chat\Assistant::STATUS);
         add_filter('madoficina_chat_assistant_mode', fn() => 'inline');
 
         $this->client = Clients::save(['name' => 'Lanas del Norte', 'code' => 'LN']);
@@ -305,6 +306,19 @@ class ChatTest extends MADOF_TestCase {
         $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
         $this->assertSame('open', $this->status($a));
         $this->assertSame('2026-10-20', $GLOBALS['wpdb']->get_var('SELECT due_date FROM ' . Schema::table('action_items') . " WHERE id = {$c}"));
+    }
+
+    public function test_without_php_fpm_the_answer_still_comes_in_the_same_request(){
+        $this->key();
+        remove_all_filters('madoficina_chat_assistant_mode'); // CLI: no fastcgi/litespeed finisher
+        $this->assertNull(\MAD_Oficina\Chat\Assistant::finisher());
+        $a = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Subir anuncios', 'owner' => 'jessica', 'status' => 'open']);
+        $this->claude[] = self::understood(['done' => [$a]]);
+        $this->say('ya están los anuncios');
+        $this->assertSame('done', $this->status($a), 'never left in a queue that may not run');
+        $st = get_option(\MAD_Oficina\Chat\Assistant::STATUS);
+        $this->assertArrayHasKey('received', $st);
+        $this->assertArrayHasKey('answered', $st);
     }
 
     public function test_liz_in_her_words_never_reaches_other_tasks(){
