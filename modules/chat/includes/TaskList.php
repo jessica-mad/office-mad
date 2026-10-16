@@ -67,7 +67,9 @@ final class TaskList {
 
         if ( $undo && $has ) return ['action' => 'undo', 'nums' => $target];
         if ( $has && ($done || $bare) ) return ['action' => 'done', 'nums' => $target];
-        if ( preg_match('/\b(tareas|pendientes|lista)\b/', $t) ) return ['action' => 'list', 'nums' => []];
+        // Only the bare request («tareas», «mis tareas», «¿qué tareas tengo?»); a sentence about tasks goes to the assistant.
+        $bare_list = trim(preg_replace('/[^a-z ]+/', ' ', $t));
+        if ( preg_match('/^(?:(?:dame|pasame|mandame|ensename|muestrame|ver|mis|las|que|cuales|son|tengo|hola)\s+)*(?:tareas|pendientes|lista)(?:\s+(?:abiertas|pendientes|tengo|de hoy|por favor))*$/', $bare_list) ) return ['action' => 'list', 'nums' => []];
         if ( $done ) return ['action' => 'ask', 'nums' => []];
         return ['action' => null, 'nums' => []];
     }
@@ -114,6 +116,20 @@ final class TaskList {
             $out['changed'][] = $t;
         }
         if ( $out['changed'] ) self::log('chat_task_done', $out['changed'], $email);
+        return $out;
+    }
+
+    /** Duplicates or tasks that no longer apply: cancelled, not deleted (they leave lists and the portal). */
+    public static function cancel(array $tasks, $email, $manager_email){
+        global $wpdb;
+        $out = ['changed' => [], 'already' => [], 'denied' => []];
+        foreach ( $tasks as $t ) {
+            if ( ! self::allowed($t, $email, $manager_email) ) { $out['denied'][] = $t; continue; }
+            if ( $t['status'] === 'cancelled' ) { $out['already'][] = $t; continue; }
+            $wpdb->update(Schema::table('action_items'), ['status' => 'cancelled', 'updated_at' => Time::now()], ['id' => $t['id']]);
+            $out['changed'][] = $t;
+        }
+        if ( $out['changed'] ) self::log('chat_task_cancelled', $out['changed'], $email);
         return $out;
     }
 

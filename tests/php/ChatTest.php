@@ -207,6 +207,9 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame(['action' => 'done', 'nums' => 'all'], $p('Todas hechas!'));
         $this->assertSame(['action' => 'undo', 'nums' => [3]], $p('deshacer la 3'));
         $this->assertSame('list', $p('¿qué tareas tengo?')['action']);
+        $this->assertSame('list', $p('mis tareas')['action']);
+        $this->assertNull($p('quita las tareas duplicadas de Lanas')['action'], 'a sentence about tasks goes to the assistant');
+        $this->assertNull($p('¿qué tareas tiene Liz esta semana?')['action']);
         $this->assertSame('ask', $p('ya está hecho')['action']);
         $this->assertNull($p('hola, ¿qué tal?')['action']);
         $this->assertNull($p('ok, te escribo a las 5')['action']);
@@ -336,6 +339,29 @@ class ChatTest extends MADOF_TestCase {
         $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
         $this->assertSame('open', $this->status($a));
         $this->assertSame('2026-10-20', $GLOBALS['wpdb']->get_var('SELECT due_date FROM ' . Schema::table('action_items') . " WHERE id = {$c}"));
+    }
+
+    public function test_duplicated_tasks_are_found_and_cancelled_with_undo(){
+        $this->key();
+        $keep = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Enviar fotos del catálogo', 'owner' => 'cliente', 'status' => 'open', 'due_date' => '2026-10-20', 'visibility' => 'client']);
+        $dup = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'enviar las fotos catalogo', 'owner' => 'cliente', 'status' => 'open']);
+        $other = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Revisar textos', 'owner' => 'jessica', 'status' => 'open']);
+        $this->claude = [
+            ['tool' => 'ask_proyectos', 'input' => ['question' => 'Quita las tareas duplicadas de LN']],
+            ['tool' => 'find_duplicates', 'input' => ['client' => 'LN']],
+            ['tool' => 'update_tasks', 'input' => ['cancel' => [$dup]]],
+            ['text' => "Anulada la {$dup}, duplicada de la {$keep}."],
+            ['text' => 'Listo: quité la repetida de las fotos.'],
+        ];
+        $this->say('quita las tareas duplicadas de Lanas');
+        $groups = json_decode($this->tool_result($this->prompts[2]), true)['groups'];
+        $this->assertCount(1, $groups, 'only the photos pair');
+        $this->assertEqualsCanonicalizing([$keep, $dup], array_column($groups[0], 'id'));
+        $this->assertSame(['open', 'cancelled', 'open'], [$this->status($keep), $this->status($dup), $this->status($other)]);
+
+        preg_match('/"key":"token","value":"([A-Za-z0-9,]+)"/', $this->last_to_jessica(), $m);
+        $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
+        $this->assertSame('open', $this->status($dup), '«Deshacer» brings it back');
     }
 
     public function test_finanzas_finds_the_last_invoice_with_its_pdf(){

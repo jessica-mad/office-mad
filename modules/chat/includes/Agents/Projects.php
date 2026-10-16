@@ -18,20 +18,21 @@ final class Projects extends Specialist {
     public function slug(){ return 'proyectos'; }
     public function character(){ return 'coordinadora'; }
     public function area(){ return 'Proyectos'; }
-    public function scope(){ return 'tareas (de Jessica, del equipo y de los clientes), ideas a futuro, línea de tiempo por cliente; puede marcar tareas hechas, reabrirlas, cambiar fechas y crear tareas internas'; }
+    public function scope(){ return 'tareas (de Jessica, del equipo y de los clientes), ideas a futuro, línea de tiempo por cliente; puede marcar tareas hechas, reabrirlas, anularlas (duplicadas o que ya no aplican), cambiar fechas y crear tareas internas'; }
     public static function allowed(array $ctx){ return ! empty($ctx['is_manager']) || ! empty($ctx['member']); }
     public function routing(){
         return 'Todo lo que es TAREAS (qué hay pendiente, de quién, para cuándo, qué venció), aunque la tarea saliera de una reunión; marcar hechas, reabrir, cambiar fechas, apuntar una tarea nueva; las IDEAS a futuro. '
-            . 'Ejemplos: «¿qué tengo esta semana?», «¿qué le toca a Liz?», «ya mandé el logo a LCS», «apúntame llamar a Rosa el lunes», «¿qué ideas tenemos con MOM?».';
+            . 'Ejemplos: «¿qué tengo esta semana?», «¿qué le toca a Liz?», «ya mandé el logo a LCS», «apúntame llamar a Rosa el lunes», «quita las tareas duplicadas de LCS», «¿qué ideas tenemos con MOM?».';
     }
 
     protected function tool_label($tool){
-        return ['list_tasks' => 'está repasando las tareas', 'update_tasks' => 'está actualizando las tareas', 'create_task' => 'está apuntando la tarea', 'list_ideas' => 'está mirando el banco de ideas'][$tool] ?? '';
+        return ['find_duplicates' => 'está buscando tareas repetidas', 'list_tasks' => 'está repasando las tareas', 'update_tasks' => 'está actualizando las tareas', 'create_task' => 'está apuntando la tarea', 'list_ideas' => 'está mirando el banco de ideas'][$tool] ?? '';
     }
 
     protected function instructions(){
-        return "- Cambia tareas (hecha, reabrir, fecha, crear) solo si la pregunta lo pide claramente; si hay duda entre varias, NO cambies nada y da las opciones con su id.\n"
+        return "- Cambia tareas (hecha, reabrir, anular, fecha, crear) solo si la pregunta lo pide claramente; si hay duda entre varias, NO cambies nada y da las opciones con su id.\n"
             . "- Tras cambiar algo, di exactamente qué cambiaste (id, título, nuevo estado o fecha).\n"
+            . "- Duplicadas: usa find_duplicates y revisa cada grupo; si de verdad son la misma tarea, deja la más completa (la que tenga fecha, descripción o la visible para el cliente; si empatan, la más antigua) y anula las demás con cancel. Si dos se parecen pero no son lo mismo, no las toques y dilo.\n"
             . ($this->ctx['member'] ? "- Solo trabajas con las tareas de {$this->ctx['member']['name']}.\n" : '');
     }
 
@@ -49,9 +50,12 @@ final class Projects extends Specialist {
                 'query' => ['type' => 'string', 'description' => 'Palabras del título o la descripción'],
                 'limit' => ['type' => 'integer'],
              ]), 'handler' => [$this, 'list_tasks']],
-            ['name' => 'update_tasks', 'description' => 'Marca tareas como hechas, las reabre o cambia su fecha límite. Usa ids de list_tasks.',
+            ['name' => 'find_duplicates', 'description' => 'Grupos de tareas abiertas que parecen la misma (mismo cliente y título igual o casi igual), con id, título, descripción, fecha, responsable, si el cliente la ve y de dónde salió.',
+             'input_schema' => self::obj(['client' => ['type' => 'string']]), 'handler' => [$this, 'find_duplicates']],
+            ['name' => 'update_tasks', 'description' => 'Marca tareas como hechas, las reabre, las anula (cancel: duplicadas o que ya no aplican; no se borran) o cambia su fecha límite. Usa ids de list_tasks.',
              'input_schema' => self::obj([
                 'done' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                'cancel' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'reopen' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'due' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer'], 'date' => ['type' => 'string', 'description' => 'AAAA-MM-DD']], 'required' => ['id', 'date']]],
              ]), 'handler' => [$this, 'update_tasks']],
@@ -104,24 +108,57 @@ final class Projects extends Specialist {
         $email = $this->ctx['email']; $manager = $this->ctx['manager_email'];
         $done = array_map('intval', (array) ($in['done'] ?? []));
         $reopen = array_map('intval', (array) ($in['reopen'] ?? []));
+        $cancel = array_map('intval', (array) ($in['cancel'] ?? []));
         $due = [];
         foreach ( (array) ($in['due'] ?? []) as $d ) if ( ($date = self::date_arg($d['date'] ?? '')) && abs(strtotime($date) - time()) < 2 * YEAR_IN_SECONDS ) $due[(int) ($d['id'] ?? 0)] = $date;
-        $rows = TaskList::rows(array_merge($done, $reopen, array_keys($due)));
+        $rows = TaskList::rows(array_merge($done, $reopen, $cancel, array_keys($due)));
         if ( ! $rows ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
         $token = TaskList::snapshot(array_values($rows));
         $pick = fn($ids) => array_values(array_intersect_key($rows, array_flip($ids)));
         $a = TaskList::mark($pick($done), $email, $manager);
         $b = TaskList::reopen($pick($reopen), [], $email, $manager);
         $c = TaskList::set_due(array_map(fn($id) => ['task' => $rows[$id], 'date' => $due[$id]], array_keys(array_intersect_key($due, $rows))), $email, $manager);
-        $changed = count($a['changed']) + count($b['changed']) + count($c['changed']);
+        $x = TaskList::cancel($pick($cancel), $email, $manager);
+        $changed = count($a['changed']) + count($b['changed']) + count($c['changed']) + count($x['changed']);
         if ( $changed ) $this->undo[] = $token;
         $t = fn($r) => ['id' => (int) $r['id'], 'title' => $r['title']];
         return [
             'marked_done' => array_map($t, $a['changed']), 'already_done' => array_map($t, $a['already']),
-            'reopened' => array_map($t, $b['changed']), 'new_dates' => array_map(fn($x) => $t($x['task']) + ['due' => $x['date']], $c['changed']),
-            'not_allowed' => array_map($t, array_merge($a['denied'], $b['denied'], $c['denied'])),
-            'missing_ids' => array_values(array_diff(array_merge($done, $reopen, array_keys($due)), array_keys($rows))),
+            'reopened' => array_map($t, $b['changed']), 'cancelled' => array_map($t, $x['changed']), 'new_dates' => array_map(fn($x) => $t($x['task']) + ['due' => $x['date']], $c['changed']),
+            'not_allowed' => array_map($t, array_merge($a['denied'], $b['denied'], $c['denied'], $x['denied'])),
+            'missing_ids' => array_values(array_diff(array_merge($done, $reopen, $cancel, array_keys($due)), array_keys($rows))),
         ];
+    }
+
+    /** Open tasks grouped by client and normalised title (accents, case, punctuation, small words). */
+    public function find_duplicates(array $in){
+        $list = $this->list_tasks(['client' => $in['client'] ?? '', 'status' => 'open', 'limit' => 50]);
+        if ( empty($list['tasks']) ) return ['groups' => [], 'note' => $list['note'] ?? 'No hay tareas abiertas.'];
+        global $wpdb;
+        $meta = [];
+        foreach ( $wpdb->get_results('SELECT id, client_id, source, created_at FROM ' . Schema::table('action_items') . ' WHERE id IN (' . implode(',', array_map(fn($t) => (int) $t['id'], $list['tasks'])) . ')', ARRAY_A) as $r ) $meta[(int) $r['id']] = $r;
+        $norm = function($s){
+            $s = strtolower(remove_accents((string) $s));
+            $s = preg_replace('/[^a-z0-9 ]+/', ' ', $s);
+            $words = array_diff(preg_split('/\s+/', $s, -1, PREG_SPLIT_NO_EMPTY), ['el', 'la', 'los', 'las', 'de', 'del', 'a', 'al', 'y', 'e', 'en', 'para', 'con', 'un', 'una', 'que', 'por']);
+            sort($words);
+            return implode(' ', $words);
+        };
+        $groups = [];
+        foreach ( $list['tasks'] as $t ) {
+            $m = $meta[$t['id']] ?? [];
+            $groups[($m['client_id'] ?? 0) . '|' . $norm($t['title'])][] = $t + ['source' => $m['source'] ?? null, 'created' => substr((string) ($m['created_at'] ?? ''), 0, 10)];
+        }
+        // Near matches too: one normalised title contained in another, same client.
+        $keys = array_keys($groups);
+        foreach ( $keys as $i => $k1 ) foreach ( array_slice($keys, $i + 1) as $k2 ) {
+            if ( ! isset($groups[$k1], $groups[$k2]) ) continue;
+            [$c1, $t1] = explode('|', $k1, 2); [$c2, $t2] = explode('|', $k2, 2);
+            if ( $c1 === $c2 && $t1 !== '' && $t2 !== '' && (strpos($t1, $t2) !== false || strpos($t2, $t1) !== false || similar_text($t1, $t2) / max(strlen($t1), strlen($t2)) > 0.85) ) {
+                $groups[$k1] = array_merge($groups[$k1], $groups[$k2]); unset($groups[$k2]);
+            }
+        }
+        return ['groups' => array_values(array_filter($groups, fn($g) => count($g) > 1))];
     }
 
     public function create_task(array $in){
