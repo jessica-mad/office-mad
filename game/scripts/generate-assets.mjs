@@ -6,6 +6,7 @@
 //   public/props/*.png            furniture that needs its own colour (mustard counter, MAD sign)
 //   public/characters/{slug}.png  112×96 sheets (7 cols of 16 px × 3 rows of 32 px: down, up, right)
 //   public/office.json            Tiled map: floor, walls, props (objects), rooms, spots
+//   public/portraits/{slug}.png   96×72 close-up of each character at their desk (shown ×4-×6)
 //
 // A character sheet Jessica drew herself is never overwritten: only files this script wrote
 // (recorded in characters/.generated.json) or the old 128×192 format are replaced.
@@ -332,9 +333,65 @@ function writeCharacters() {
   return kept;
 }
 
+/* ───────────────────────── portraits ───────────────────────── */
+// The close-up is the office itself: everything is composed as the scene draws it and the
+// bust of each character at their desk is cut out (48×36) and enlarged ×2 to 96×72.
+const CLOSEUP = { w: 48, h: 36, scale: 2 };
+
+const composite = (dst, src, dx, dy, flip = false) => {
+  for (let y = 0; y < src.height; y++) for (let x = 0; x < src.width; x++) {
+    const tx = dx + x, ty = dy + y;
+    if (tx < 0 || ty < 0 || tx >= dst.width || ty >= dst.height) continue;
+    const s = (y * src.width + (flip ? src.width - 1 - x : x)) * 4, a = src.data[s + 3] / 255;
+    if (!a) continue;
+    const d = (ty * dst.width + tx) * 4;
+    for (let k = 0; k < 3; k++) dst.data[d + k] = Math.round(src.data[s + k] * a + dst.data[d + k] * (1 - a));
+    dst.data[d + 3] = 255;
+  }
+};
+const crop = (src, x0, y0, w, h) => { const out = blank(w, h); copy(src, x0, y0, w, h, out, 0, 0); return out; };
+
+function writePortraits() {
+  const office = blank(W * T, H * T);
+  for (let i = 0; i < office.data.length; i += 4) office.data.set([11, 11, 11, 255], i);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (MAP[y][x] !== 'W') copy(FLOORS[MAP[y][x]], 0, 0, T, T, office, x * T, y * T);
+  const items = [];
+  const walls = read(path.join(OUT, 'walls.png'));
+  const isw = (x, y) => x >= 0 && y >= 0 && x < W && y < H && MAP[y][x] === 'W';
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (isw(x, y)) {
+    const m = (isw(x, y - 1) ? 1 : 0) | (isw(x + 1, y) ? 2 : 0) | (isw(x, y + 1) ? 4 : 0) | (isw(x - 1, y) ? 8 : 0);
+    items.push({ z: (y + 1) * T, x: x * T, y: (y + 1) * T - 32, img: crop(walls, (m % 4) * 16, Math.floor(m / 4) * 32, 16, 32) });
+  }
+  for (const p of PROPS) items.push({ z: p.depth, x: p.px ?? p.col * T, y: p.py ?? (p.row + p.fh) * T - p.h, img: read(path.join(OUT, p.image)), flip: p.flip });
+  const seats = {};
+  for (const [name, x, y, face] of SPOTS) if (name.startsWith('desk_')) seats[name.slice(5)] = { x, y, face };
+  const STANDING = ['secretaria', 'recepcionista'];
+  for (const [slug, s] of Object.entries(seats)) {
+    const sheet = read(path.join(OUT, 'characters', `${slug}.png`));
+    const sit = !STANDING.includes(slug);
+    const row = s.face === 'up' ? 1 : s.face === 'down' ? 0 : 2;
+    const frame = crop(sheet, (sit ? 3 : 0) * 16, row * 32, 16, 32);
+    items.push({ z: (s.y + 1) * T, x: s.x * T, y: (s.y + 1) * T - 32 - (sit ? 3 : 0), img: frame, flip: s.face === 'left', slug });
+  }
+  items.sort((a, b) => a.z - b.z).forEach((it) => composite(office, it.img, it.x, it.y, it.flip));
+
+  for (const it of items.filter((i) => i.slug)) {
+    const x0 = Math.max(0, Math.min(W * T - CLOSEUP.w, it.x + 8 - CLOSEUP.w / 2));
+    const y0 = Math.max(0, it.y - 2);
+    const bust = crop(office, x0, y0, CLOSEUP.w, CLOSEUP.h);
+    const out = blank(CLOSEUP.w * CLOSEUP.scale, CLOSEUP.h * CLOSEUP.scale);
+    for (let y = 0; y < out.height; y++) for (let x = 0; x < out.width; x++) {
+      const s = (Math.floor(y / CLOSEUP.scale) * CLOSEUP.w + Math.floor(x / CLOSEUP.scale)) * 4;
+      out.data.set(bust.data.subarray(s, s + 4), (y * out.width + x) * 4);
+    }
+    save(out, path.join(OUT, 'portraits', `${it.slug}.png`));
+  }
+}
+
 writeTileset();
 writeProps();
 furnish();
 writeMap();
 const kept = writeCharacters();
+writePortraits();
 console.log(`map ${W}×${H} · ${PROPS.length} props · ${Object.keys(CAST).length} characters${kept.length ? ' (kept: ' + kept.join(', ') + ')' : ''}`);
