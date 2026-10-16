@@ -147,10 +147,11 @@ final class TaskList {
     }
 
     /** Keeps how these tasks were (status, due date) so «Deshacer» can put them back. @return string token */
-    public static function snapshot(array $tasks){
+    public static function snapshot(array $tasks, array $created_ids = []){
         $token = wp_generate_password(16, false);
         $data = [];
         foreach ( $tasks as $t ) $data[(int) $t['id']] = ['status' => $t['status'], 'due_date' => $t['due_date'], 'completed_at' => $t['completed_at'] ?? null];
+        foreach ( $created_ids as $id ) $data[(int) $id] = ['status' => 'cancelled', 'due_date' => null, 'completed_at' => null, 'created' => true]; // undo = cancel it
         set_transient('madof_task_undo_' . $token, $data, 7 * DAY_IN_SECONDS);
         return $token;
     }
@@ -167,7 +168,7 @@ final class TaskList {
             $was = $data[$id];
             $wpdb->update(Schema::table('action_items'), [
                 'status' => in_array($was['status'], ['open', 'in_progress', 'done', 'cancelled'], true) ? $was['status'] : 'open',
-                'due_date' => $was['due_date'] ?: null, 'completed_at' => $was['completed_at'] ?: null, 'updated_at' => Time::now(),
+                'due_date' => ! empty($was['created']) ? $t['due_date'] : ($was['due_date'] ?: null), 'completed_at' => $was['completed_at'] ?: null, 'updated_at' => Time::now(),
             ], ['id' => $id]);
             $out['changed'][] = $t;
         }

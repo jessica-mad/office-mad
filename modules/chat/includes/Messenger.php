@@ -35,6 +35,11 @@ final class Messenger {
         return strtolower($google['connected_email'] ?? get_option('admin_email'));
     }
 
+    /** The DM where the bot talks to Jessica (null) or to a team member. */
+    public function dm_space(?array $member = null){
+        return $member ? (string) ($member['chat_dm_space'] ?? '') : (string) ($this->settings['manager_dm'] ?? '');
+    }
+
     /** @return array|\WP_Error */
     public function to_manager(array $message){
         $dm = $this->settings['manager_dm'] ?? '';

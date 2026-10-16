@@ -67,9 +67,31 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
         </section>
     </form>
 
-    <section class="madof-card">
-        <span class="madof-kicker"><?php esc_html_e('Hablarle con tus palabras o con audios', 'mad-oficina'); ?></span>
-        <p><?php esc_html_e('Escríbele o mándale una nota de voz al bot: «ya mandé el presupuesto a Lanas», «el vídeo de MOM lo dejo para el lunes». Marca las tareas como hechas o les cambia la fecha, y siempre te deja «Deshacer». Si no lo tiene claro, te pregunta. Liz puede hacer lo mismo con sus tareas.', 'mad-oficina'); ?></p>
+    <?php $persona = \MAD_Oficina\Chat\Orchestrator::persona($settings); $memail = $messenger->manager_email(); $mine = strtolower(wp_get_current_user()->user_email) === $memail; $facts = $mine ? \MAD_Oficina\Chat\Memory::facts($memail) : []; ?>
+    <section class="madof-card" id="asistente">
+        <span class="madof-kicker"><?php esc_html_e('Tu asistente', 'mad-oficina'); ?></span>
+        <p><?php esc_html_e('Escríbele o mándale una nota de voz al bot como a una persona: «envíame la última factura de LCS», «¿qué acordamos con MOM sobre la web?», «ya mandé el presupuesto a Lanas». Ella pregunta a cada área (Finanzas, Actas, Proyectos), te va contando mientras y te contesta con los datos tal cual. Los cambios en tareas llevan «Deshacer». Nunca envía nada a clientes. Liz solo llega a sus tareas.', 'mad-oficina'); ?></p>
+        <?php echo AdminUi::form_open('chat_assistant', 'madof-form'); ?>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Nombre', 'mad-oficina'); ?><input type="text" name="assistant_name" value="<?php echo esc_attr($settings['assistant_name'] ?? ''); ?>" placeholder="<?php echo esc_attr(\MAD_Oficina\Chat\Orchestrator::DEFAULT_NAME); ?>"></label>
+            </div>
+            <label><?php esc_html_e('Su forma de ser', 'mad-oficina'); ?><textarea name="assistant_personality" rows="3" placeholder="<?php echo esc_attr(\MAD_Oficina\Chat\Orchestrator::DEFAULT_PERSONALITY); ?>"><?php echo esc_textarea($settings['assistant_personality'] ?? ''); ?></textarea>
+                <small><?php esc_html_e('Cambia cómo te habla, nunca los datos: esos salen siempre de cada área, tal cual.', 'mad-oficina'); ?></small></label>
+            <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
+        </form>
+        <?php if ( $mine ) : ?>
+        <p><strong><?php echo esc_html(sprintf(__('Lo que %s recuerda de ti', 'mad-oficina'), $persona['name'])); ?></strong>
+            <small class="madof-muted"><?php esc_html_e('(se lo pides en el chat: «recuerda que a LCS lo llamo Luz Clara»)', 'mad-oficina'); ?></small></p>
+        <?php if ( ! $facts ) : ?><p class="madof-muted"><?php esc_html_e('Nada todavía.', 'mad-oficina'); ?></p><?php else : ?>
+            <ul class="madof-cartero-list">
+            <?php foreach ( $facts as $f ) : ?>
+                <li><?php echo esc_html($f['text']); ?> <?php echo AdminUi::form_open('chat_assistant', 'madof-inline'); ?><input type="hidden" name="forget" value="<?php echo esc_attr($f['id']); ?>"><button class="madof-link"><?php esc_html_e('Olvidar', 'mad-oficina'); ?></button></form></li>
+            <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+        <?php echo AdminUi::form_open('chat_assistant', 'madof-inline'); ?><input type="hidden" name="clear_history" value="1"><button class="madof-link"><?php esc_html_e('Borrar la conversación reciente', 'mad-oficina'); ?></button></form>
+        <p class="description"><?php esc_html_e('Recuerda la conversación de los últimos 3 días para seguir el hilo («¿y la anterior?»).', 'mad-oficina'); ?></p>
+        <?php endif; ?>
         <ul class="madof-checklist">
             <?php echo $check(\MAD_Oficina\Core\Agents\ClaudeClient::has_key(), __('Clave de Claude (para entender frases; sin ella solo entiende números: «la 2 y la 5 hechas»)', 'mad-oficina')); ?>
         </ul>

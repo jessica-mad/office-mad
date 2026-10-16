@@ -72,10 +72,10 @@ return new class($core) implements MAD_Oficina_Module {
         add_action(self::NOTICE_HOOK, [$this, 'send_autonomy_notice']);
         add_action(self::MEETING_HOOK, [$this, 'send_meeting_messages'], 10, 3);
         // What Jessica or Liz tell the bot about their tasks (words or voice).
-        add_action(\MAD_Oficina\Chat\Assistant::HOOK, fn($email, $text, $voice = []) => (new \MAD_Oficina\Chat\Assistant($this->messenger(), $this->api()))->run($email, $text, (array) $voice), 10, 3);
+        add_action(\MAD_Oficina\Chat\Assistant::HOOK, fn($email, $text, $voice = []) => (new \MAD_Oficina\Chat\Assistant($this->messenger(), $this->api(), $this->settings()))->run($email, $text, (array) $voice), 10, 3);
 
         add_action('madoficina_client_edit_sections', [$this, 'render_client_section']);
-        foreach ( ['chat_settings', 'chat_test', 'client_chat_targets'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['chat_settings', 'chat_test', 'client_chat_targets', 'chat_assistant'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -198,6 +198,29 @@ return new class($core) implements MAD_Oficina_Module {
         $s['test_space'] = self::parse_space($p['test_space_link'] ?? '') ?: self::parse_space($p['test_space'] ?? '');
         $this->save_settings($s);
         $this->back($url, __('Ajustes de Chat guardados.', 'mad-oficina'));
+    }
+
+    /** «Tu asistente»: name, personality and what she remembers. */
+    public function handle_chat_assistant(){
+        $this->guard('chat_assistant');
+        $p = wp_unslash($_POST);
+        $url = admin_url('admin.php?page=' . $this->menu_slug()) . '#asistente';
+        $email = $this->messenger()->manager_email();
+        $mine = strtolower(wp_get_current_user()->user_email) === $email; // her memory is hers, even for other administrators
+        if ( ( ! empty($p['forget']) || ! empty($p['clear_history']) ) && ! $mine ) $this->back($url, __('Esa memoria es de Jessica.', 'mad-oficina'), 'error');
+        if ( ! empty($p['forget']) ) {
+            \MAD_Oficina\Chat\Memory::forget($email, sanitize_key($p['forget']));
+            $this->back($url, __('Olvidado.', 'mad-oficina'));
+        }
+        if ( ! empty($p['clear_history']) ) {
+            \MAD_Oficina\Chat\Memory::clear_history($email);
+            $this->back($url, __('Conversación borrada: la próxima vez empieza de cero.', 'mad-oficina'));
+        }
+        $s = $this->settings();
+        $s['assistant_name'] = mb_substr(sanitize_text_field($p['assistant_name'] ?? ''), 0, 40);
+        $s['assistant_personality'] = mb_substr(sanitize_textarea_field($p['assistant_personality'] ?? ''), 0, 800);
+        $this->save_settings($s);
+        $this->back($url, __('Tu asistente, guardada.', 'mad-oficina'));
     }
 
     public function handle_chat_test(){

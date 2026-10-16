@@ -49,6 +49,15 @@ final class ChatApi {
 
     public function account(){ return $this->account; }
 
+    /** Rewrites one of the bot's own messages (e.g. «Le pregunto a…» → the answer). @return array|\WP_Error */
+    public function update_message($name, array $message){
+        if ( ! preg_match('#^spaces/[A-Za-z0-9_-]+/messages/[A-Za-z0-9_.\-]+$#', (string) $name) ) return new \WP_Error('madof_chat_msg', 'Bad message name');
+        $mask = implode(',', array_values(array_intersect(['text', 'cardsV2'], array_keys($message)))) ?: 'text';
+        if ( ! isset($message['cardsV2']) ) $message['cardsV2'] = []; // a status line never keeps an old card
+        if ( strpos($mask, 'cardsV2') === false ) $mask .= ',cardsV2';
+        return $this->request('PATCH', $name . '?updateMask=' . rawurlencode($mask), $message);
+    }
+
     /** Spaces the bot is a member of. @return array|\WP_Error */
     public function list_spaces(){
         $out = [];

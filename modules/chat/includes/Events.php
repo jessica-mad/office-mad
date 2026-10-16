@@ -176,7 +176,7 @@ final class Events {
     private function needs_understanding($email, $text){
         if ( trim($text) === '' || ! \MAD_Oficina\Core\Agents\ClaudeClient::has_key() ) return false;
         $p = TaskList::parse($text);
-        if ( $p['action'] === 'list' ) return false;
+        if ( $p['action'] === 'list' && mb_strlen(trim($text)) < 40 ) return false; // «tareas»; a real question goes to the assistant
         if ( in_array($p['action'], ['done', 'undo'], true) && TaskList::last($email) ) return false;
         return true;
     }
@@ -232,8 +232,12 @@ final class Events {
 
         // «Deshacer» after marking by words.
         if ( $fn === 'task_undo' && ! empty($params['token']) ) {
-            $r = TaskList::restore($params['token'], $email, $this->manager_email());
-            if ( is_wp_error($r) ) return $this->text($r->get_error_message());
+            $r = ['changed' => [], 'denied' => []];
+            foreach ( array_slice(explode(',', (string) $params['token']), 0, 10) as $token ) {
+                $one = TaskList::restore($token, $email, $this->manager_email());
+                if ( is_wp_error($one) ) return $this->text($one->get_error_message());
+                $r['changed'] = array_merge($r['changed'], $one['changed']); $r['denied'] = array_merge($r['denied'], $one['denied']);
+            }
             if ( $r['denied'] && ! $r['changed'] ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
             return $this->update(Cards::card('undo-' . substr(md5((string) $params['token']), 0, 8), __('Deshecho', 'mad-oficina'), '', [
                 ['textParagraph' => ['text' => esc_html__('Lo he dejado como estaba:', 'mad-oficina') . '<br>' . implode('<br>', array_map(fn($t) => '• ' . esc_html($t['title']), $r['changed']))]],
