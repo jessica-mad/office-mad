@@ -34,6 +34,28 @@ final class Uploads {
         return is_readable($p) ? file_get_contents($p) : null;
     }
 
+    public static function exists($expense_id){
+        return is_readable(self::path($expense_id));
+    }
+
+    /**
+     * The invoice itself, to look at it before deciding: the kept file (through a
+     * nonce-protected link, only for whoever sees Finanzas) or, once archived, Drive's preview.
+     */
+    public static function preview(array $e, $open = true){
+        if ( self::exists($e['id']) ) {
+            $url = wp_nonce_url(admin_url('admin-post.php?action=madof_expense_file&expense=' . (int) $e['id']), 'madof_expense_file_' . (int) $e['id']);
+        } elseif ( ! empty($e['drive_file_id']) ) {
+            $url = 'https://drive.google.com/file/d/' . rawurlencode($e['drive_file_id']) . '/preview';
+        } else {
+            return '<p class="madof-muted">' . esc_html__('El archivo ya no está aquí y todavía no está en Drive.', 'mad-oficina') . '</p>';
+        }
+        $link = self::exists($e['id']) ? $url : ($e['drive_url'] ?: $url);
+        return '<details class="madof-invoice-view"' . ($open ? ' open' : '') . '><summary>' . esc_html__('Ver la factura', 'mad-oficina') . '</summary>'
+            . '<iframe src="' . esc_url($url) . '" title="' . esc_attr__('Factura', 'mad-oficina') . '" loading="lazy"></iframe>'
+            . '<p><a href="' . esc_url($link) . '" target="_blank" rel="noopener">' . esc_html__('Abrirla en otra pestaña', 'mad-oficina') . '</a></p></details>';
+    }
+
     public static function delete($expense_id){
         $p = self::path($expense_id);
         if ( file_exists($p) ) @unlink($p);

@@ -79,6 +79,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
             · <?php echo esc_html(sprintf(__('De: %s', 'mad-oficina'), $e['sender'] ?: ( $e['source'] === 'drive' ? __('tu archivo de Drive', 'mad-oficina') : __('subida manual', 'mad-oficina') ))); ?>
             <?php if ( $e['subject'] && $e['source'] !== 'drive' ) echo '· ' . esc_html($e['subject']); ?>
             <?php if ( $e['drive_url'] ) : ?>· <a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver el archivo en Drive', 'mad-oficina'); ?></a><?php endif; ?></p>
+        <?php echo \MAD_Oficina\Suppliers\Uploads::preview($e, false); ?>
         <?php if ( $e['notes'] ) echo '<p class="madof-warn">' . esc_html($e['notes']) . '</p>'; ?>
         <?php if ( $e['client_id'] && ( $inv = Expenses::rebilled_in($e['id']) ) ) echo '<p>' . esc_html(sprintf(__('Repercutido en la factura %s.', 'mad-oficina'), $inv)) . '</p>'; ?>
         <?php if ( $e['source'] === 'drive' && $e['subject'] ) echo '<p class="madof-muted">' . esc_html(sprintf(__('Venía de tu archivo: %s', 'mad-oficina'), $e['subject'])) . '</p>'; ?>

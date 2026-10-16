@@ -668,6 +668,7 @@ final class Intake {
             $e['supplier_name'], $e['supplier_tax_id'], $e['number'] ? sprintf(__('nº %s', 'mad-oficina'), $e['number']) : '',
             $e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '', Suppliers::money((float) $e['total'], $e['currency']),
         ]))) . '<br><small>' . esc_html(sprintf(__('A nombre de: %s', 'mad-oficina'), trim(($e['recipient_name'] ?: '—') . ' ' . ($e['recipient_tax_id'] ?: '')))) . ' · ' . esc_html(sprintf(__('De: %s', 'mad-oficina'), $e['sender'] ?: __('subida manual', 'mad-oficina'))) . '</small>'
-            . ' · <a href="' . esc_url($view) . '">' . esc_html__('Ver el gasto', 'mad-oficina') . '</a></p>';
+            . ' · <a href="' . esc_url($view) . '">' . esc_html__('Ver el gasto', 'mad-oficina') . '</a></p>'
+            . Uploads::preview($e);
     }
 }

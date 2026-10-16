@@ -112,6 +112,22 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertSame($calls + 1, $this->calls);
     }
 
+    public function test_the_card_shows_the_invoice_itself(){
+        $r = $this->receive($this->x(['number' => 'V-1']));
+        $approval = Approvals::for_object('expense', $r['expense_id'])[0];
+        $html = apply_filters('madoficina_approval_form_' . Intake::NEW_SUPPLIER, '', $approval);
+        $this->assertStringContainsString('<iframe src="', $html);
+        $this->assertStringContainsString('action=madof_expense_file&#038;expense=' . $r['expense_id'], $html);
+        $this->assertMatchesRegularExpression('/_wpnonce=[a-f0-9]+/', $html, 'the link carries a nonce');
+        $this->assertTrue(\MAD_Oficina\Suppliers\Uploads::exists($r['expense_id']));
+
+        // Once archived (the local copy is gone), Drive's preview.
+        \MAD_Oficina\Suppliers\Uploads::delete($r['expense_id']);
+        Expenses::update($r['expense_id'], ['drive_file_id' => 'FILE123', 'drive_url' => 'https://drive.google.com/file/d/FILE123/view']);
+        $html = apply_filters('madoficina_approval_form_' . Intake::NEW_SUPPLIER, '', $approval);
+        $this->assertStringContainsString('https://drive.google.com/file/d/FILE123/preview', $html);
+    }
+
     public function test_not_an_invoice_and_unreadable(){
         $r = $this->receive($this->x(['is_invoice' => false, 'doc_type' => 'quote']));
         $this->assertSame(['ignored', 'not_invoice'], [$r['status'], $r['reason']]);

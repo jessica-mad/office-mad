@@ -178,3 +178,4 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-num tr.is-total td,.madof-num tr.is-total th{border-top:2px solid var(--k);background:var(--g);font-weight:600}
 .madof-neg{color:#a12a00}
 .madof-bank td.is-out strong{color:#9b2c2c}.madof-bank td.is-in strong{color:#1d6b3a}.madof-bank select{max-width:260px}
+.madof-invoice-view iframe{width:100%;height:560px;border:1px solid var(--k,#0B0B0B);border-radius:12px;background:#fff;margin-top:8px}.madof-invoice-view summary{cursor:pointer;font-weight:600}

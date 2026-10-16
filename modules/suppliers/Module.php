@@ -86,7 +86,7 @@ return new class($core) implements MAD_Oficina_Module {
             add_submenu_page('mad-finanzas', __('Proveedores', 'mad-oficina'), __('Proveedores', 'mad-oficina'), $cap, 'admin.php?page=' . $this->menu_slug() . '&tab=suppliers', '', 11);
         }, 11);
 
-        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice', 'expense_file'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -185,6 +185,26 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     /* ==== Admin ==== */
+
+    /** The kept invoice file, shown inline (inbox card, expense page). Only for whoever sees Finanzas. */
+    public function handle_expense_file(){
+        $id = absint($_GET['expense'] ?? 0);
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        check_admin_referer('madof_expense_file_' . $id);
+        $e = \MAD_Oficina\Suppliers\Expenses::get($id);
+        $bytes = $e ? \MAD_Oficina\Suppliers\Uploads::read($id) : null;
+        if ( $bytes === null ) {
+            if ( $e && $e['drive_url'] ) { wp_redirect($e['drive_url']); exit; }
+            wp_die(esc_html__('El archivo ya no está aquí.', 'mad-oficina'), 404);
+        }
+        $mime = \MAD_Oficina\Suppliers\Reader::media_type($bytes); // PDF or image only are shown; anything else is downloaded
+        nocache_headers();
+        header('Content-Type: ' . ($mime ?: 'application/octet-stream'));
+        header('Content-Disposition: ' . ($mime ? 'inline' : 'attachment') . '; filename="' . str_replace(['"', "\r", "\n"], '', \MAD_Oficina\Suppliers\Expenses::filename($e)) . '"');
+        header('X-Content-Type-Options: nosniff');
+        echo $bytes;
+        exit;
+    }
 
     private function guard($action){
         if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
