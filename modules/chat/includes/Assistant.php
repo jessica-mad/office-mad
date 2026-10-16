@@ -122,7 +122,7 @@ final class Assistant {
         $user = get_user_by('email', $email);
         $ctx = [
             'email' => $email, 'is_manager' => $is_manager, 'member' => $member, 'manager_email' => $this->manager_email,
-            'user_id' => $member ? (int) $member['wp_user_id'] : ($user ? (int) $user->ID : 0),
+            'user_id' => $member ? (int) $member['wp_user_id'] : self::manager_user_id($email),
         ];
         $boss = new Orchestrator($this->settings, $ctx, $this->progress);
         $answer = $boss->answer($text);
@@ -149,6 +149,21 @@ final class Assistant {
         if ( is_wp_error($r) ) { $this->log('reply_error', ['error' => $r->get_error_message()]); self::status('error', $r->get_error_message()); }
         else self::status('answered', $this->asked ? 'preguntó a: ' . implode(', ', array_unique($this->asked)) : 'contestó ella sola');
         return is_wp_error($r) ? $r : $message;
+    }
+
+    /**
+     * Jessica's WordPress user, for what depends on it (Finanzas). Chat verified she is the
+     * manager; her WP user may have another email: then the one Finanzas is reserved to,
+     * or — when it is not reserved, so any manager sees it — any manager.
+     */
+    public static function manager_user_id($email){
+        $cap = \MAD_Oficina\Core\Roles::CAP_MANAGE;
+        $user = get_user_by('email', $email);
+        if ( $user && user_can($user, $cap) ) return (int) $user->ID;
+        $reserved = \MAD_Oficina\Core\FinanceAccess::users();
+        if ( $reserved ) return (int) $reserved[0];
+        foreach ( get_users(['fields' => 'ID', 'orderby' => 'ID', 'number' => 50]) as $id ) if ( user_can((int) $id, $cap) ) return (int) $id;
+        return 0;
     }
 
     private static function member($email){

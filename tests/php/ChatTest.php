@@ -391,6 +391,26 @@ class ChatTest extends MADOF_TestCase {
         delete_option(\MAD_Oficina\Core\FinanceAccess::OPTION);
     }
 
+    public function test_amparo_is_reachable_even_if_jessicas_wordpress_email_is_another(){
+        $this->key();
+        $jess = $this->factory()->user->create(['role' => 'administrator', 'user_email' => 'otra-direccion@personal.example']);
+        get_user_by('id', $jess)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        update_option(\MAD_Oficina\Core\FinanceAccess::OPTION, [$jess]); // she reserved Finanzas to herself
+        $this->claude = [['text' => 'Hola.']];
+        $this->say('pregúntale a Amparo por la última factura');
+        $this->assertContains('ask_finanzas', $this->tool_names($this->prompts[0]));
+        $this->assertStringContainsString('Amparo', $this->prompts[0]['system']);
+        delete_option(\MAD_Oficina\Core\FinanceAccess::OPTION);
+    }
+
+    public function test_an_area_she_cannot_reach_is_named_not_unknown(){
+        $this->key();
+        $this->claude = [['text' => 'Eso es de Jessica.']];
+        $this->say('¿cuánto hemos facturado?', 'liz@imad.example');
+        $this->assertNotContains('ask_finanzas', $this->tool_names($this->prompts[0]));
+        $this->assertStringContainsString('Amparo (Finanzas): existe, pero esa área es solo de Jessica', $this->prompts[0]['system']);
+    }
+
     public function test_she_has_a_map_of_whom_to_ask_and_knows_the_clients(){
         $this->key();
         $this->claude = [['text' => 'Hola.']];

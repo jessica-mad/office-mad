@@ -108,6 +108,16 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
                 <br><span class="madof-warn"><?php echo esc_html(sprintf(__('Último error (%1$s): %2$s', 'mad-oficina'), $ago('error'), $ast['error']['detail'])); ?></span>
             <?php endif; ?></p>
         <?php endif; ?>
+        <?php
+        $muid = \MAD_Oficina\Chat\Assistant::manager_user_id($memail);
+        $mu = $muid ? get_userdata($muid) : null;
+        $fin = \MAD_Oficina\Chat\Agents\Finance::allowed(['is_manager' => true, 'user_id' => $muid]);
+        ?>
+        <ul class="madof-checklist">
+            <?php echo $check($fin, $fin
+                ? sprintf(__('Finanzas: %1$s puede preguntar a la contable (te reconoce como el usuario «%2$s»).', 'mad-oficina'), $persona['name'], $mu ? $mu->user_login : '—')
+                : sprintf(__('Finanzas: %s no puede preguntar a la contable. Finanzas está reservada a otra persona: revisa «Quién ve Finanzas» en Facturación → Ajustes.', 'mad-oficina'), $persona['name'])); ?>
+        </ul>
         <p class="description"><?php echo esc_html(\MAD_Oficina\Chat\Assistant::finisher() ? __('Tu servidor contesta a Google primero y trabaja después: perfecto para audios largos.', 'mad-oficina') : __('Tu servidor trabaja mientras Google espera (máximo 30 s): si un audio tarda más, Chat puede decir que el bot no responde, pero la respuesta te llega igual unos segundos después.', 'mad-oficina')); ?></p>
         <?php $shape = get_option(\MAD_Oficina\Chat\Transcriber::SHAPE_OPTION); if ( $shape ) : ?>
             <p class="description"><?php echo esc_html(sprintf(__('Último audio recibido %s.', 'mad-oficina'), sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $shape['at'])))); ?></p>
