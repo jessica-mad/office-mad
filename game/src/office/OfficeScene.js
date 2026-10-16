@@ -306,6 +306,27 @@ export default class OfficeScene extends Phaser.Scene {
     }
   }
 
+  /* ───────────── camera ───────────── */
+
+  /** The camera goes to the character's desk for the close-up (instant with reduced motion). */
+  focusOn(slug) {
+    const ch = this.characters[slug];
+    if (!ch) return;
+    const cam = this.cameras.main, ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 300;
+    const zoom = 3.2;
+    const halfW = cam.width / zoom / 2, halfH = cam.height / zoom / 2;
+    const x = Math.max(halfW, Math.min(this.map.widthInPixels - halfW, ch.sprite.x));
+    const y = Math.max(halfH, Math.min(this.map.heightInPixels - halfH, ch.sprite.y - 16));
+    cam.pan(x, y, ms, 'Sine.easeInOut', true);
+    cam.zoomTo(zoom, ms, 'Sine.easeInOut', true);
+  }
+
+  unfocus() {
+    const cam = this.cameras.main, ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 300;
+    cam.pan(this.map.widthInPixels / 2, this.map.heightInPixels / 2, ms, 'Sine.easeInOut', true);
+    cam.zoomTo(2, ms, 'Sine.easeInOut', true);
+  }
+
   /* ───────────── speech bubbles & tags ───────────── */
 
   bubbleBox(text, fill, color) {

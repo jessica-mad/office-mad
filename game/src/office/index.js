@@ -28,6 +28,8 @@ export async function createOffice(container, { assets, v, me, onRoom, onCharact
       assets, v, me, onRoom, onCharacter,
       onReady: (scene) => resolve({
         setStates: (states) => scene.setStates(states),
+        focus: (slug) => scene.focusOn(slug),
+        unfocus: () => scene.unfocus(),
         // While an HTML dialog is open, clicks must not reach rooms/characters underneath.
         setInputEnabled: (on) => { scene.input.enabled = on; },
         destroy: () => game.destroy(true),

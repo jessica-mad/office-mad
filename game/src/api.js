@@ -28,6 +28,8 @@ export function createApi(config) {
     getClient() { return clientId; },
     me: () => request('me', { withClient: false }),
     state: () => request('office/state', { withClient: false }),
+    waiting: () => request('office/waiting', { withClient: false }),
+    resolveApproval: (id, decision) => request('office/approvals/' + Number(id), { method: 'POST', body: { decision }, withClient: false }),
     section: (name) => request('portal/' + name),
     invoices: () => request('portal/invoices'),
     // Opened in a new tab, so the REST nonce goes in the URL (cookie auth needs it).
