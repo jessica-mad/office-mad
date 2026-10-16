@@ -39,10 +39,13 @@ final class Orchestrator {
         ];
     }
 
-    /** Waiting lines, so the wait does not feel empty. */
-    public static function opener(){
-        $lines = ['Dame un segundo, lo miro.', 'Voy a ello.', 'Marchando, déjame mirarlo.', 'Un momento, que pregunto.', 'Lo busco y te digo.'];
-        return $lines[array_rand($lines)];
+    /**
+     * The first waiting line, only once she has decided to ask an area (a greeting or a
+     * quick answer never shows one): «Un momento, se lo pregunto a Amparo (finanzas)…».
+     */
+    public static function opener($name, $area){
+        $lines = ['Un momento, se lo pregunto a %1$s (%2$s)…', 'Dame un segundo, que se lo pregunto a %1$s (%2$s)…', 'Voy a ello: le pregunto a %1$s (%2$s)…', 'Lo miro con %1$s (%2$s) y te digo…'];
+        return sprintf($lines[array_rand($lines)], $name, mb_strtolower($area));
     }
 
     /** @return Agents\Specialist[] the areas this person may reach */
@@ -71,7 +74,7 @@ final class Orchestrator {
                 'input_schema' => ['type' => 'object', 'properties' => ['question' => ['type' => 'string']], 'required' => ['question']],
                 'handler' => function($in) use ($agent){
                     $this->asked[] = $agent->slug();
-                    $this->say(sprintf('Le pregunto a %1$s (%2$s)…', $agent->name(), mb_strtolower($agent->area())));
+                    $this->say(count($this->asked) === 1 ? self::opener($agent->name(), $agent->area()) : sprintf('Ahora le pregunto a %1$s (%2$s)…', $agent->name(), mb_strtolower($agent->area())));
                     $agent->progress = fn($line) => $this->say($agent->name() . ' ' . $line . '…');
                     $answer = $agent->ask((string) ($in['question'] ?? ''));
                     $this->undo = array_merge($this->undo, $agent->undo);

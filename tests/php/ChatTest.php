@@ -324,6 +324,7 @@ class ChatTest extends MADOF_TestCase {
         // One message: created at once, edited while working, and finally the answer.
         $msgs = $this->to_jessica();
         $this->assertSame('POST', $msgs[0]['method']);
+        $this->assertMatchesRegularExpression('/Valle \\(proyectos\\)/u', wp_json_encode($msgs[0]['body'], JSON_UNESCAPED_UNICODE), 'the first line comes once she knows whom to ask');
         $this->assertSame('PATCH', end($msgs)['method']);
         $final = $this->last_to_jessica();
         $this->assertStringContainsString('Subir anuncios', $final);
@@ -419,6 +420,8 @@ class ChatTest extends MADOF_TestCase {
         $this->claude = [['text' => '¡Hola, Jessica!']];
         $this->say('hola');
         $this->assertStringContainsString('¡Hola, Jessica!', $this->last_to_jessica(), 'never left in a queue that may not run');
+        $this->assertCount(1, $this->to_jessica(), 'nothing to wait for: no «un momento», just the answer');
+        $this->assertSame('POST', $this->to_jessica()[0]['method']);
         $st = get_option(\MAD_Oficina\Chat\Assistant::STATUS);
         $this->assertArrayHasKey('received', $st);
         $this->assertArrayHasKey('answered', $st);
@@ -435,7 +438,6 @@ class ChatTest extends MADOF_TestCase {
         $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'source' => 'UPLOADED_CONTENT', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
         $this->assertSame(1, $this->speech_calls);
         $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
-        $this->assertStringContainsString('Te escucho', wp_json_encode($this->to_jessica()[0]['body'], JSON_UNESCAPED_UNICODE));
         $this->assertStringContainsString('He oído', $this->last_to_jessica());
         $shape = get_option(\MAD_Oficina\Chat\Transcriber::SHAPE_OPTION);
         $this->assertSame('audio/mp4', $shape['message']['attachment'][0]['contentType'], 'we keep what Google sends (no content)');

@@ -91,7 +91,6 @@ final class Assistant {
         $heard = '';
         if ( $voice ) {
             if ( ! $this->api ) return $this->reply($member, ['text' => __('El bot no está configurado.', 'mad-oficina')]);
-            $this->progress->start(__('Te escucho…', 'mad-oficina'));
             $text = Transcriber::text_of($this->api, $voice + ['text' => '', 'transcript' => null, 'audio' => null]);
             if ( is_wp_error($text) ) return $this->reply($member, ['text' => $text->get_error_message()]);
             $heard = $text;
@@ -118,8 +117,6 @@ final class Assistant {
         if ( $used >= self::DAILY ) return $this->reply($member, ['text' => __('Hoy ya hemos hablado muchísimo: mañana sigo. Para tareas, contéstame con los números de la lista.', 'mad-oficina')]);
         set_transient($key, $used + 1, DAY_IN_SECONDS);
 
-        $opener = Orchestrator::opener();
-        $heard !== '' ? $this->progress->say($opener) : $this->progress->start($opener);
         $user = get_user_by('email', $email);
         $ctx = [
             'email' => $email, 'is_manager' => $is_manager, 'member' => $member, 'manager_email' => $this->manager_email,

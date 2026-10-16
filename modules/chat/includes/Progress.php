@@ -5,7 +5,8 @@ if ( ! defined('ABSPATH') ) exit;
 
 /**
  * One message in the person's DM that tells what is going on while they wait
- * («Dame un segundo…» → «Le pregunto a Amparo…») and finally becomes the answer.
+ * («Un momento, se lo pregunto a Amparo…») and finally becomes the answer. It only
+ * appears once there is something to wait for; a quick answer just arrives.
  * If it cannot be edited, the answer simply goes as a new message.
  */
 final class Progress {
@@ -27,8 +28,9 @@ final class Progress {
         if ( ! is_wp_error($r) && ! empty($r['name']) ) { $this->name = $r['name']; $this->last = $text; $this->last_at = microtime(true); }
     }
 
-    /** A new status line (skipped if it is the same, or less than a second after the last one). */
+    /** A new status line: the first one creates the message; then it is edited (not more than once a second). */
     public function say($text){
+        if ( ! $this->name ) { $this->start($text); return; }
         if ( ! $this->name || $text === $this->last || microtime(true) - $this->last_at < (float) apply_filters('madoficina_progress_interval', 1.0) ) return; // Chat allows ~1 edit per second
         $this->last = $text; $this->last_at = microtime(true);
         $this->api->update_message($this->name, ['text' => $text]);

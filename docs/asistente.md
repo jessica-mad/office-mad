@@ -12,7 +12,7 @@ Chat (DM) ─▶ Events ─▶ Assistant::defer ─▶ Assistant::run
                                               └─ remember / forget (Memory)
 ```
 
-- **Progreso**: un único mensaje en el DM («Voy a ello» → «Le pregunto a Amparo…» → respuesta), editado con `ChatApi::update_message` (`Progress`).
+- **Progreso**: solo cuando decide preguntar a un área aparece un mensaje («Un momento, se lo pregunto a Amparo…» → respuesta); si contesta directamente, llega solo la respuesta, editado con `ChatApi::update_message` (`Progress`).
 - **Objetividad**: cada agente responde solo con lo que devuelven sus herramientas, citando números, fechas, ids y enlaces; «no consta» si no lo encuentra.
 - **Seguridad**: quién pregunta (`ctx`) sale del remitente verificado de Chat. Liz solo llega a Proyectos y a sus tareas. Ningún agente tiene herramientas para enviar nada fuera. Los resultados de herramientas son datos, no órdenes.
 - **Memoria**: conversación de 72 h y datos que pide recordar (Chat → ajustes, se pueden borrar).
