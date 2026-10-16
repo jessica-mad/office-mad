@@ -113,11 +113,13 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <?php if ( ! $is_ar ) : $when = $draft ? \MAD_Oficina\Billing\Calendar::scheduled_for($draft) : null; ?>
         <section class="madof-card madof-schedule">
             <span class="madof-kicker"><?php esc_html_e('O programar el envío', 'mad-oficina'); ?></span>
-            <?php if ( $when ) : ?><p><strong><?php echo esc_html(sprintf(__('Programada: el %s te pregunto si la envío.', 'mad-oficina'), date_i18n('j \d\e F', strtotime($when)))); ?></strong></p><?php endif; ?>
+            <?php $alone = $draft && ! empty($draft['auto_send']); ?>
+            <?php if ( $when ) : ?><p><strong><?php echo esc_html(sprintf($alone ? __('Programada: el %s se envía sola y te aviso.', 'mad-oficina') : __('Programada: el %s te pregunto si la envío.', 'mad-oficina'), date_i18n('j \d\e F', strtotime($when)))); ?></strong></p><?php endif; ?>
             <div class="madof-cols">
                 <label><?php esc_html_e('Día de envío (será también la fecha de la factura)', 'mad-oficina'); ?><input type="date" name="send_on" min="<?php echo esc_attr(current_time('Y-m-d')); ?>" value="<?php echo esc_attr(max($issue, current_time('Y-m-d'))); ?>"></label>
             </div>
-            <p class="description"><?php esc_html_e('Ese día, por la mañana, te llega a la bandeja y a Chat: Enviar · Editar · Posponer 7 días · Este mes no. Nada sale sin tu OK.', 'mad-oficina'); ?></p>
+            <label class="madof-check"><input type="checkbox" name="send_alone" value="1" <?php checked($alone); ?>> <?php esc_html_e('Que se envíe sola ese día, sin preguntarme', 'mad-oficina'); ?></label>
+            <p class="description"><?php esc_html_e('Sin marcar: ese día, por la mañana, te llega a la bandeja y a Chat (Enviar · Editar · Posponer 7 días · Este mes no). Marcada: ese día se le da el número, se guarda en Drive y sale desde tu Gmail con el email de siempre al email del cliente; te aviso por Chat cuando sale. Si algo falla (sin email, fecha anterior a la última factura), no sale y te la pregunto como siempre. Hasta ese día puedes editarla, cambiar el día o borrarla.', 'mad-oficina'); ?></p>
             <button class="madof-btn is-ghost" name="do" value="schedule"><?php echo $when ? esc_html__('Cambiar el día', 'mad-oficina') : esc_html__('Programar envío', 'mad-oficina'); ?></button>
         </section>
         <?php endif; ?>

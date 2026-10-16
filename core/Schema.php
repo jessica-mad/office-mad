@@ -345,6 +345,7 @@ final class Schema {
   status varchar(20) NOT NULL DEFAULT 'draft',
   issued_at datetime NULL,
   asked_at datetime NULL,
+  auto_send tinyint(1) NOT NULL DEFAULT 0,
   issuer longtext NULL,
   sent_at datetime NULL,
   paid tinyint(1) NOT NULL DEFAULT 0,

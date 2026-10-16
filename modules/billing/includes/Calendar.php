@@ -226,10 +226,31 @@ final class Calendar {
             $r = $this->issuing->request((int) $id);
             if ( is_wp_error($r) ) {
                 do_action('madoficina_notify_manager', sprintf(__('Quería preguntarte por la factura de %1$s, pero %2$s', 'mad-oficina'), $inv['client_name'], lcfirst($r->get_error_message())));
+            } elseif ( ! empty($inv['auto_send']) ) {
+                $this->send_alone((int) $r, $inv);
             }
             $n++;
         }
         return $n;
+    }
+
+    /**
+     * «Programar y enviar sola»: Jessica gave her OK when she scheduled it, so on the day it
+     * is issued and sent with the default email, and she gets a note. If anything stops it
+     * (no email, a date before the last invoice…), it waits in the inbox as usual.
+     */
+    private function send_alone($approval_id, array $inv){
+        $approval = Approvals::get($approval_id);
+        if ( ! $approval || $approval['status'] !== Approvals::PENDING ) return;
+        $input = $this->issuing->default_input($approval);
+        $result = ! empty($input['send']) ? Approvals::resolve($approval_id, 'approve', $input, 0, 'auto') : new \WP_Error('madof_inv_to', __('no tiene email del cliente', 'mad-oficina'));
+        if ( is_wp_error($result) ) {
+            do_action('madoficina_approval_created', $approval_id); // the usual card in Chat
+            do_action('madoficina_notify_manager', sprintf(__('Hoy tocaba enviar sola la factura de %1$s, pero %2$s. Te la dejo en la bandeja para que la mires.', 'mad-oficina'), $inv['client_name'], lcfirst($result->get_error_message())));
+            return;
+        }
+        do_action('madoficina_notify_manager', sprintf(__('Enviada sola, como programaste: factura %1$s de %2$s por %3$s a %4$s. El cartero la guarda en Drive y sale desde tu Gmail en unos minutos.', 'mad-oficina'),
+            $result['number'] ?? '', $inv['client_name'], Money::format($inv['total']), $input['to']));
     }
 
     /* ==== Answers ==== */
@@ -256,11 +277,16 @@ final class Calendar {
      * Jessica is asked in the inbox and Chat — Enviar · Editar · Posponer · Este mes no.
      * @return array{message:string, date:string}|\WP_Error
      */
-    public static function schedule($invoice_id, $date){
+    public static function schedule($invoice_id, $date, $alone = false){
         global $wpdb;
         $inv = Invoices::get($invoice_id);
         if ( ! $inv || $inv['status'] !== 'draft' ) return new \WP_Error('madof_inv', __('Esa factura ya no está en borrador.', 'mad-oficina'));
         if ( ! preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $date) || $date < current_time('Y-m-d') ) return new \WP_Error('madof_inv_date', __('Elige hoy o un día que no haya pasado.', 'mad-oficina'));
+        $to = '';
+        foreach ( preg_split('/[\s,;]+/', (string) $inv['client_email'], -1, PREG_SPLIT_NO_EMPTY) as $e ) if ( is_email($e) ) { $to = strtolower($e); break; }
+        if ( $alone && $inv['series'] === 'AR' ) return new \WP_Error('madof_inv_series', __('Las facturas de Argentina se emiten en la plataforma argentina: no pueden salir solas.', 'mad-oficina'));
+        if ( $alone && ! $to ) return new \WP_Error('madof_inv_to', __('Para que salga sola necesita el email del cliente (en sus datos fiscales).', 'mad-oficina'));
+        if ( $alone && ! $inv['client_tax_id'] ) return new \WP_Error('madof_inv_tax', __('Para que salga sola necesita el NIF del cliente (en sus datos fiscales).', 'mad-oficina'));
         foreach ( Approvals::for_object('invoice', $invoice_id) as $a ) {
             if ( $a['status'] === Approvals::PENDING ) Approvals::resolve($a['id'], 'reject', [], get_current_user_id());
         }
@@ -268,9 +294,12 @@ final class Calendar {
         $wpdb->update(Invoices::table(), [
             'issue_date' => $date, 'year' => (int) substr($date, 0, 4),
             'due_date' => $inv['due_date'] ? gmdate('Y-m-d', strtotime($inv['due_date'] . ' ' . ($shift >= 0 ? '+' : '') . (int) $shift . ' days')) : null,
-            'asked_at' => null, 'source' => $inv['source'] === self::SOURCE ? self::SOURCE : self::SCHEDULED, 'updated_at' => Time::now(),
+            'asked_at' => null, 'source' => $inv['source'] === self::SOURCE ? self::SOURCE : self::SCHEDULED, 'auto_send' => $alone ? 1 : 0, 'updated_at' => Time::now(),
         ], ['id' => $invoice_id]);
-        return ['message' => sprintf(__('Programada para el %s: ese día te pregunto en la bandeja y en Chat si la envío.', 'mad-oficina'), date_i18n('j \d\e F', strtotime($date))), 'date' => $date];
+        $day = date_i18n('j \d\e F', strtotime($date));
+        return ['message' => $alone
+            ? sprintf(__('Programada para el %1$s: ese día se emite y se envía sola a %2$s, y te aviso por Chat.', 'mad-oficina'), $day, $to)
+            : sprintf(__('Programada para el %s: ese día te pregunto en la bandeja y en Chat si la envío.', 'mad-oficina'), $day), 'date' => $date];
     }
 
     /** The day a draft will be asked, if it is waiting for one. */

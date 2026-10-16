@@ -149,6 +149,50 @@ class CalendarTest extends MADOF_TestCase {
         $this->assertSame('scheduled', Invoices::get($id)['source']);
     }
 
+    public function test_a_draft_scheduled_to_go_alone_is_issued_and_sent_on_its_day(){
+        update_option(MAD_Oficina_Core::option_key('billing'), ['calendar_enabled' => false, 'calendar_hour' => 9, 'billing_day' => 28, 'payment_days' => 15]);
+        $issuing = new Issuing(get_option(MAD_Oficina_Core::option_key('billing')));
+        $id = $issuing->save_draft(['profile_id' => $this->profile, 'issue_date' => '2099-12-01'], [['description' => 'Sesión de fotos', 'quantity' => '1', 'unit_price' => '300']]);
+        $other = $issuing->save_draft(['profile_id' => $this->profile, 'issue_date' => '2099-12-01'], [['description' => 'Retoque', 'quantity' => '1', 'unit_price' => '50']]);
+        $notes = new ArrayObject();
+        add_action('madoficina_notify_manager', fn($t) => $notes->append($t));
+
+        $r = Calendar::schedule($id, '2099-12-04', true);
+        $this->assertStringContainsString('se envía sola a pagos@lcs.example', $r['message']);
+        $this->assertSame(1, (int) Invoices::get($id)['auto_send']);
+        Calendar::schedule($other, '2099-12-04', true);
+        $GLOBALS['wpdb']->update(Invoices::table(), ['client_email' => ''], ['id' => $other]); // the email went missing afterwards
+
+        $this->assertSame(0, $this->cal()->run($this->ts('2099-12-03 10:00'))['asked'], 'not before its day');
+        delete_option(Calendar::RUN_OPTION);
+        $this->cal()->run($this->ts('2099-12-04 09:15'));
+
+        $sent = Invoices::get($id);
+        $this->assertNotEmpty($sent['number'], 'issued on its own');
+        $approval = Approvals::for_object('invoice', $id)[0];
+        $this->assertSame([Approvals::APPROVED, 'auto'], [$approval['status'], $approval['channel']]);
+        $order = $GLOBALS['wpdb']->get_var("SELECT payload FROM " . \MAD_Oficina\Core\Schema::table('tasks') . " WHERE type = 'invoice_archive' ORDER BY id DESC LIMIT 1");
+        $this->assertStringContainsString('pagos@lcs.example', (string) $order, 'and sent to the client');
+
+        $this->assertNull(Invoices::get($other)['number'], 'without an email it does not go');
+        $this->assertSame(Approvals::PENDING, Approvals::for_object('invoice', $other)[0]['status'], '…it waits in the inbox');
+        $all = implode("\n", $notes->getArrayCopy());
+        $this->assertStringContainsString('Enviada sola', $all);
+        $this->assertStringContainsString('Te la dejo en la bandeja', $all);
+        remove_all_actions('madoficina_notify_manager');
+    }
+
+    public function test_going_alone_needs_an_email_and_scheduling_again_without_it_asks(){
+        $issuing = new Issuing(get_option(MAD_Oficina_Core::option_key('billing')));
+        $id = $issuing->save_draft(['profile_id' => $this->profile, 'issue_date' => '2099-12-01'], [['description' => 'Fotos', 'quantity' => '1', 'unit_price' => '300']]);
+        $GLOBALS['wpdb']->update(Invoices::table(), ['client_email' => ''], ['id' => $id]);
+        $this->assertWPError(Calendar::schedule($id, '2099-12-04', true));
+        $GLOBALS['wpdb']->update(Invoices::table(), ['client_email' => 'pagos@lcs.example'], ['id' => $id]);
+        Calendar::schedule($id, '2099-12-04', true);
+        Calendar::schedule($id, '2099-12-05');
+        $this->assertSame(0, (int) Invoices::get($id)['auto_send'], 'scheduled again without the box: it asks');
+    }
+
     public function test_a_deleted_calendar_draft_does_not_come_back_on_its_own(){
         $this->cal()->run($this->ts('2026-11-25 10:00'));
         $draft = Invoices::all(['status' => 'draft'])[0];

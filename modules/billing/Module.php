@@ -342,7 +342,7 @@ return new class($core) implements MAD_Oficina_Module {
             exit;
         }
         if ( $do === 'schedule' ) {
-            $r = \MAD_Oficina\Billing\Calendar::schedule($saved, sanitize_text_field($p['send_on'] ?? ''));
+            $r = \MAD_Oficina\Billing\Calendar::schedule($saved, sanitize_text_field($p['send_on'] ?? ''), ! empty($p['send_alone']));
             $this->back(['edit' => $saved], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
         }
         if ( $do === 'test' ) {
