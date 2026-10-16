@@ -16,7 +16,7 @@ final class Finance extends Specialist {
     public function slug(){ return 'finanzas'; }
     public function character(){ return 'contable'; }
     public function area(){ return 'Finanzas'; }
-    public function scope(){ return 'facturas emitidas y borradores (con su PDF), presupuestos, cobros y vencimientos, gastos y facturas de proveedores, totales por periodo'; }
+    public function scope(){ return 'facturas emitidas y borradores (con su PDF), presupuestos, cobros y vencimientos, gastos y facturas de proveedores, movimientos del banco y si cuadran, totales por periodo'; }
     public function routing(){
         return 'Todo lo que es DINERO: facturas a clientes (la última, una concreta, su PDF, si está cobrada o vencida), presupuestos, cuánto se ha facturado o gastado en un periodo, gastos y facturas de proveedores. '
             . 'Ejemplos: «envíame la última factura de LCS», «¿qué facturas están sin cobrar?», «¿cuánto le facturamos a MOM este año?», «¿cuánto gastamos en software en octubre?», «¿le mandamos presupuesto a X?».';
@@ -26,7 +26,7 @@ final class Finance extends Specialist {
 
     protected function tool_label($tool){
         return ['find_invoices' => 'está buscando en las facturas', 'invoice_detail' => 'está abriendo la factura', 'find_quotes' => 'está mirando los presupuestos',
-            'find_expenses' => 'está revisando los gastos', 'totals' => 'está sumando'][$tool] ?? '';
+            'find_expenses' => 'está revisando los gastos', 'bank_movements' => 'está mirando el banco', 'totals' => 'está sumando'][$tool] ?? '';
     }
 
     protected function instructions(){
@@ -52,6 +52,9 @@ final class Finance extends Specialist {
             ['name' => 'find_expenses', 'description' => 'Gastos y facturas de proveedores: fecha, proveedor, concepto, categoría, base, IVA, total, cliente repercutible, enlace en Drive.',
              'input_schema' => self::obj(['supplier' => ['type' => 'string'], 'category' => ['type' => 'string'], 'client' => ['type' => 'string'], 'from' => ['type' => 'string'], 'to' => ['type' => 'string'], 'limit' => ['type' => 'integer']]),
              'handler' => [$this, 'find_expenses']],
+            ['name' => 'bank_movements', 'description' => 'Movimientos del banco (de los extractos subidos): fecha, concepto, importe (+ entra, - sale), si cuadran con una factura, gasto o impuesto, o si están sin cuadrar.',
+             'input_schema' => self::obj(['query' => ['type' => 'string', 'description' => 'Palabras del concepto'], 'status' => ['type' => 'string', 'enum' => ['unmatched', 'matched', 'ignored', 'all']], 'from' => ['type' => 'string'], 'to' => ['type' => 'string'], 'limit' => ['type' => 'integer']]),
+             'handler' => [$this, 'bank_movements']],
             ['name' => 'totals', 'description' => 'Sumas de un periodo: facturado (base, IVA, IRPF, total; cobrado y pendiente), por cliente si se pide, y gastos por categoría.',
              'input_schema' => self::obj(['from' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'to' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'client' => ['type' => 'string']], ['from', 'to']),
              'handler' => [$this, 'totals']],
@@ -135,6 +138,22 @@ final class Finance extends Specialist {
             'base' => (float) $e['base'], 'vat' => (float) $e['vat'], 'total' => (float) $e['total'], 'currency' => $e['currency'],
             'for_client' => self::client_label($e['client_id']), 'drive' => $e['drive_url'],
         ], $rows)];
+    }
+
+    public function bank_movements(array $in){
+        global $wpdb;
+        $where = ['1=1']; $args = [];
+        $st = $in['status'] ?? 'all';
+        if ( $st !== 'all' ) { $where[] = 'status = %s'; $args[] = $st; }
+        if ( ! empty($in['query']) ) { $where[] = 'concept LIKE %s'; $args[] = '%' . $wpdb->esc_like((string) $in['query']) . '%'; }
+        if ( $d = self::date_arg($in['from'] ?? '') ) { $where[] = 'date >= %s'; $args[] = $d; }
+        if ( $d = self::date_arg($in['to'] ?? '') ) { $where[] = 'date <= %s'; $args[] = $d; }
+        $sql = 'SELECT date, concept, amount, status, match_type, note FROM ' . Schema::table('bank_movements') . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY date DESC LIMIT ' . self::limit($in['limit'] ?? 0, 20, 60);
+        $rows = $wpdb->get_results($args ? $wpdb->prepare($sql, ...$args) : $sql, ARRAY_A);
+        $covered = $wpdb->get_row('SELECT MIN(date) a, MAX(date) b FROM ' . Schema::table('bank_movements'), ARRAY_A);
+        return ['statements_cover' => [$covered['a'] ?? null, $covered['b'] ?? null], 'page' => admin_url('admin.php?page=mad-oficina-facturacion&tab=bank'),
+            'movements' => array_map(fn($r) => ['date' => $r['date'], 'concept' => $r['concept'], 'amount' => (float) $r['amount'],
+                'status' => ['matched' => 'cuadra', 'unmatched' => 'sin cuadrar', 'ignored' => 'sin factura (resuelto)'][$r['status']] ?? $r['status'], 'with' => $r['note']], $rows)];
     }
 
     public function totals(array $in){

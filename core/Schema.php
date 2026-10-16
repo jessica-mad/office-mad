@@ -385,6 +385,29 @@ final class Schema {
 
             // What a client pays: monthly fees (start → end, or open) and one-off jobs (one month).
             // Base amounts, without VAT. The forecast and the monthly drafts come from here.
+            // Bank statement lines (Finanzas → Banco), matched with invoices, expenses and taxes.
+            'bank_movements' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  account varchar(60) NOT NULL DEFAULT '',
+  date date NOT NULL,
+  value_date date NULL,
+  amount decimal(12,2) NOT NULL,
+  currency char(3) NOT NULL DEFAULT 'EUR',
+  concept varchar(500) NOT NULL DEFAULT '',
+  balance decimal(12,2) NULL,
+  hash char(40) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'unmatched',
+  match_type varchar(20) NULL,
+  match_ids varchar(255) NULL,
+  note varchar(255) NULL,
+  import_id varchar(32) NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY hash (hash),
+  KEY status (status),
+  KEY date (date)",
+
             'billing_items' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   profile_id bigint(20) unsigned NOT NULL,

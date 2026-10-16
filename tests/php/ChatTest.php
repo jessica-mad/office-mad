@@ -383,7 +383,7 @@ class ChatTest extends MADOF_TestCase {
         $this->assertStringNotContainsString('F-2026-010', $found, 'the most recent only');
         $this->assertStringContainsString('drive.google.com/file/d/NEW', $this->last_to_jessica());
         $this->assertContains('ask_finanzas', $this->tool_names($this->prompts[0]), 'Jessica reaches Finanzas');
-        $this->assertSame(['find_invoices', 'invoice_detail', 'find_quotes', 'find_expenses', 'totals'], $this->tool_names($this->prompts[1]), 'Finanzas is read-only');
+        $this->assertSame(['find_invoices', 'invoice_detail', 'find_quotes', 'find_expenses', 'bank_movements', 'totals'], $this->tool_names($this->prompts[1]), 'Finanzas is read-only');
     }
 
     public function test_liz_only_reaches_her_own_tasks(){

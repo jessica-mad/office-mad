@@ -62,7 +62,7 @@ function install() {
 
 /** Main trigger: send new meetings, then carry out approved orders. */
 // Must match MAD Oficina (Cartero::VERSION): the website shows when this code is outdated.
-var CARTERO_VERSION = '2026-10-18';
+var CARTERO_VERSION = '2026-10-19';
 var RUN_STARTED = 0, EXPENSES_CFG = null, REPORT = null;
 
 /** What this run did, sent to the website with the tick (Jessica sees it in «El cartero»). */
@@ -280,6 +280,7 @@ function processOrders() {
         meeting_archive: archiveMeeting_,
         invoice_archive: archiveInvoice_,
         invoice_test: testInvoice_,
+        payment_reminder: paymentReminder_,
         libro_upsert: function (p) { upsertLibro_(p.rows || []); return { rows: (p.rows || []).length }; },
         expense_archive: archiveExpense_,
         expense_move: moveExpense_,
@@ -404,6 +405,18 @@ function archiveInvoice_(p) {
   if (sent) row['Estado'] = 'Enviada';
   upsertLibro_([row]);
   return { file_id: file.getId(), url: file.getUrl(), sent: sent };
+}
+
+/** A friendly payment reminder Jessica approved, from her Gmail, with the invoice attached. Never twice. */
+function paymentReminder_(p) {
+  var key = 'SENT_REMINDER_' + p.key, props = props_();
+  if (props.getProperty(key)) return { sent: true, repeated: true };
+  var mail = { to: p.email.to, subject: p.email.subject, body: p.email.body };
+  if (p.email.bcc) mail.bcc = p.email.bcc;
+  if (p.invoice_id) mail.attachments = [invoicePdf_(p.invoice_id)];
+  MailApp.sendEmail(mail);
+  props.setProperty(key, new Date().toISOString());
+  return { sent: true };
 }
 
 /** «Enviarme una prueba»: the draft PDF to Jessica only; nothing is archived. */

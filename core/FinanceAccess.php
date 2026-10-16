@@ -15,7 +15,7 @@ final class FinanceAccess {
 
     const OPTION = 'madoficina_finance_users';
     /** Requests that carry money matters (the accountant's). */
-    const APPROVAL_TYPES = ['invoice_issue', 'supplier_new', 'expense_review', 'missing_invoice'];
+    const APPROVAL_TYPES = ['invoice_issue', 'supplier_new', 'expense_review', 'missing_invoice', 'payment_reminder'];
 
     /** @return int[] */
     public static function users(){

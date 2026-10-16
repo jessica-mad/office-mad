@@ -18,6 +18,7 @@ $heads = [
     'agreements' => [__('Acuerdos', 'mad-oficina'), __('Fees mensuales y encargos puntuales de cada cliente.', 'mad-oficina')],
     'quotes' => [__('Presupuestos', 'mad-oficina'), __('Lo que está en el aire, con su probabilidad.', 'mad-oficina')],
     'clients' => [__('Clientes de facturación', 'mad-oficina'), __('Datos fiscales de cada cliente y con qué cliente de la oficina va.', 'mad-oficina')],
+    'bank' => [__('Banco', 'mad-oficina'), __('Sube el extracto de tu cuenta y lo cruzo con tus facturas, gastos e impuestos: lo que cuadra se apunta solo; aquí ves lo que no.', 'mad-oficina')],
     'taxes' => [__('Impuestos y cuotas', 'mad-oficina'), __('Lo que pagas a Hacienda y a la Seguridad Social. Las estimaciones son orientativas: la cifra buena la da la gestoría.', 'mad-oficina')],
     'settings' => [__('Ajustes de finanzas', 'mad-oficina'), __('Tus datos de emisor, el email de las facturas, el Libro MAD y la lectura de gastos.', 'mad-oficina')],
 ];
@@ -28,7 +29,7 @@ $status_pill = function($inv){
     $label = Invoices::STATUSES[$inv['status']] ?? $inv['status'];
     $cls = $inv['status'] === 'draft' ? '' : 'is-on';
     $out = '<span class="madof-pill ' . $cls . '">' . esc_html__($label, 'mad-oficina') . '</span>';
-    if ( in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' ) $out .= ' <span class="madof-pill ' . ($inv['paid'] ? 'is-on' : '') . '">' . ($inv['paid'] ? esc_html__('Cobrada', 'mad-oficina') : esc_html__('Sin cobrar', 'mad-oficina')) . '</span>';
+    if ( in_array($inv['status'], ['issued', 'sent'], true) ) $out .= ' <span class="madof-pill ' . ($inv['paid'] ? 'is-on' : '') . '">' . ($inv['paid'] ? esc_html__('Cobrada', 'mad-oficina') : esc_html__('Sin cobrar', 'mad-oficina')) . '</span>';
     if ( ! $inv['paid'] && in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' && ! empty($inv['due_date']) && $inv['due_date'] < current_time('Y-m-d') ) $out .= ' <span class="madof-pill is-alert">' . esc_html__('Vencida', 'mad-oficina') . '</span>';
     return $out;
 };
@@ -85,7 +86,7 @@ $status_pill = function($inv){
             <button class="madof-btn is-ghost"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></button>
         </form><?php endif; ?>
         </div>
-        <?php if ( in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' ) : ?>
+        <?php if ( in_array($inv['status'], ['issued', 'sent'], true) ) : // Argentina too: its due date is asked like any other ?>
             <?php echo AdminUi::form_open('billing_paid', 'madof-inline'); ?>
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
                 <input type="hidden" name="paid" value="<?php echo $inv['paid'] ? '' : '1'; ?>">
@@ -104,7 +105,7 @@ $status_pill = function($inv){
         <?php endif; ?>
     </section>
 
-<?php elseif ( in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'taxes'], true) ) :
+<?php elseif ( in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'bank', 'taxes'], true) ) :
     include __DIR__ . '/' . $tab . '.php'; ?>
 
 <?php elseif ( $tab === 'summary' ) :

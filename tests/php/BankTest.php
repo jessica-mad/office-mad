@@ -1,0 +1,198 @@
+<?php
+use MAD_Oficina\Billing\Bank;
+use MAD_Oficina\Billing\BankStatement;
+use MAD_Oficina\Billing\Collections;
+use MAD_Oficina\Billing\Invoices;
+use MAD_Oficina\Core\Approvals;
+use MAD_Oficina\Core\Crypto;
+use MAD_Oficina\Core\Schema;
+
+/**
+ * Finanzas → Banco (statements matched with invoices, expenses and taxes) and Cobros
+ * (due invoices not collected). Everything here is invented data.
+ */
+class BankTest extends MADOF_TestCase {
+
+    private static $sa_key;
+    private $client;
+    private $sent = [];
+    private $dir;
+
+    public static function wpSetUpBeforeClass($factory){
+        openssl_pkey_export(openssl_pkey_new(['private_key_bits' => 2048]), self::$sa_key);
+    }
+
+    public function set_up(){
+        parent::set_up();
+        add_filter('pre_http_request', [$this, 'fake'], 10, 3);
+        update_option(MAD_Oficina_Core::option_key('chat'), ['manager_email' => 'jessica@imad.example', 'manager_dm' => 'spaces/JESSDM',
+            'service_account' => Crypto::encrypt(wp_json_encode(['type' => 'service_account', 'client_email' => 'bot@proj.iam.gserviceaccount.com', 'private_key' => self::$sa_key, 'token_uri' => 'https://oauth2.googleapis.com/token']))]);
+        delete_transient('madof_chat_token_' . md5('bot@proj.iam.gserviceaccount.com'));
+        delete_option(Bank::RULES); delete_option(Collections::ASKED); delete_option(Collections::DAY);
+        $this->client = $this->make_client('LCS', 'Luz Clara');
+        $this->dir = get_temp_dir() . 'madof-bank-' . wp_generate_password(6, false);
+        wp_mkdir_p($this->dir);
+    }
+
+    public function tear_down(){
+        remove_filter('pre_http_request', [$this, 'fake']);
+        parent::tear_down();
+    }
+
+    public function fake($pre, $args, $url){
+        if ( $url === 'https://oauth2.googleapis.com/token' ) return ['response' => ['code' => 200], 'body' => wp_json_encode(['access_token' => 't', 'expires_in' => 3600])];
+        if ( strpos($url, 'https://chat.googleapis.com/v1/') === 0 ) {
+            $this->sent[] = json_decode($args['body'] ?? '{}', true);
+            return ['response' => ['code' => 200], 'body' => wp_json_encode(['name' => 'spaces/JESSDM/messages/' . count($this->sent)])];
+        }
+        return $pre;
+    }
+
+    private function file($name, $content){
+        $path = $this->dir . '/' . $name;
+        file_put_contents($path, $content);
+        return $path;
+    }
+
+    private function invoice(array $row){
+        global $wpdb;
+        static $seq = 0; $seq++;
+        $wpdb->insert(Invoices::table(), $row + ['series' => 'F', 'number' => 'F-2026-0' . (10 + $seq), 'seq' => $seq, 'year' => 2026, 'issue_date' => '2026-02-01', 'client_id' => $this->client,
+            'client_name' => 'Luz Clara SL', 'client_email' => 'pagos@luzclara.example', 'status' => 'sent', 'total' => 121, 'base' => 100, 'vat' => 21, 'paid' => 0, 'created_at' => '2026-02-01 00:00:00', 'updated_at' => '2026-02-01 00:00:00']);
+        return (int) $wpdb->insert_id;
+    }
+
+    private function inv($id){ return Invoices::get($id); }
+
+    /* ───────── reading statements ───────── */
+
+    public function test_csv_with_bank_header_lines_and_debit_credit_columns(){
+        $csv = "Movimientos de la cuenta ES00 0000 0000 0000\nDesde 01/01/2026 hasta 31/03/2026\n\n"
+            . "F. Operación;F. Valor;Concepto;Cargo;Abono;Saldo\n"
+            . "03/02/2026;03/02/2026;TRANSF. DE LUZ CLARA SL FRA F-2026-011;;121,00;1.121,00\n"
+            . "05/02/2026;05/02/2026;RECIBO ADOBE SYSTEMS;24,19;;1.096,81\n"
+            . ";;Saldo final;;;1.096,81\n";
+        $st = BankStatement::read($this->file('extracto.csv', mb_convert_encoding($csv, 'Windows-1252', 'UTF-8')), 'extracto.csv');
+        $this->assertCount(2, $st['rows'], 'totals and header lines are skipped');
+        $this->assertSame(['2026-02-03', 121.0, 'TRANSF. DE LUZ CLARA SL FRA F-2026-011'], [$st['rows'][0]['date'], $st['rows'][0]['amount'], $st['rows'][0]['concept']]);
+        $this->assertSame(-24.19, $st['rows'][1]['amount']);
+        $this->assertSame(1096.81, $st['rows'][1]['balance']);
+    }
+
+    public function test_xlsx_with_shared_strings_and_excel_dates(){
+        $path = $this->dir . '/extracto.xlsx';
+        $zip = new ZipArchive(); $zip->open($path, ZipArchive::CREATE);
+        $zip->addFromString('xl/sharedStrings.xml', '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Fecha</t></si><si><t>Concepto</t></si><si><t>Importe</t></si><si><t>Pago Google Ads</t></si></sst>');
+        $zip->addFromString('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+            . '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>'
+            . '<row r="2"><c r="A2"><v>46056</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>-50.5</v></c></row></sheetData></worksheet>');
+        $zip->close();
+        $st = BankStatement::read($path, 'extracto.xlsx');
+        $this->assertSame([['date' => '2026-02-03', 'value_date' => null, 'concept' => 'Pago Google Ads', 'amount' => -50.5, 'balance' => null]], $st['rows']);
+    }
+
+    public function test_norma_43_and_html_xls(){
+        $n43 = "11" . str_repeat('0', 8) . "0000001234" . str_repeat(' ', 60) . "\n"
+            . '22' . '    ' . '0000' . '260203' . '260203' . '02' . '000' . '2' . '00000000012100' . '0000000000' . str_pad('LUZCLARA', 12) . str_pad('F-2026-011', 16) . "\n"
+            . "2301TRANSFERENCIA DE LUZ CLARA SL" . str_repeat(' ', 9) . str_repeat(' ', 38) . "\n";
+        $st = BankStatement::read($this->file('cuenta.n43', $n43), 'cuenta.n43');
+        $this->assertSame('2026-02-03', $st['rows'][0]['date']);
+        $this->assertSame(121.0, $st['rows'][0]['amount'], 'D/H 2 = abono');
+        $this->assertStringContainsString('TRANSFERENCIA DE LUZ CLARA', $st['rows'][0]['concept']);
+
+        $html = '<html><body><table><tr><td>Fecha</td><td>Descripción</td><td>Importe</td></tr><tr><td>10/02/2026</td><td>Comisión mantenimiento</td><td>-6,00</td></tr></table></body></html>';
+        $st = BankStatement::read($this->file('movs.xls', $html), 'movs.xls');
+        $this->assertSame(-6.0, $st['rows'][0]['amount']);
+        $this->assertWPError(BankStatement::read($this->file('raro.csv', "a;b;c\n1;2;3\n"), 'raro.csv'), 'unknown columns are explained, not guessed');
+    }
+
+    /* ───────── matching ───────── */
+
+    public function test_money_in_marks_the_invoice_collected_silently_and_overlaps_do_not_duplicate(){
+        $a = $this->invoice(['total' => 121, 'issue_date' => '2026-01-31']);
+        $b = $this->invoice(['total' => 300, 'issue_date' => '2026-01-31']);
+        $c = $this->invoice(['total' => 200, 'issue_date' => '2026-01-31']);
+        $st = ['account' => '', 'rows' => [
+            ['date' => '2026-02-03', 'value_date' => null, 'concept' => 'TRANSF LUZ CLARA SL F-2026-011', 'amount' => 121.0, 'balance' => null],
+            ['date' => '2026-02-10', 'value_date' => null, 'concept' => 'TRANSFERENCIA LUZ CLARA FRAS FEBRERO', 'amount' => 500.0, 'balance' => null],
+        ]];
+        $imp = Bank::import($st);
+        $m = Bank::match($imp['ids']);
+        $this->assertSame(['matched' => 2, 'ignored' => 0, 'unmatched' => 0], $m);
+        $this->assertSame(['1', '2026-02-03 12:00:00'], [(string) $this->inv($a)['paid'], $this->inv($a)['paid_at']], 'collected on the bank date');
+        $this->assertSame([1, 1], [(int) $this->inv($b)['paid'], (int) $this->inv($c)['paid']], 'one transfer, two invoices of the same client');
+        $this->assertSame(['new' => 0, 'repeated' => 2], array_slice(Bank::import($st), 0, 2), 'uploading again duplicates nothing');
+
+        // «Deshacer» puts the invoice back to unpaid.
+        Bank::unlink((int) $GLOBALS['wpdb']->get_var('SELECT id FROM ' . Bank::table() . ' WHERE amount = 121'));
+        $this->assertSame(0, (int) $this->inv($a)['paid']);
+    }
+
+    public function test_money_out_with_supplier_invoices_taxes_rules_and_what_is_missing(){
+        global $wpdb;
+        $exp = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-02-01', 'supplier_name' => 'Adobe Systems', 'total' => 24.19, 'currency' => 'EUR']);
+        $this->insert('suppliers', ['name' => 'Canva', 'status' => 'active']);
+        $tax = $this->insert('taxes', ['kind' => 'autonomos', 'period' => '2026-02', 'paid_on' => '2026-02-28', 'amount' => 294.0]);
+        $imp = Bank::import(['account' => '', 'rows' => [
+            ['date' => '2026-02-05', 'value_date' => null, 'concept' => 'RECIBO ADOBE SYSTEMS', 'amount' => -24.19, 'balance' => null],
+            ['date' => '2026-02-28', 'value_date' => null, 'concept' => 'TGSS COTIZACION 022026', 'amount' => -294.0, 'balance' => null],
+            ['date' => '2026-02-12', 'value_date' => null, 'concept' => 'CANVA* 0233 PRO', 'amount' => -11.99, 'balance' => null],
+            ['date' => '2026-02-28', 'value_date' => null, 'concept' => 'COMISION MANTENIMIENTO CUENTA', 'amount' => -6.0, 'balance' => null],
+        ]]);
+        Bank::match($imp['ids']);
+        $rows = $wpdb->get_results('SELECT concept, status, match_type, match_ids, note FROM ' . Bank::table() . ' ORDER BY id', ARRAY_A);
+        $this->assertSame(['matched', 'expense', (string) $exp], [$rows[0]['status'], $rows[0]['match_type'], $rows[0]['match_ids']]);
+        $this->assertSame(['matched', 'tax', (string) $tax], [$rows[1]['status'], $rows[1]['match_type'], $rows[1]['match_ids']]);
+        $this->assertSame('unmatched', $rows[2]['status']);
+        $this->assertStringContainsString('Parece de Canva: falta su factura', $rows[2]['note']);
+
+        // She says the fee needs no invoice and to remember it: next time it settles itself.
+        $fee = (int) $wpdb->get_var('SELECT id FROM ' . Bank::table() . " WHERE concept LIKE 'COMISION%'");
+        Bank::ignore($fee, 'no_invoice', 'comision mantenimiento', 'Comisión del banco');
+        $next = Bank::import(['account' => '', 'rows' => [['date' => '2026-03-31', 'value_date' => null, 'concept' => 'COMISION MANTENIMIENTO CUENTA', 'amount' => -6.0, 'balance' => null]]]);
+        $this->assertSame(['matched' => 0, 'ignored' => 1, 'unmatched' => 0], Bank::match($next['ids']));
+        $this->assertSame([], array_column(Bank::unpaid_expenses(), 'id'), 'the Adobe one was paid');
+    }
+
+    /* ───────── cobros ───────── */
+
+    public function test_due_and_not_collected_asks_jessica_once_a_week_argentina_included(){
+        $due = $this->invoice(['total' => 121, 'issue_date' => '2026-02-01', 'due_date' => '2026-02-16']);
+        $later = $this->invoice(['total' => 50, 'issue_date' => '2026-02-10', 'due_date' => '2026-03-10']);
+        $ar = $this->invoice(['series' => 'AR', 'number' => null, 'currency' => 'USD', 'total' => 900, 'issue_date' => '2026-01-20', 'due_date' => null]);
+        $col = new Collections(['payment_days' => 15]);
+        $this->assertSame(2, $col->run('2026-02-16'));
+        $texts = wp_json_encode($this->sent, JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('vence hoy y no consta cobrada', $texts);
+        $this->assertStringContainsString('de Argentina', $texts);
+        $this->assertStringContainsString('collect_remind', $texts);
+        $this->assertStringNotContainsString('50,00', $texts, 'not due yet');
+
+        delete_option(Collections::DAY);
+        $this->assertSame(0, $col->run('2026-02-17'), 'once, then again a week later');
+        delete_option(Collections::DAY);
+        $this->assertSame(2, $col->run('2026-02-23'));
+
+        // «Ya está cobrada» from Chat.
+        Collections::chat_action(null, 'collect_paid', ['invoice_id' => $due], 'jessica@imad.example', true);
+        $this->assertSame(1, (int) $this->inv($due)['paid']);
+        delete_option(Collections::DAY);
+        $this->assertSame(1, $col->run('2026-03-02'), 'collected ones stop asking (only Argentina left)');
+    }
+
+    public function test_the_friendly_reminder_waits_for_her_ok_and_goes_from_her_gmail(){
+        update_option(\MAD_Oficina\Core\ClientCopy::OPTION, ['on' => true, 'template' => 'yo+c.{cliente}@agencia.example']);
+        $id = $this->invoice(['total' => 121, 'due_date' => '2026-02-16']);
+        $this->assertStringContainsString('bandeja', wp_json_encode(Collections::chat_action(null, 'collect_remind', ['invoice_id' => $id], 'jessica@imad.example', true), JSON_UNESCAPED_UNICODE));
+        $this->assertSame('Solo Jessica puede decidir sobre los cobros.', Collections::chat_action(null, 'collect_remind', ['invoice_id' => $id], 'liz@imad.example', false));
+        $approval = array_values(array_filter(Approvals::for_object('invoice', $id), fn($a) => $a['action_type'] === Collections::ACTION))[0];
+        $this->assertSame(Approvals::PENDING, $approval['status']);
+        $this->assertContains(Collections::ACTION, \MAD_Oficina\Core\FinanceAccess::types(), 'a money matter: hidden from who does not see Finanzas');
+
+        Approvals::resolve($approval['id'], 'approve', [], 1, 'chat');
+        $order = json_decode($GLOBALS['wpdb']->get_var("SELECT payload FROM " . Schema::table('tasks') . " WHERE type = 'payment_reminder'"), true);
+        $this->assertSame(['pagos@luzclara.example', 'yo+c.luz-clara@agencia.example', $id], [$order['email']['to'], $order['email']['bcc'], $order['invoice_id']]);
+        $this->assertStringContainsString('pendiente de pago', $order['email']['subject']);
+        delete_option(\MAD_Oficina\Core\ClientCopy::OPTION);
+    }
+}

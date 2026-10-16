@@ -46,7 +46,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -69,6 +69,14 @@ return new class($core) implements MAD_Oficina_Module {
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
         add_filter('madoficina_chat_approval_buttons', ['MAD_Oficina\\Billing\\Calendar', 'chat_buttons'], 10, 2);
         add_filter('madoficina_chat_action', ['MAD_Oficina\\Billing\\Calendar', 'chat_action'], 10, 5);
+
+        // Cobros: due and not collected → Jessica is asked; a friendly reminder goes through the inbox.
+        add_action(self::CRON_HOOK, fn() => (new \MAD_Oficina\Billing\Collections($this->settings()))->run());
+        add_action('madoficina_tick', fn() => (new \MAD_Oficina\Billing\Collections($this->settings()))->run());
+        add_filter('madoficina_chat_action', ['MAD_Oficina\\Billing\\Collections', 'chat_action'], 10, 5);
+        $reminder = \MAD_Oficina\Billing\Collections::ACTION;
+        add_filter('madoficina_approval_handler_' . $reminder, fn() => ['MAD_Oficina\\Billing\\Collections', 'approve']);
+        add_filter('madoficina_approval_form_' . $reminder, ['MAD_Oficina\\Billing\\Collections', 'render_form'], 10, 2);
         // «Finanzas»: its own menu (billing, expenses, taxes), apart from the office.
         add_action('admin_menu', [$this, 'register_finance_menu'], 9);
         add_action('admin_menu', [$this, 'sort_finance_menu'], 999);
@@ -91,7 +99,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_menu_page(__('Finanzas', 'mad-oficina'), __('Finanzas', 'mad-oficina'), $cap, self::FINANCE, [$this, 'render_summary_page'], 'dashicons-chart-area', 57);
         add_submenu_page(self::FINANCE, __('Resumen', 'mad-oficina'), __('Resumen', 'mad-oficina'), $cap, self::FINANCE, [$this, 'render_summary_page'], 0);
         add_submenu_page(self::FINANCE, __('Facturas', 'mad-oficina'), __('Facturas', 'mad-oficina'), $cap, $this->menu_slug(), [$this, 'render_settings_page'], 1);
-        foreach ( [2 => ['calendar', __('Calendario', 'mad-oficina')], 3 => ['forecast', __('Previsión', 'mad-oficina')], 4 => ['agreements', __('Acuerdos', 'mad-oficina')], 5 => ['quotes', __('Presupuestos', 'mad-oficina')], 6 => ['clients', __('Clientes de facturación', 'mad-oficina')], 20 => ['taxes', __('Impuestos', 'mad-oficina')], 30 => ['settings', __('Ajustes', 'mad-oficina')]] as $pos => [$tab, $label] ) {
+        foreach ( [2 => ['calendar', __('Calendario', 'mad-oficina')], 3 => ['forecast', __('Previsión', 'mad-oficina')], 4 => ['agreements', __('Acuerdos', 'mad-oficina')], 5 => ['quotes', __('Presupuestos', 'mad-oficina')], 6 => ['clients', __('Clientes de facturación', 'mad-oficina')], 7 => ['bank', __('Banco', 'mad-oficina')], 20 => ['taxes', __('Impuestos', 'mad-oficina')], 30 => ['settings', __('Ajustes', 'mad-oficina')]] as $pos => [$tab, $label] ) {
             add_submenu_page(self::FINANCE, $label, $label, $cap, $url($this->menu_slug(), $tab), '', $pos);
         }
     }
@@ -112,7 +120,7 @@ return new class($core) implements MAD_Oficina_Module {
     public function finance_submenu_file($file){
         $page = $_GET['page'] ?? '';
         $tab = sanitize_key($_GET['tab'] ?? '');
-        if ( $page === $this->menu_slug() && in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'clients', 'taxes', 'settings'], true) && ! isset($_GET['invoice']) && ! isset($_GET['edit']) ) {
+        if ( $page === $this->menu_slug() && in_array($tab, ['calendar', 'forecast', 'agreements', 'quotes', 'clients', 'bank', 'taxes', 'settings'], true) && ! isset($_GET['invoice']) && ! isset($_GET['edit']) ) {
             return 'admin.php?page=' . $page . '&tab=' . $tab;
         }
         if ( $page === 'mad-oficina-gastos' && $tab === 'suppliers' ) return 'admin.php?page=mad-oficina-gastos&tab=suppliers';
@@ -379,6 +387,46 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     /** Argentina: the invoice is issued on the Argentine platform; here it is only recorded. */
+    /** Finanzas → Banco: a statement in; what matches is settled silently, the rest waits (and Jessica gets a link in Chat). */
+    public function handle_billing_bank_upload(){
+        $this->guard('billing_bank_upload');
+        $f = $_FILES['statement'] ?? null;
+        if ( ! $f || empty($f['tmp_name']) || ! is_uploaded_file($f['tmp_name']) ) $this->back(['tab' => 'bank'], __('Sube el extracto del banco (Excel, CSV o Norma 43).', 'mad-oficina'), 'error');
+        if ( $f['size'] > 10 * MB_IN_BYTES ) $this->back(['tab' => 'bank'], __('El archivo es demasiado grande.', 'mad-oficina'), 'error');
+        $st = \MAD_Oficina\Billing\BankStatement::read($f['tmp_name'], sanitize_file_name($f['name']));
+        if ( is_wp_error($st) ) $this->back(['tab' => 'bank'], $st->get_error_message(), 'error');
+        $imp = \MAD_Oficina\Billing\Bank::import($st, wp_unslash($_POST['account'] ?? ''));
+        $m = \MAD_Oficina\Billing\Bank::match($imp['ids']);
+        if ( $m['unmatched'] ) {
+            $chat = MAD_Oficina_Core::instance()->get_module('chat');
+            if ( $chat ) $chat->messenger()->to_manager(['text' => sprintf(_n('He cruzado el extracto del banco: %1$d movimiento no cuadra. Míralo aquí: %2$s', 'He cruzado el extracto del banco: %1$d movimientos no cuadran. Míralos aquí: %2$s', $m['unmatched'], 'mad-oficina'),
+                $m['unmatched'], admin_url('admin.php?page=' . $this->menu_slug() . '&tab=bank'))]);
+        }
+        $this->back(['tab' => 'bank'], sprintf(__('%1$d movimientos nuevos (%2$d ya estaban): %3$d cuadran, %4$d resueltos por tus reglas y %5$d sin cuadrar.', 'mad-oficina'), $imp['new'], $imp['repeated'], $m['matched'], $m['ignored'], $m['unmatched']));
+    }
+
+    public function handle_billing_bank_action(){
+        $this->guard('billing_bank_action');
+        $p = wp_unslash($_POST);
+        $id = absint($p['movement'] ?? 0);
+        $do = sanitize_key($p['do'] ?? '');
+        $view = sanitize_key($p['view'] ?? 'unmatched');
+        if ( $do === 'link' ) {
+            [$type, $ref] = array_pad(explode(':', (string) ($p['target'] ?? ''), 2), 2, '');
+            $r = \MAD_Oficina\Billing\Bank::link($id, sanitize_key($type), [absint($ref)]);
+        } elseif ( $do === 'ignore' ) {
+            $r = \MAD_Oficina\Billing\Bank::ignore($id, sanitize_key($p['kind'] ?? ''), ! empty($p['remember']) ? sanitize_text_field($p['pattern'] ?? '') : '', sanitize_text_field($p['label'] ?? ''));
+        } elseif ( $do === 'unlink' ) {
+            \MAD_Oficina\Billing\Bank::unlink($id); $r = true;
+        } elseif ( $do === 'rematch' ) {
+            $r = \MAD_Oficina\Billing\Bank::match();
+            $this->back(['tab' => 'bank'], sprintf(__('Vuelto a cruzar: %1$d cuadran ahora, %2$d siguen sin cuadrar.', 'mad-oficina'), $r['matched'] + $r['ignored'], $r['unmatched']));
+        } elseif ( $do === 'delete_rule' ) {
+            \MAD_Oficina\Billing\Bank::delete_rule(sanitize_text_field($p['pattern'] ?? '')); $r = true;
+        } else $r = new \WP_Error('madof_bank', __('Acción desconocida.', 'mad-oficina'));
+        $this->back(['tab' => 'bank', 'view' => $view], is_wp_error($r) ? $r->get_error_message() : __('Hecho.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+    }
+
     public function handle_billing_ar_issued(){
         $this->guard('billing_ar_issued');
         global $wpdb;

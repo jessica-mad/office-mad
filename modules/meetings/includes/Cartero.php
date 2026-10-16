@@ -12,7 +12,7 @@ final class Cartero {
 
     const OPTION = 'madoficina_cartero';
     /** Code.gs version this plugin expects (apps-script/Code.gs → CARTERO_VERSION). */
-    const VERSION = '2026-10-18';
+    const VERSION = '2026-10-19';
     const RUN_MINUTES = 10;
 
     public static function get(){
@@ -79,7 +79,7 @@ final class Cartero {
         $st = self::status();
         $kinds = ['meeting_archive' => __('archivar una reunión', 'mad-oficina'), 'invoice_archive' => __('guardar y enviar una factura', 'mad-oficina'), 'invoice_test' => __('enviarte una prueba', 'mad-oficina'),
             'libro_upsert' => __('apuntar en el Libro MAD', 'mad-oficina'), 'libro_sync' => __('sincronizar el Libro MAD', 'mad-oficina'), 'expense_archive' => __('archivar un gasto', 'mad-oficina'),
-            'expense_move' => __('mover un gasto en Drive', 'mad-oficina'), 'gmail_filter' => __('crear un filtro de Gmail', 'mad-oficina')];
+            'expense_move' => __('mover un gasto en Drive', 'mad-oficina'), 'gmail_filter' => __('crear un filtro de Gmail', 'mad-oficina'), 'payment_reminder' => __('enviar un recordatorio de pago', 'mad-oficina')];
         ob_start(); ?>
         <section class="madof-card madof-cartero">
             <span class="madof-kicker"><?php esc_html_e('El cartero (Apps Script)', 'mad-oficina'); ?></span>
