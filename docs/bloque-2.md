@@ -57,12 +57,12 @@ En la vista oficina:
 
 ## Sprites propios
 
-Sustituye los archivos `assets/game/characters/{slug}.png` (también en `game/public/characters/` si recompilas). Formato:
-- PNG de **128×192**: 4 columnas × 6 filas de 32×32.
-- Filas 0 a 3: caminar ↓ ← → ↑.
-- Fila 4: idle (↓ ← → ↑).
-- Fila 5: sentado (↓ ← → ↑).
-- Punto de apoyo: (16, 30).
+Sustituye los archivos `assets/game/characters/{slug}.png` (y en `game/public/characters/` si recompilas). Formato (el de pixel-agents, desde la oficina v2):
+- PNG de **112×96**: 7 columnas de 16 px × 3 filas de 32 px.
+- Filas: abajo, arriba, derecha. La izquierda se obtiene reflejando la derecha.
+- Columnas: caminar 1-3, teclear 1-2, leer 1-2.
+- Punto de apoyo: centro de los pies (abajo del todo, en el centro).
+- Plantilla: cualquiera de `game/public/kit/characters/char_*.png`.
 
 Los slugs son:
 - `recepcionista`
@@ -74,7 +74,7 @@ Los slugs son:
 - `analista`
 - `jessica`
 
-El mapa (`office.json`) se abre y se edita con **Tiled**.
+El mapa (`office.json`) se abre con **Tiled**, pero se genera con `game/scripts/generate-assets.mjs` (posiciones del encargo `docs/oficina-v2.md`): cambia los muebles allí, no en Tiled.
 
 ## Recompilar (solo desarrollo)
 
@@ -82,4 +82,4 @@ El mapa (`office.json`) se abre y se edita con **Tiled**.
 cd game && npm install && npm run build   # regenera los sprites provisionales y compila en assets/game
 ```
 
-`npm run build` vuelve a generar los sprites provisionales. Si ya has puesto los tuyos, usa `npx vite build`.
+`npm run build` vuelve a generar el mapa y los sprites provisionales, pero **nunca sobrescribe un sprite tuyo**: solo sustituye los que generó él (los anota en `characters/.generated.json`).

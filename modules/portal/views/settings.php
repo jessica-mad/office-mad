@@ -18,7 +18,7 @@ $current = Characters::all();
 
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Personajes', 'mad-oficina'); ?></span>
-            <p class="description"><?php esc_html_e('Nombres y cargos que ve el cliente. Los sprites siguen el formato de 128×192 px (4 columnas × 6 filas de 32×32) en assets/game/characters/{slug}.png.', 'mad-oficina'); ?></p>
+            <p class="description"><?php esc_html_e('Nombres y cargos que ve el cliente. Los sprites siguen el formato de 112×96 px (7 columnas de 16 px × 3 filas de 32 px: abajo, arriba, derecha; columnas: caminar 1-3, teclear 1-2, leer 1-2) en assets/game/characters/{slug}.png.', 'mad-oficina'); ?></p>
             <table class="madof-table">
                 <thead><tr>
                     <th scope="col"><?php esc_html_e('Sala', 'mad-oficina'); ?></th>

@@ -56,7 +56,11 @@ return new class($core) implements MAD_Oficina_Module {
 
     /** One version for the map and sprites: changes when any of them changes (e.g. new sprites). */
     private function game_assets_version(){
-        $files = array_merge(glob(MAD_OFICINA_DIR . 'assets/game/*.{json,png}', GLOB_BRACE) ?: [], glob(MAD_OFICINA_DIR . 'assets/game/characters/*.png') ?: []);
+        $g = MAD_OFICINA_DIR . 'assets/game/';
+        $files = array_merge(
+            glob($g . '*.{json,png}', GLOB_BRACE) ?: [], glob($g . 'characters/*.png') ?: [], glob($g . 'props/*.png') ?: [],
+            glob($g . 'kit/*/*.png') ?: [], glob($g . 'kit/furniture/*/*.png') ?: [] // the pixel-agents kit (furniture is one folder deeper)
+        );
         $sig = '';
         foreach ( $files as $f ) $sig .= basename($f) . filesize($f) . filemtime($f);
         return substr(md5($sig), 0, 10);
