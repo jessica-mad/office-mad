@@ -28,6 +28,14 @@ $now_month = $year === $this_year ? (int) current_time('n') : 12;
 <div class="wrap madof-wrap">
     <?php AdminUi::header(__('Finanzas', 'mad-oficina'), __('Resumen', 'mad-oficina'), __('Lo que entra frente a lo que sale, sin IVA. Argentina va aparte. Son cifras orientativas: las buenas las cierra la gestoría.', 'mad-oficina')); ?>
 
+    <?php if ( ! \MAD_Oficina\Core\FinanceAccess::reserved() ) : $others = count(get_users(['capability' => \MAD_Oficina\Core\Roles::CAP_MANAGE, 'fields' => 'ID'])) - 1; ?>
+        <?php if ( $others > 0 ) : echo AdminUi::form_open('billing_finance_access', 'madof-card madof-form'); ?>
+            <input type="hidden" name="from_summary" value="1">
+            <p><?php echo AdminUi::icon('alert'); ?> <?php echo esc_html(sprintf(_n('Ahora mismo Finanzas la ve también %d persona más con acceso de gerencia.', 'Ahora mismo Finanzas la ven también %d personas más con acceso de gerencia.', $others, 'mad-oficina'), $others)); ?></p>
+            <button class="madof-btn is-small"><?php esc_html_e('Reservármela solo a mí', 'mad-oficina'); ?></button>
+        </form><?php endif; ?>
+    <?php endif; ?>
+
     <nav class="madof-filters" aria-label="<?php esc_attr_e('Año', 'mad-oficina'); ?>">
         <?php foreach ( $years as $y ) : ?>
             <a class="madof-pill <?php echo $y === $year ? 'is-on' : ''; ?>" href="<?php echo esc_url($base . '&year=' . $y); ?>"><?php echo esc_html($y); ?></a>

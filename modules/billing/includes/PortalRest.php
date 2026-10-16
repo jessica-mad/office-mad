@@ -40,6 +40,8 @@ final class PortalRest {
     public function can(){
         if ( ! is_user_logged_in() ) return new \WP_Error('rest_not_logged_in', __('Inicia sesión para entrar en la oficina.', 'mad-oficina'), ['status' => 401]);
         if ( ! current_user_can(Roles::CAP_PORTAL) ) return new \WP_Error('rest_forbidden', __('Tu usuario no tiene acceso a la oficina.', 'mad-oficina'), ['status' => 403]);
+        // The office's own people only see invoices if Finanzas is theirs; clients see their own.
+        if ( current_user_can(Roles::CAP_MANAGE) && ! \MAD_Oficina\Core\FinanceAccess::can() ) return new \WP_Error('rest_forbidden', __('Las facturas solo las ve quien lleva Finanzas.', 'mad-oficina'), ['status' => 403]);
         return PortalAreas::can('billing') ? true : PortalAreas::denied();
     }
 

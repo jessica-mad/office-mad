@@ -44,7 +44,7 @@ final class Rest {
             'args' => ['decision' => ['required' => true, 'type' => 'string', 'enum' => ['approve', 'reject']]],
             'callback' => function(\WP_REST_Request $r){
                 $a = \MAD_Oficina\Core\Approvals::get((int) $r['id']);
-                if ( ! $a ) return new \WP_Error('madof_not_found', __('Esa petición ya no existe.', 'mad-oficina'), ['status' => 404]);
+                if ( ! $a || \MAD_Oficina\Core\FinanceAccess::hides($a) ) return new \WP_Error('madof_not_found', __('Esa petición ya no existe.', 'mad-oficina'), ['status' => 404]);
                 $approve = $r['decision'] === 'approve';
                 $input = $approve ? (array) apply_filters('madoficina_approval_default_input_' . $a['action_type'], [], $a) : [];
                 $res = \MAD_Oficina\Core\Approvals::resolve($a['id'], $r['decision'], $input, get_current_user_id(), 'portal');
@@ -100,7 +100,7 @@ final class Rest {
     public static function waiting(){
         $types = \MAD_Oficina\Core\Approvals::types();
         $out = [];
-        foreach ( \MAD_Oficina\Core\Approvals::pending(100) as $a ) {
+        foreach ( \MAD_Oficina\Core\FinanceAccess::visible(\MAD_Oficina\Core\Approvals::pending(100)) as $a ) {
             $slug = OfficeState::AGENT_TO_CHARACTER[$a['agent']] ?? null;
             if ( ! $slug || $a['status'] !== 'pending' || count($out[$slug] ?? []) >= 10 ) continue;
             $out[$slug][] = [
@@ -162,7 +162,7 @@ final class Rest {
             ],
         ];
         if ( $role === 'manager' ) {
-            $data['inbox'] = ['pending' => \MAD_Oficina\Core\Approvals::count_pending(), 'url' => admin_url('admin.php?page=mad-oficina-bandeja')];
+            $data['inbox'] = ['pending' => \MAD_Oficina\Core\FinanceAccess::pending_count(), 'url' => admin_url('admin.php?page=mad-oficina-bandeja')];
             $data['clients'] = array_map(fn($c) => ['id' => $c['id'], 'name' => $c['name'], 'code' => $c['code']], Clients::all(['status' => 'active']));
         }
         return rest_ensure_response(apply_filters('madoficina_portal_me', $data, $user)); // other modules add their bits (e.g. the brief form)

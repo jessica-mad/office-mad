@@ -12,10 +12,12 @@ if ( ! defined('ABSPATH') ) exit;
 
 $types = Approvals::types();
 $counts = Approvals::count_by_type();
+// Money matters (the accountant's) only for whoever has Finanzas.
+if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) $counts = array_diff_key($counts, array_flip(\MAD_Oficina\Core\FinanceAccess::types()));
 $type = sanitize_key($_GET['type'] ?? '');
 if ( $type && ! isset($counts[$type]) ) $type = '';
-$pending = Approvals::pending(200, $type);
-$resolved = Approvals::recent_resolved(20);
+$pending = \MAD_Oficina\Core\FinanceAccess::visible(Approvals::pending(200, $type));
+$resolved = \MAD_Oficina\Core\FinanceAccess::visible(Approvals::recent_resolved(20));
 $who = function($agent){
     $slug = OfficeState::AGENT_TO_CHARACTER[$agent] ?? null;
     $c = $slug ? Characters::get($slug) : null;

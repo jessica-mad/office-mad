@@ -80,6 +80,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_billing_pending_profiles', [$this, 'rebill_profiles'], 10, 2);
 
         add_action('admin_menu', function(){
+            if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) return;
             $cap = MAD_Oficina_Core::CAPABILITY;
             add_submenu_page('mad-finanzas', $this->title(), __('Gastos', 'mad-oficina'), $cap, $this->menu_slug(), [$this, 'render_settings_page'], 10);
             add_submenu_page('mad-finanzas', __('Proveedores', 'mad-oficina'), __('Proveedores', 'mad-oficina'), $cap, 'admin.php?page=' . $this->menu_slug() . '&tab=suppliers', '', 11);
@@ -186,7 +187,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Admin ==== */
 
     private function guard($action){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
         check_admin_referer('madof_' . $action);
     }
 
@@ -374,7 +375,7 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function render_settings_page(){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         $settings = $this->settings();
         $intake = $this->intake();
         $tab = sanitize_key($_GET['tab'] ?? 'expenses');

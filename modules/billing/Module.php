@@ -48,7 +48,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
-            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings'] as $a ) {
+            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
@@ -85,6 +85,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     /** Finanzas → Resumen, Facturas, Calendario… Sections of a page are direct links to its tab. */
     public function register_finance_menu(){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) return; // reserved for whoever Jessica chose
         $cap = MAD_Oficina_Core::CAPABILITY;
         $url = fn($page, $tab) => 'admin.php?page=' . $page . '&tab=' . $tab;
         add_menu_page(__('Finanzas', 'mad-oficina'), __('Finanzas', 'mad-oficina'), $cap, self::FINANCE, [$this, 'render_summary_page'], 'dashicons-chart-area', 57);
@@ -119,7 +120,7 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function render_summary_page(){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         include __DIR__ . '/views/finance-summary.php';
     }
 
@@ -150,7 +151,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Admin ==== */
 
     private function guard($action){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
         check_admin_referer('madof_' . $action);
     }
 
@@ -280,7 +281,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Client card and list ==== */
 
     public function render_client_identity($client){
-        if ( empty($client['id']) || ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) return;
+        if ( empty($client['id']) || ! \MAD_Oficina\Core\FinanceAccess::can() ) return;
         $linked = \MAD_Oficina\Billing\Profiles::for_client($client['id']);
         $unlinked = \MAD_Oficina\Billing\Profiles::unlinked();
         $suggested = [];
@@ -293,10 +294,12 @@ return new class($core) implements MAD_Oficina_Module {
     private $legal_names = null;
 
     public function render_client_list_head(){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) return;
         echo '<th scope="col">' . esc_html__('Razón social', 'mad-oficina') . '</th>';
     }
 
     public function render_client_list_cell($client){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) return;
         if ( $this->legal_names === null ) {
             $this->legal_names = [];
             foreach ( \MAD_Oficina\Billing\Profiles::all() as $p ) if ( $p['client_id'] ) $this->legal_names[$p['client_id']][] = $p['legal_name'];
@@ -475,6 +478,20 @@ return new class($core) implements MAD_Oficina_Module {
         $this->back(['tab' => 'calendar'], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
     }
 
+    /* ==== Who sees Finanzas ==== */
+
+    /** «Reservármela» or the list in Ajustes: only the chosen managers see Finanzas. */
+    public function handle_billing_finance_access(){
+        $this->guard('billing_finance_access');
+        $ids = isset($_POST['users']) ? array_map('absint', (array) $_POST['users']) : [get_current_user_id()];
+        $r = \MAD_Oficina\Core\FinanceAccess::set($ids);
+        if ( is_wp_error($r) ) $this->back(['tab' => 'settings'], $r->get_error_message(), 'error');
+        $names = array_map(fn($id) => get_userdata($id)->display_name, \MAD_Oficina\Core\FinanceAccess::users());
+        \MAD_Oficina\Core\AdminUi::flash(sprintf(__('Finanzas solo la ve: %s.', 'mad-oficina'), implode(', ', $names)));
+        wp_safe_redirect(admin_url(! empty($_POST['from_summary']) ? 'admin.php?page=' . self::FINANCE : 'admin.php?page=' . $this->menu_slug() . '&tab=settings'));
+        exit;
+    }
+
     /* ==== Taxes ==== */
 
     public function handle_billing_tax_save(){
@@ -508,7 +525,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     /** The invoice as PDF with MAD's design (opens in the browser). */
     public function handle_billing_pdf(){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
         $id = absint($_GET['invoice'] ?? 0);
         check_admin_referer('madof_billing_pdf_' . $id);
         $inv = \MAD_Oficina\Billing\Invoices::get($id);
@@ -524,7 +541,7 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     public function render_settings_page(){
-        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         $settings = $this->settings();
         if ( isset($_GET['edit']) ) {
             $issuing = $this->issuing();

@@ -80,7 +80,7 @@ final class MAD_Oficina_Core {
             'dashicons-building',
             56
         );
-        $pending = \MAD_Oficina\Core\Approvals::count_pending();
+        $pending = \MAD_Oficina\Core\FinanceAccess::pending_count();
         add_submenu_page(
             self::MENU_SLUG_ROOT,
             __('Bandeja de gerencia','mad-oficina'),
@@ -122,6 +122,8 @@ final class MAD_Oficina_Core {
         check_admin_referer('madof_approval_' . $id);
         $decision = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
         $input = isset($_POST['input']) && is_array($_POST['input']) ? wp_unslash($_POST['input']) : [];
+        $approval = \MAD_Oficina\Core\Approvals::get($id);
+        if ( $approval && \MAD_Oficina\Core\FinanceAccess::hides($approval) ) wp_die(esc_html__('Esta petición es de Finanzas.', 'mad-oficina'), 403);
 
         $result = \MAD_Oficina\Core\Approvals::resolve($id, $decision, $input, get_current_user_id());
         if ( is_wp_error($result) ) {
@@ -144,6 +146,8 @@ final class MAD_Oficina_Core {
             $decision = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
             $ids = array_map('absint', (array) ($_POST['ids'] ?? []));
         }
+        // Money matters stay with whoever has Finanzas.
+        $ids = array_values(array_filter($ids, function($id){ $a = \MAD_Oficina\Core\Approvals::get($id); return $a && ! \MAD_Oficina\Core\FinanceAccess::hides($a); }));
         if ( ! $ids ) {
             \MAD_Oficina\Core\AdminUi::flash(__('Marca al menos una.', 'mad-oficina'), 'error');
             wp_safe_redirect($back); exit;

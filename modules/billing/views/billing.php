@@ -259,7 +259,20 @@ $status_pill = function($inv){
         </form>
     </section>
 
-<?php elseif ( $tab === 'settings' ) : ?>
+<?php elseif ( $tab === 'settings' ) :
+    $managers = get_users(['capability' => \MAD_Oficina\Core\Roles::CAP_MANAGE, 'fields' => ['ID', 'display_name', 'user_email']]);
+    $finance = \MAD_Oficina\Core\FinanceAccess::users(); ?>
+    <?php echo AdminUi::form_open('billing_finance_access', 'madof-form madof-card'); ?>
+        <span class="madof-kicker"><?php esc_html_e('Quién ve Finanzas', 'mad-oficina'); ?></span>
+        <p class="description"><?php esc_html_e('Facturas, gastos, impuestos, previsión y las peticiones del contable en la bandeja. Quien no esté marcado no ve el menú Finanzas aunque sea administrador.', 'mad-oficina'); ?></p>
+        <?php foreach ( $managers as $u ) : $me = (int) $u->ID === get_current_user_id(); ?>
+            <label class="madof-check"><input type="checkbox" name="users[]" value="<?php echo (int) $u->ID; ?>" <?php checked(! $finance || in_array((int) $u->ID, $finance, true)); ?> <?php disabled($me); ?>>
+                <?php echo esc_html($u->display_name . ' · ' . $u->user_email . ($me ? ' ' . __('(tú: siempre)', 'mad-oficina') : '')); ?></label>
+            <?php if ( $me ) : ?><input type="hidden" name="users[]" value="<?php echo (int) $u->ID; ?>"><?php endif; ?>
+        <?php endforeach; ?>
+        <p class="description"><?php esc_html_e('Ojo: un administrador de WordPress siempre podría darse permisos a sí mismo. Si alguien no debe ver Finanzas de ninguna manera, mejor que no sea administrador (por ejemplo, Editor con acceso al equipo).', 'mad-oficina'); ?></p>
+        <button class="madof-btn is-small"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
+    </form>
     <nav class="madof-filters" aria-label="<?php esc_attr_e('Otros ajustes', 'mad-oficina'); ?>">
         <a class="madof-pill" href="<?php echo esc_url($base . '&tab=import'); ?>"><?php esc_html_e('Importar histórico de facturas', 'mad-oficina'); ?></a>
         <a class="madof-pill" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-gastos&tab=settings')); ?>"><?php esc_html_e('Lectura de gastos', 'mad-oficina'); ?></a>
