@@ -25,6 +25,10 @@ final class Orchestrator {
     public $undo = [];
     /** @var string[] areas consulted, for the log */
     public $asked = [];
+    /** @var array<string,string> answers already given in this turn, by area and question */
+    private $answers = [];
+
+    const MAX_ASKS_PER_AREA = 2;
 
     public function __construct(array $settings, array $ctx, ?Progress $progress){
         $this->settings = $settings;
@@ -73,12 +77,19 @@ final class Orchestrator {
                 'description' => sprintf('Pregunta a %1$s, %2$s (%3$s). Sabe de: %4$s. Hazle UNA pregunta concreta y completa (cliente, fechas, qué quieres que haga); te contesta con datos y enlaces.', $agent->name(), mb_strtolower($agent->role()), $agent->area(), $agent->scope()),
                 'input_schema' => ['type' => 'object', 'properties' => ['question' => ['type' => 'string']], 'required' => ['question']],
                 'handler' => function($in) use ($agent){
+                    // One clear question per area; a second only to fill a gap. Never the same one twice.
+                    $q = trim((string) ($in['question'] ?? ''));
+                    $key = $agent->slug() . '|' . mb_strtolower($q);
+                    if ( isset($this->answers[$key]) ) return ['from' => $agent->name(), 'repeated' => true, 'answer' => $this->answers[$key], 'note' => 'Ya le habías hecho esta pregunta: usa esta respuesta.'];
+                    $n = count(array_keys($this->asked, $agent->slug(), true));
+                    if ( $n >= self::MAX_ASKS_PER_AREA ) return new \WP_Error('madof_enough', sprintf('Ya has preguntado %d veces a %s en esta respuesta: contesta con lo que tienes.', $n, $agent->name()));
                     $this->asked[] = $agent->slug();
                     $this->say(count($this->asked) === 1 ? self::opener($agent->name(), $agent->area()) : sprintf('Ahora le pregunto a %1$s (%2$s)…', $agent->name(), mb_strtolower($agent->area())));
                     $agent->progress = fn($line) => $this->say($agent->name() . ' ' . $line . '…');
                     $answer = $agent->ask((string) ($in['question'] ?? ''));
                     $this->undo = array_merge($this->undo, $agent->undo);
                     if ( is_wp_error($answer) ) return $answer;
+                    $this->answers[$key] = $answer;
                     $this->say(sprintf('%s ya me ha contestado. Te lo preparo…', $agent->name()));
                     return ['from' => $agent->name() . ' · ' . $agent->area(), 'answer' => $answer];
                 },
@@ -98,6 +109,10 @@ final class Orchestrator {
             . "- No sabes los datos de la oficina: pregúntaselos a las áreas con sus herramientas (puedes preguntar a varias, una pregunta clara a cada una).\n"
             . "- Lo que contestan las áreas es la verdad de la oficina: transmítelo fielmente, con números, fechas y enlaces exactos. No inventes, no redondees, no completes huecos. Si un área dice que no consta o duda, dilo.\n"
             . "- Tu personalidad está en cómo lo dices, nunca en los datos.\n"
+            . "- Contesta SOLO a su último mensaje. Lo que ya le dijiste en la conversación no se repite ni se reformula.\n"
+            . "- Si te corrige o un área añade o corrige algo, di solo lo nuevo o lo que cambia, en una o dos frases («Corrijo: es la F-2026-014, del 28/10»). Nada de rehacer la respuesta entera.\n"
+            . "- Pregunta a cada área una sola vez, con una pregunta completa; solo repites si faltó un dato concreto. Si dos áreas dicen lo mismo, cuéntalo una vez.\n"
+            . "- Breve: lo justo para responder. Sin introducciones ni resúmenes al final.\n"
             . "- No puedes enviar nada a clientes ni a terceros, ni crear reuniones. Si te lo piden, di que eso aún se aprueba desde la bandeja de la oficina.\n"
             . "- Si te pide que recuerdes algo, usa remember. Si no hace falta preguntar a nadie (un saludo, una charla), contesta tú.\n"
             . "- Formato de Chat: corto, *negrita* con asteriscos, listas con •, enlaces tal cual. Sin emojis. Español de España, tuteando.\n"

@@ -391,6 +391,25 @@ class ChatTest extends MADOF_TestCase {
         delete_option(\MAD_Oficina\Core\FinanceAccess::OPTION);
     }
 
+    public function test_she_does_not_ask_an_area_over_and_over_nor_repeat_herself(){
+        $this->key();
+        $this->claude = [
+            ['tool' => 'ask_proyectos', 'input' => ['question' => '¿Qué tareas abiertas hay?']],
+            ['text' => 'No hay tareas abiertas.'],                                               // Valle, 1st
+            ['tool' => 'ask_proyectos', 'input' => ['question' => '¿Qué tareas abiertas hay?']],   // same again: no new call to Valle
+            ['tool' => 'ask_proyectos', 'input' => ['question' => '¿Y de LN?']],
+            ['text' => 'Tampoco.'],                                                              // Valle, 2nd
+            ['tool' => 'ask_proyectos', 'input' => ['question' => '¿Seguro?']],                   // 3rd: refused
+            ['text' => 'Nada abierto.'],
+        ];
+        $this->say('¿qué tengo pendiente?');
+        $this->assertCount(7, $this->prompts, 'the repeated question did not reach Valle again');
+        $this->assertStringContainsString('"repeated":true', $this->tool_result($this->prompts[3]));
+        $this->assertStringContainsString('Ya has preguntado 2 veces', $this->tool_result($this->prompts[6]));
+        $this->assertStringContainsString('di solo lo nuevo o lo que cambia', $this->prompts[0]['system']);
+        $this->assertStringContainsString('no se repite ni se reformula', $this->prompts[0]['system']);
+    }
+
     public function test_she_has_a_name_a_personality_and_remembers(){
         $this->key();
         $settings = get_option(MAD_Oficina_Core::option_key('chat'));
