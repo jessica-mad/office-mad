@@ -67,6 +67,21 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
         </section>
     </form>
 
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Hablarle con tus palabras o con audios', 'mad-oficina'); ?></span>
+        <p><?php esc_html_e('Escríbele o mándale una nota de voz al bot: «ya mandé el presupuesto a Lanas», «el vídeo de MOM lo dejo para el lunes». Marca las tareas como hechas o les cambia la fecha, y siempre te deja «Deshacer». Si no lo tiene claro, te pregunta. Liz puede hacer lo mismo con sus tareas.', 'mad-oficina'); ?></p>
+        <ul class="madof-checklist">
+            <?php echo $check(\MAD_Oficina\Core\Agents\ClaudeClient::has_key(), __('Clave de Claude (para entender frases; sin ella solo entiende números: «la 2 y la 5 hechas»)', 'mad-oficina')); ?>
+        </ul>
+        <p class="description"><?php echo esc_html(sprintf(
+            __('Para los audios: si Google no le pasa al bot su propia transcripción, el bot transcribe el audio con Speech-to-Text (hasta 1 minuto). Para eso, en Google Cloud (proyecto %1$s): activa «Cloud Speech-to-Text API» y, en IAM, da a %2$s el rol «Cloud Speech Client». Cuesta unos céntimos al mes.', 'mad-oficina'),
+            $sa ? ($sa->project_id() ?: '—') : '—', $sa ? $sa->email() : __('la cuenta de servicio del bot', 'mad-oficina')
+        )); ?></p>
+        <?php $shape = get_option(\MAD_Oficina\Chat\Transcriber::SHAPE_OPTION); if ( $shape ) : ?>
+            <p class="description"><?php echo esc_html(sprintf(__('Último audio recibido %s.', 'mad-oficina'), sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $shape['at'])))); ?></p>
+        <?php endif; ?>
+    </section>
+
     <details class="madof-card madof-details" <?php echo $sa ? '' : 'open'; ?>>
         <summary><?php esc_html_e('Cómo crear el bot en Google Cloud (una vez)', 'mad-oficina'); ?></summary>
         <ol class="madof-steps">

@@ -68,6 +68,16 @@ final class Events {
 
             case 'MESSAGE':
                 if ( $is_dm ) $this->remember_dm($email, $space['name'] ?? '');
+                // A voice message, or words that need understanding: answered a moment later
+                // (Chat only waits 30 s), by the assistant, as a new message.
+                if ( $is_dm && ($email === $this->manager_email() || $this->member_by_email($email)) ) {
+                    $voice = Transcriber::voice_of((array) ($e['message'] ?? []));
+                    $text = (string) ($e['message']['argumentText'] ?? $e['message']['text'] ?? '');
+                    if ( $voice || $this->needs_understanding($email, $text) ) {
+                        Assistant::defer($email, $voice ? '' : $text, $voice);
+                        return rest_ensure_response(new \stdClass());
+                    }
+                }
                 $out = $this->answer($email, $is_dm, (string) ($e['message']['argumentText'] ?? $e['message']['text'] ?? ''));
                 return is_array($out) ? rest_ensure_response($out) : $this->text($out);
 
@@ -162,6 +172,15 @@ final class Events {
         return TaskList::result_card(TaskList::mark($rows, $email, $this->manager_email()), false, $missing);
     }
 
+    /** Free words (not «la 2 hecha» nor «tareas») go to the assistant when Claude is configured. */
+    private function needs_understanding($email, $text){
+        if ( trim($text) === '' || ! \MAD_Oficina\Core\Agents\ClaudeClient::has_key() ) return false;
+        $p = TaskList::parse($text);
+        if ( $p['action'] === 'list' ) return false;
+        if ( in_array($p['action'], ['done', 'undo'], true) && TaskList::last($email) ) return false;
+        return true;
+    }
+
     /** Open tasks as a numbered card (and remembered, for answers by number). */
     private function task_list_message($email, ?array $member){
         $ids = TaskList::open_ids($member ? (int) $member['id'] : null);
@@ -212,6 +231,14 @@ final class Events {
         }
 
         // «Deshacer» after marking by words.
+        if ( $fn === 'task_undo' && ! empty($params['token']) ) {
+            $r = TaskList::restore($params['token'], $email, $this->manager_email());
+            if ( is_wp_error($r) ) return $this->text($r->get_error_message());
+            if ( $r['denied'] && ! $r['changed'] ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
+            return $this->update(Cards::card('undo-' . substr(md5((string) $params['token']), 0, 8), __('Deshecho', 'mad-oficina'), '', [
+                ['textParagraph' => ['text' => esc_html__('Lo he dejado como estaba:', 'mad-oficina') . '<br>' . implode('<br>', array_map(fn($t) => '• ' . esc_html($t['title']), $r['changed']))]],
+            ]));
+        }
         if ( $fn === 'task_undo' ) {
             $prev = TaskList::parse_prev($params['prev'] ?? '');
             $r = TaskList::reopen(array_values(TaskList::rows(array_keys($prev))), $prev, $email, $this->manager_email());

@@ -12,6 +12,8 @@ if ( ! defined('ABSPATH') ) exit;
 final class ServiceAccount {
 
     const SCOPE = 'https://www.googleapis.com/auth/chat.bot';
+    /** Speech-to-Text (voice messages). Needs the API enabled and the «Cloud Speech Client» role. */
+    const SCOPE_CLOUD = 'https://www.googleapis.com/auth/cloud-platform';
 
     private $key;
 
@@ -40,16 +42,18 @@ final class ServiceAccount {
 
     public function email(){ return $this->key['client_email']; }
 
+    public function project_id(){ return (string) ($this->key['project_id'] ?? ''); }
+
     /** @return string|\WP_Error */
-    public function access_token(){
-        $cache_key = 'madof_chat_token_' . md5($this->key['client_email']);
+    public function access_token($scope = self::SCOPE){
+        $cache_key = 'madof_chat_token_' . md5($this->key['client_email'] . ($scope === self::SCOPE ? '' : '|' . $scope));
         $cached = Crypto::decrypt(get_transient($cache_key) ?: '');
         if ( $cached ) return $cached;
 
         $now = time();
         $assertion = GoogleJwt::sign([
             'iss'   => $this->key['client_email'],
-            'scope' => self::SCOPE,
+            'scope' => $scope,
             'aud'   => $this->key['token_uri'] ?? 'https://oauth2.googleapis.com/token',
             'iat'   => $now,
             'exp'   => $now + 3600,

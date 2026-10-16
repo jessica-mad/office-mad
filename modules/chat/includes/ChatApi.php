@@ -24,6 +24,31 @@ final class ChatApi {
         return $this->request('POST', $space . '/messages', $message);
     }
 
+    /**
+     * An attachment sent to the bot (e.g. a voice message), by its attachmentDataRef.
+     * @return array{body:string, type:string}|\WP_Error
+     */
+    public function download($resource_name, $max_bytes){
+        $resource_name = (string) $resource_name;
+        if ( $resource_name === '' || ! preg_match('#^[A-Za-z0-9_\-./=+]+$#', $resource_name) || strpos($resource_name, '..') !== false ) {
+            return new \WP_Error('madof_chat_media', __('Adjunto de Chat no válido.', 'mad-oficina'));
+        }
+        $token = $this->account->access_token();
+        if ( is_wp_error($token) ) return $token;
+        $path = implode('/', array_map('rawurlencode', explode('/', $resource_name)));
+        $res = wp_remote_get(self::BASE . 'media/' . $path . '?alt=media', [
+            'timeout' => 30, 'headers' => ['Authorization' => 'Bearer ' . $token], 'limit_response_size' => $max_bytes + 1,
+        ]);
+        if ( is_wp_error($res) ) return $res;
+        $code = wp_remote_retrieve_response_code($res);
+        if ( $code >= 300 ) return new \WP_Error('madof_chat_media', sprintf(__('Google Chat no me deja descargar el audio (%d).', 'mad-oficina'), $code));
+        $body = wp_remote_retrieve_body($res);
+        if ( strlen($body) > $max_bytes ) return new \WP_Error('madof_chat_media_big', __('El audio es demasiado largo.', 'mad-oficina'));
+        return ['body' => $body, 'type' => (string) wp_remote_retrieve_header($res, 'content-type')];
+    }
+
+    public function account(){ return $this->account; }
+
     /** Spaces the bot is a member of. @return array|\WP_Error */
     public function list_spaces(){
         $out = [];

@@ -132,6 +132,50 @@ final class TaskList {
         return $out;
     }
 
+    /** New due dates. @param array[] $changes [['task' => row, 'date' => 'Y-m-d'], …] @return array{changed:array[], denied:array[]} */
+    public static function set_due(array $changes, $email, $manager_email){
+        global $wpdb;
+        $out = ['changed' => [], 'denied' => []];
+        foreach ( $changes as $c ) {
+            $t = $c['task'];
+            if ( ! self::allowed($t, $email, $manager_email) ) { $out['denied'][] = $t; continue; }
+            $wpdb->update(Schema::table('action_items'), ['due_date' => $c['date'], 'updated_at' => Time::now()], ['id' => $t['id']]);
+            $out['changed'][] = $c;
+        }
+        if ( $out['changed'] ) self::log('chat_task_due', array_column($out['changed'], 'task'), $email);
+        return $out;
+    }
+
+    /** Keeps how these tasks were (status, due date) so «Deshacer» can put them back. @return string token */
+    public static function snapshot(array $tasks){
+        $token = wp_generate_password(16, false);
+        $data = [];
+        foreach ( $tasks as $t ) $data[(int) $t['id']] = ['status' => $t['status'], 'due_date' => $t['due_date'], 'completed_at' => $t['completed_at'] ?? null];
+        set_transient('madof_task_undo_' . $token, $data, 7 * DAY_IN_SECONDS);
+        return $token;
+    }
+
+    /** @return array{changed:array[], denied:array[]}|\WP_Error */
+    public static function restore($token, $email, $manager_email){
+        global $wpdb;
+        $token = preg_replace('/[^A-Za-z0-9]/', '', (string) $token);
+        $data = $token !== '' ? get_transient('madof_task_undo_' . $token) : false;
+        if ( ! is_array($data) ) return new \WP_Error('madof_undo', __('Ya no puedo deshacerlo (ha pasado mucho tiempo).', 'mad-oficina'));
+        $out = ['changed' => [], 'denied' => []];
+        foreach ( self::rows(array_keys($data)) as $id => $t ) {
+            if ( ! self::allowed($t, $email, $manager_email) ) { $out['denied'][] = $t; continue; }
+            $was = $data[$id];
+            $wpdb->update(Schema::table('action_items'), [
+                'status' => in_array($was['status'], ['open', 'in_progress', 'done', 'cancelled'], true) ? $was['status'] : 'open',
+                'due_date' => $was['due_date'] ?: null, 'completed_at' => $was['completed_at'] ?: null, 'updated_at' => Time::now(),
+            ], ['id' => $id]);
+            $out['changed'][] = $t;
+        }
+        if ( $out['changed'] ) delete_transient('madof_task_undo_' . $token); // someone else's click leaves it usable
+        if ( $out['changed'] ) self::log('chat_task_undo', $out['changed'], $email);
+        return $out;
+    }
+
     private static function log($event, array $tasks, $email){
         global $wpdb;
         $wpdb->insert(Schema::table('agent_log'), [

@@ -71,6 +71,8 @@ return new class($core) implements MAD_Oficina_Module {
         add_action(self::NOTE_HOOK, [$this, 'send_note']);
         add_action(self::NOTICE_HOOK, [$this, 'send_autonomy_notice']);
         add_action(self::MEETING_HOOK, [$this, 'send_meeting_messages'], 10, 3);
+        // What Jessica or Liz tell the bot about their tasks (words or voice).
+        add_action(\MAD_Oficina\Chat\Assistant::HOOK, fn($email, $text, $voice = []) => (new \MAD_Oficina\Chat\Assistant($this->messenger(), $this->api()))->run($email, $text, (array) $voice), 10, 3);
 
         add_action('madoficina_client_edit_sections', [$this, 'render_client_section']);
         foreach ( ['chat_settings', 'chat_test', 'client_chat_targets'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
