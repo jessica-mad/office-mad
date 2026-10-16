@@ -50,7 +50,7 @@ Trabajaremos **por fases**. Implementa solo la fase que te indique; las siguient
    - **Nuevo encargo / primera toma de contacto**: formulario de briefing.
    - **Escribir libremente**: chat con IA.
 4. Al hacer clic en una sala o personaje se abre un **panel HTML superpuesto** al canvas, con el estilo MAD.
-5. Hay siempre una **"vista clásica"** sin juego. Es la vista por defecto en móvil y con `prefers-reduced-motion`.
+5. Hay siempre una **"vista clásica"** sin juego. Es la vista por defecto con `prefers-reduced-motion`. Desde la oficina v2 (planta vertical), la oficina es la vista por defecto también en móvil.
 
 ### Salas y personajes
 | Sala | Personaje | Función |

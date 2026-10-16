@@ -3,8 +3,11 @@ import './portal.css';
 import { createApi } from './api.js';
 import { icon } from './icons.js';
 import { PANELS, ROOM_PANEL, CHARACTER_PANEL, menuButtons, greeting, esc, canSee } from './panels.js';
+import { createCloseup } from './closeup.js';
 
 const POLL_MS = 25000;
+const DESKTOP = window.matchMedia('(min-width: 761px)');
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
 const store = {
   get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { v == null ? window.localStorage.removeItem(k) : window.localStorage.setItem(k, v); } catch { /* private mode */ } },
@@ -42,14 +45,60 @@ async function boot(root) {
   let office = null;
   let pollTimer = null;
 
-  const prefersClassic = window.matchMedia('(max-width: 760px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let view = store.get('madof-view') || (prefersClassic ? 'classic' : 'office');
+  // The office is the default view (also on a phone: the plan is vertical); the classic one,
+  // with reduced motion. A choice made with the button is remembered.
+  let view = store.get('madof-view') || (REDUCED.matches ? 'classic' : 'office');
+
+  // Close-up of a character: side column on desktop (always there, reception by default),
+  // full-screen sheet on a phone.
+  const side = $('.madof-side');
+  let sheetScroll = 0;
+  const closeup = createCloseup(side, ctx, {
+    onBack: () => backToOffice(),
+    onGo: (slug) => showCharacter(slug),
+    waiting: me.role === 'manager' ? async () => (await api.waiting()).characters : null,
+    onResolved: () => refreshStates(),
+  });
+  function showCharacter(slug) {
+    if (!DESKTOP.matches && !side.classList.contains('is-open')) {
+      sheetScroll = window.scrollY;
+      side.classList.add('is-open');
+      document.documentElement.classList.add('madof-sheet-open');
+    }
+    closeup.show(slug);
+    if (DESKTOP.matches) {
+      office?.focus(slug);
+      const r = side.getBoundingClientRect();
+      if (r.top < 0 || r.top > window.innerHeight * 0.6) side.scrollIntoView({ block: 'start', behavior: REDUCED.matches ? 'auto' : 'smooth' });
+    }
+  }
+  function backToOffice() {
+    const back = closeup.returnFocus();
+    office?.unfocus();
+    if (DESKTOP.matches) { closeup.show('recepcionista', { focus: false }); }
+    else {
+      side.classList.remove('is-open');
+      document.documentElement.classList.remove('madof-sheet-open');
+      closeup.clear();
+      window.scrollTo(0, sheetScroll); // back to the same point of the plan
+    }
+    back?.focus?.({ preventScroll: true });
+  }
+  function layout() {
+    const on = view === 'office' && DESKTOP.matches;
+    side.hidden = view !== 'office';
+    if (on && !closeup.slug) closeup.show('recepcionista', { focus: false });
+    if (DESKTOP.matches) { side.classList.remove('is-open'); document.documentElement.classList.remove('madof-sheet-open'); }
+    else if (!side.classList.contains('is-open')) closeup.clear();
+  }
+  DESKTOP.addEventListener?.('change', layout);
 
   async function setView(next) {
     view = next;
     store.set('madof-view', next);
     officeEl.hidden = next !== 'office';
     classicEl.hidden = next !== 'classic';
+    layout();
     if (toggle) {
       toggle.innerHTML = next === 'office' ? `${icon('grid')}<span>Vista clásica</span>` : `${icon('game')}<span>Vista oficina</span>`;
       toggle.setAttribute('aria-pressed', String(next === 'office'));
@@ -72,24 +121,30 @@ async function boot(root) {
     schedulePoll();
   }
 
+  async function refreshStates() {
+    if (!office || me.role === 'visitor') return;
+    try { office.setStates((await api.state()).characters); } catch { /* keep last state */ }
+  }
   function schedulePoll() {
     clearInterval(pollTimer);
     if (view !== 'office' || me.role === 'visitor') return;
-    const tick = async () => {
-      if (document.hidden || !office) return;
-      try { office.setStates((await api.state()).characters); } catch { /* keep last state */ }
-    };
+    const tick = () => { if (!document.hidden) refreshStates(); };
     tick();
     pollTimer = setInterval(tick, POLL_MS);
   }
 
+  /** Who answers in each room (Gerencia: Jessica, also for clients, with her own table). */
+  const characterOf = (room) => Object.keys(me.characters).find((slug) => me.characters[slug].room === room) || 'recepcionista';
+
   function openRoom(room) {
+    if (view === 'office') return showCharacter(characterOf(room));
     if (me.role === 'visitor') return dialog.open(room === 'recepcion' ? 'recepcion' : 'solo-clientes');
     if (me.role === 'team') return dialog.open(room === 'estudio' ? 'mis-tareas' : 'recepcion');
     if (room === 'gerencia' && me.role !== 'manager') return dialog.open('privado');
     dialog.open(ROOM_PANEL[room] || 'recepcion');
   }
   function openCharacter(slug) {
+    if (view === 'office') return showCharacter(slug);
     if (me.role === 'visitor') return dialog.open(slug === 'recepcionista' ? 'recepcion' : 'solo-clientes');
     if (me.role === 'team') return dialog.open(slug === 'liz' ? 'mis-tareas' : 'recepcion');
     if (slug === 'jessica' && me.role !== 'manager') return dialog.open('privado');
@@ -115,6 +170,7 @@ async function boot(root) {
       api.setClient(id);
       store.set('madof-client', id ? String(id) : null);
       $('.madof-who').textContent = id ? me.clients.find((c) => c.id === id).name : 'Gerencia';
+      if (closeup.slug) closeup.show(closeup.slug, { focus: false }); // its panels now show this client
     });
   }
 
@@ -157,11 +213,14 @@ function shell(me, api) {
     </header>
     <div class="madof-stage">
       <section class="madof-office" hidden aria-label="Oficina">
-        <div class="madof-canvas"></div>
-        <nav class="madof-rooms" aria-label="Salas de la oficina">
-          ${rooms.map(([slug, label]) => `<button type="button" data-room="${slug}">${esc(label)}</button>`).join('')}
-          <button type="button" class="madof-fs" data-action="fullscreen" aria-label="Pantalla completa">${icon('expand')}</button>
-        </nav>
+        <div class="madof-office-main">
+          <div class="madof-canvas"></div>
+          <nav class="madof-rooms" aria-label="Salas de la oficina">
+            ${rooms.map(([slug, label]) => `<button type="button" data-room="${slug}">${esc(label)}</button>`).join('')}
+            <button type="button" class="madof-fs" data-action="fullscreen" aria-label="Pantalla completa">${icon('expand')}</button>
+          </nav>
+        </div>
+        <aside class="madof-side" aria-label="Primer plano"></aside>
       </section>
       <section class="madof-classic" hidden aria-label="Recepción">
         <div class="madof-reception">

@@ -235,3 +235,17 @@ Si Jessica toca a un agente que está en la antesala (`esperando_gerencia`), su 
 - Móvil a 390 px: oficina a todo el ancho, el primer plano como hoja y «‹ Oficina» que vuelve al mismo punto.
 - Con teclado: llegar a una casilla, abrir su panel y volver.
 - Visitante, cliente, Liz y gerencia ven cada uno sus casillas y nada más.
+
+# Cómo ha quedado (notas de implementación)
+
+- **Escritorio (más de 760 px):** la oficina a la izquierda y la columna del primer plano a la derecha.
+  - La columna se queda fija al bajar por la página.
+  - Si hay sitio (columna de 588 px o más), el retrato va a la izquierda y la tabla a la derecha, como en el boceto (`game/design/boceto-primer-plano.png`).
+  - Al abrir una casilla, el panel ocupa el lado de la tabla y el retrato se estrecha.
+- **Móvil:** el primer plano es una hoja a pantalla completa; «‹ Oficina» vuelve al mismo punto del scroll.
+- **Retratos:** se generan recortando la propia oficina (cada personaje en su mesa) en `assets/game/portraits/{slug}.png`, de 96×72. Si Jessica dibuja los suyos, basta con sustituir esos PNG.
+- **Antesala:**
+  - Jessica ve lo que trae cada agente, con «Aprobar tal cual» y «Descartar» (lo mismo que en Chat) y «Revisar en la bandeja» para editar antes de aprobar.
+  - Endpoints, solo para gerencia: `GET /office/waiting` y `POST /office/approvals/{id}`.
+- **Saludos:** se editan en Ajustes → Oficina. `{nombre}` es el nombre de quien entra. La recepcionista tiene un saludo aparte para visitantes y Jessica uno para ella misma.
+- **Pestañas:** solo aparecen con más de 9 casillas. Hoy ningún personaje llega a 9 casillas, así que no se ven.
