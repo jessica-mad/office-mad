@@ -337,9 +337,13 @@ return new class($core) implements MAD_Oficina_Module {
         if ( $do === 'issue' ) {
             $approval = $this->issuing()->request($saved);
             if ( is_wp_error($approval) ) $this->back(['edit' => $saved], $approval->get_error_message(), 'error');
-            \MAD_Oficina\Core\AdminUi::flash(__('Borrador guardado. Tienes la emisión en la bandeja (y en Chat) para aprobarla.', 'mad-oficina'));
+            \MAD_Oficina\Core\AdminUi::flash(__('Aquí la tienes: pulsa «Aprobar» y se numera, se guarda en Drive y sale desde tu Gmail. También te ha llegado a Chat.', 'mad-oficina'));
             wp_safe_redirect(admin_url('admin.php?page=mad-oficina-bandeja#approval-' . (int) $approval));
             exit;
+        }
+        if ( $do === 'schedule' ) {
+            $r = \MAD_Oficina\Billing\Calendar::schedule($saved, sanitize_text_field($p['send_on'] ?? ''));
+            $this->back(['edit' => $saved], is_wp_error($r) ? $r->get_error_message() : $r['message'], is_wp_error($r) ? 'error' : 'success');
         }
         if ( $do === 'test' ) {
             $queued = $this->issuing()->queue_test($saved, wp_get_current_user()->user_email);

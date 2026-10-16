@@ -123,4 +123,29 @@ class CalendarTest extends MADOF_TestCase {
         $this->assertSame([], Approvals::for_object('invoice', $id), 'no approval to issue: it is issued in Argentina');
         $this->assertStringContainsString('plataforma argentina', implode(' ', $notes));
     }
+
+    public function test_a_draft_made_by_hand_can_be_scheduled(){
+        // The calendar is paused: drafts scheduled by hand are still asked on their day.
+        update_option(MAD_Oficina_Core::option_key('billing'), ['calendar_enabled' => false, 'calendar_hour' => 9, 'billing_day' => 28, 'payment_days' => 15]);
+        $id = (new Issuing(get_option(MAD_Oficina_Core::option_key('billing'))))->save_draft(['profile_id' => $this->profile, 'issue_date' => '2026-11-10', 'due_date' => '2026-11-25'], [['description' => 'Sesión de fotos', 'quantity' => '1', 'unit_price' => '300']]);
+        $this->assertIsInt($id);
+        $this->assertNull(Calendar::scheduled_for(Invoices::get($id)), 'a draft by hand waits for nobody');
+        $this->assertWPError(Calendar::schedule($id, '2001-01-01'), 'not in the past');
+
+        $r = Calendar::schedule($id, '2099-12-04');
+        $this->assertSame('2099-12-04', $r['date']);
+        $inv = Invoices::get($id);
+        $this->assertSame(['2099-12-04', '2099-12-19', 'scheduled'], [$inv['issue_date'], $inv['due_date'], $inv['source']], 'the due date moves with it');
+        $this->assertSame('2099-12-04', Calendar::scheduled_for($inv));
+
+        $this->assertSame(['prepared' => 0, 'asked' => 0], $this->cal()->run($this->ts('2099-12-03 10:00')), 'not yet');
+        delete_option(Calendar::RUN_OPTION);
+        $this->assertSame(['prepared' => 0, 'asked' => 1], $this->cal()->run($this->ts('2099-12-04 09:15')));
+        $this->assertSame(Approvals::PENDING, Approvals::for_object('invoice', $id)[0]['status']);
+        $this->assertNull(Calendar::scheduled_for(Invoices::get($id)), 'asked: no longer waiting');
+
+        // Postponed from Chat it stays a scheduled draft (not one of the calendar's).
+        Calendar::postpone($id, 7);
+        $this->assertSame('scheduled', Invoices::get($id)['source']);
+    }
 }

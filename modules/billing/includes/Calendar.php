@@ -17,6 +17,8 @@ if ( ! defined('ABSPATH') ) exit;
 final class Calendar {
 
     const SOURCE = 'calendar';
+    /** A draft made by hand with «Programar envío»: asked on its date like the calendar's. */
+    const SCHEDULED = 'scheduled';
     const SKIPS_OPTION = 'madoficina_billing_skips';
     const RUN_OPTION = 'madoficina_billing_calendar_day';
     const DEFAULT_LEAD_DAYS = 3;
@@ -40,12 +42,13 @@ final class Calendar {
 
     /** Once a day, after the configured hour. @return array what it did */
     public function run($now = null){
-        if ( ! $this->enabled() ) return [];
         $local = (new \DateTimeImmutable('@' . ($now ?? time())))->setTimezone(wp_timezone());
         $today = $local->format('Y-m-d');
         if ( (int) $local->format('G') < (int) ($this->settings['calendar_hour'] ?? self::DEFAULT_HOUR) ) return [];
         if ( get_option(self::RUN_OPTION) === $today ) return [];
         update_option(self::RUN_OPTION, $today, false); // first, so a slow run is never repeated
+        // With the calendar paused, drafts scheduled by hand are still asked on their day.
+        if ( ! $this->enabled() ) return ['prepared' => 0, 'asked' => $this->ask($today, true)];
         return ['prepared' => $this->prepare($today), 'asked' => $this->ask($today)];
     }
 
@@ -184,11 +187,12 @@ final class Calendar {
     /* ==== Ask on the day ==== */
 
     /** Calendar drafts whose day has come and that were not asked yet. @return int */
-    public function ask($today){
+    public function ask($today, $only_scheduled = false){
         global $wpdb;
+        $sources = $only_scheduled ? [self::SCHEDULED] : [self::SOURCE, self::SCHEDULED];
         $ids = $wpdb->get_col($wpdb->prepare(
-            'SELECT id FROM ' . Invoices::table() . " WHERE status = 'draft' AND source = %s AND asked_at IS NULL AND issue_date <= %s ORDER BY issue_date, id",
-            self::SOURCE, $today
+            'SELECT id FROM ' . Invoices::table() . " WHERE status = 'draft' AND source IN (" . implode(',', array_fill(0, count($sources), '%s')) . ") AND asked_at IS NULL AND issue_date <= %s ORDER BY issue_date, id",
+            ...array_merge($sources, [$today])
         ));
         $n = 0;
         foreach ( $ids as $id ) {
@@ -224,9 +228,36 @@ final class Calendar {
         $wpdb->update(Invoices::table(), [
             'issue_date' => $date, 'year' => (int) substr($date, 0, 4),
             'due_date' => $inv['due_date'] ? gmdate('Y-m-d', strtotime($inv['due_date'] . ' +' . (strtotime($date) - strtotime($inv['issue_date'])) / DAY_IN_SECONDS . ' days')) : null,
-            'asked_at' => null, 'source' => self::SOURCE, 'updated_at' => Time::now(),
+            'asked_at' => null, 'source' => $inv['source'] === self::SCHEDULED ? self::SCHEDULED : self::SOURCE, 'updated_at' => Time::now(),
         ], ['id' => $invoice_id]);
         return ['message' => sprintf(__('Pospuesta al %s: ese día te vuelvo a preguntar.', 'mad-oficina'), date_i18n('j/m', strtotime($date))), 'date' => $date];
+    }
+
+    /**
+     * «Programar envío»: the invoice takes that date and that day (at the calendar's hour)
+     * Jessica is asked in the inbox and Chat — Enviar · Editar · Posponer · Este mes no.
+     * @return array{message:string, date:string}|\WP_Error
+     */
+    public static function schedule($invoice_id, $date){
+        global $wpdb;
+        $inv = Invoices::get($invoice_id);
+        if ( ! $inv || $inv['status'] !== 'draft' ) return new \WP_Error('madof_inv', __('Esa factura ya no está en borrador.', 'mad-oficina'));
+        if ( ! preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $date) || $date < current_time('Y-m-d') ) return new \WP_Error('madof_inv_date', __('Elige hoy o un día que no haya pasado.', 'mad-oficina'));
+        foreach ( Approvals::for_object('invoice', $invoice_id) as $a ) {
+            if ( $a['status'] === Approvals::PENDING ) Approvals::resolve($a['id'], 'reject', [], get_current_user_id());
+        }
+        $shift = (strtotime($date) - strtotime($inv['issue_date'])) / DAY_IN_SECONDS;
+        $wpdb->update(Invoices::table(), [
+            'issue_date' => $date, 'year' => (int) substr($date, 0, 4),
+            'due_date' => $inv['due_date'] ? gmdate('Y-m-d', strtotime($inv['due_date'] . ' ' . ($shift >= 0 ? '+' : '') . (int) $shift . ' days')) : null,
+            'asked_at' => null, 'source' => $inv['source'] === self::SOURCE ? self::SOURCE : self::SCHEDULED, 'updated_at' => Time::now(),
+        ], ['id' => $invoice_id]);
+        return ['message' => sprintf(__('Programada para el %s: ese día te pregunto en la bandeja y en Chat si la envío.', 'mad-oficina'), date_i18n('j \d\e F', strtotime($date))), 'date' => $date];
+    }
+
+    /** The day a draft will be asked, if it is waiting for one. */
+    public static function scheduled_for(array $inv){
+        return $inv['status'] === 'draft' && in_array($inv['source'], [self::SOURCE, self::SCHEDULED], true) && empty($inv['asked_at']) ? $inv['issue_date'] : null;
     }
 
     /** «Este mes no»: the draft goes and its agreements are skipped this month (also in the forecast). */

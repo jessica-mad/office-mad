@@ -353,7 +353,8 @@ $status_pill = function($inv){
         <tbody>
         <?php foreach ( $list as $inv ) : ?>
             <tr>
-                <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a></td>
+                <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a>
+                    <?php if ( ! $inv['number'] && ( $when = \MAD_Oficina\Billing\Calendar::scheduled_for($inv) ) ) echo '<br><small>' . esc_html(sprintf($inv['series'] === 'AR' ? __('te lo recuerdo el %s', 'mad-oficina') : __('se envía el %s (con tu OK)', 'mad-oficina'), date_i18n('j/m', strtotime($when)))) . '</small>'; ?></td>
                 <td><?php echo esc_html(mysql2date('j M Y', $inv['issue_date'])); ?></td>
                 <td><?php if ( $inv['client_id'] && isset($codes[$inv['client_id']]) ) echo '<a class="madof-code" href="' . esc_url($base . '&client=' . $inv['client_id']) . '">' . esc_html($codes[$inv['client_id']]) . '</a> '; ?><?php echo esc_html($inv['client_name']); ?><?php if ( $inv['notes'] ) echo ' <span title="' . esc_attr($inv['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>
                 <td><?php echo esc_html($money($inv['base'])); ?></td>
