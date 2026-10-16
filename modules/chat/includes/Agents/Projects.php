@@ -20,6 +20,10 @@ final class Projects extends Specialist {
     public function area(){ return 'Proyectos'; }
     public function scope(){ return 'tareas (de Jessica, del equipo y de los clientes), ideas a futuro, línea de tiempo por cliente; puede marcar tareas hechas, reabrirlas, cambiar fechas y crear tareas internas'; }
     public static function allowed(array $ctx){ return ! empty($ctx['is_manager']) || ! empty($ctx['member']); }
+    public function routing(){
+        return 'Todo lo que es TAREAS (qué hay pendiente, de quién, para cuándo, qué venció), aunque la tarea saliera de una reunión; marcar hechas, reabrir, cambiar fechas, apuntar una tarea nueva; las IDEAS a futuro. '
+            . 'Ejemplos: «¿qué tengo esta semana?», «¿qué le toca a Liz?», «ya mandé el logo a LCS», «apúntame llamar a Rosa el lunes», «¿qué ideas tenemos con MOM?».';
+    }
 
     protected function tool_label($tool){
         return ['list_tasks' => 'está repasando las tareas', 'update_tasks' => 'está actualizando las tareas', 'create_task' => 'está apuntando la tarea', 'list_ideas' => 'está mirando el banco de ideas'][$tool] ?? '';

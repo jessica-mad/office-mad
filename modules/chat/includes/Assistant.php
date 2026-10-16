@@ -72,6 +72,8 @@ final class Assistant {
     private $settings;
     /** @var Progress|null */
     private $progress;
+    /** @var string[] areas asked for the last answer (shown in Chat → ajustes) */
+    private $asked = [];
 
     public function __construct(Messenger $messenger, ?ChatApi $api, array $settings = []){
         $this->messenger = $messenger;
@@ -124,6 +126,7 @@ final class Assistant {
         ];
         $boss = new Orchestrator($this->settings, $ctx, $this->progress);
         $answer = $boss->answer($text);
+        $this->asked = $boss->asked;
         $this->log('answered', ['asked' => $boss->asked, 'changes' => count($boss->undo), 'error' => is_wp_error($answer) ? $answer->get_error_message() : null]);
         if ( is_wp_error($answer) ) return $this->reply($member, ['text' => trim($prefix . "\n\n" . $answer->get_error_message())]);
         $message = ['text' => $answer];
@@ -144,7 +147,7 @@ final class Assistant {
     private function reply(?array $member, array $message){
         $r = $this->progress ? $this->progress->finish($message) : ($member ? $this->messenger->to_team_member($member, $message) : $this->messenger->to_manager($message));
         if ( is_wp_error($r) ) { $this->log('reply_error', ['error' => $r->get_error_message()]); self::status('error', $r->get_error_message()); }
-        else self::status('answered');
+        else self::status('answered', $this->asked ? 'preguntó a: ' . implode(', ', array_unique($this->asked)) : 'contestó ella sola');
         return is_wp_error($r) ? $r : $message;
     }
 

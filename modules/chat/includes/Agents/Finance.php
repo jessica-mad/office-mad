@@ -17,6 +17,11 @@ final class Finance extends Specialist {
     public function character(){ return 'contable'; }
     public function area(){ return 'Finanzas'; }
     public function scope(){ return 'facturas emitidas y borradores (con su PDF), presupuestos, cobros y vencimientos, gastos y facturas de proveedores, totales por periodo'; }
+    public function routing(){
+        return 'Todo lo que es DINERO: facturas a clientes (la última, una concreta, su PDF, si está cobrada o vencida), presupuestos, cuánto se ha facturado o gastado en un periodo, gastos y facturas de proveedores. '
+            . 'Ejemplos: «envíame la última factura de LCS», «¿qué facturas están sin cobrar?», «¿cuánto le facturamos a MOM este año?», «¿cuánto gastamos en software en octubre?», «¿le mandamos presupuesto a X?».';
+    }
+
     public static function allowed(array $ctx){ return ! empty($ctx['is_manager']) && FinanceAccess::can((int) ($ctx['user_id'] ?? 0)); }
 
     protected function tool_label($tool){

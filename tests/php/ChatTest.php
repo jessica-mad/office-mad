@@ -391,6 +391,19 @@ class ChatTest extends MADOF_TestCase {
         delete_option(\MAD_Oficina\Core\FinanceAccess::OPTION);
     }
 
+    public function test_she_has_a_map_of_whom_to_ask_and_knows_the_clients(){
+        $this->key();
+        $this->claude = [['text' => 'Hola.']];
+        $this->say('hola');
+        $sys = $this->prompts[0]['system'];
+        $this->assertStringContainsString('A quién preguntar (elige por el TEMA', $sys);
+        $this->assertStringContainsString('aunque la tarea saliera de una reunión', $sys, 'tasks from meetings go to Proyectos');
+        $this->assertStringContainsString('LN · Lanas del Norte', $sys, 'client codes, to resolve names before asking');
+        $this->assertStringContainsString('Todavía NO lo sabe nadie', $sys);
+        $this->assertStringContainsString('Pregúntale para:', wp_json_encode($this->prompts[0]['tools'], JSON_UNESCAPED_UNICODE));
+        $this->assertSame('contestó ella sola', get_option(\MAD_Oficina\Chat\Assistant::STATUS)['answered']['detail']);
+    }
+
     public function test_she_does_not_ask_an_area_over_and_over_nor_repeat_herself(){
         $this->key();
         $this->claude = [

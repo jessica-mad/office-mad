@@ -17,6 +17,11 @@ final class Minutes extends Specialist {
     public function area(){ return 'Actas'; }
     public function scope(){ return 'reuniones con clientes: fecha, resumen, acuerdos, tareas que salieron, próxima reunión, temas pendientes de confirmar, grabación y transcripción (búsqueda por palabras)'; }
 
+    public function routing(){
+        return 'Todo lo que se HABLÓ en reuniones: cuándo fue la última reunión con un cliente, qué se acordó o decidió, quién dijo qué, cuándo es la próxima reunión acordada, temas pendientes de confirmar, la grabación o la transcripción. '
+            . 'Ejemplos: «¿qué acordamos con MOM sobre la web?», «¿cuándo fue la última reunión con LCS?», «¿qué quedó pendiente de confirmar con Lanas?», «¿dijimos algo del presupuesto de Navidad?».';
+    }
+
     protected function tool_label($tool){
         return ['find_meetings' => 'está buscando en las reuniones', 'meeting_detail' => 'está leyendo el acta', 'search_transcripts' => 'está buscando en las transcripciones', 'pending_topics' => 'está mirando los temas pendientes'][$tool] ?? '';
     }
