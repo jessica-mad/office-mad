@@ -201,3 +201,4 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 @media (max-width:900px){.madof-review-body{grid-template-columns:1fr}.madof-review-file iframe{height:50vh}.madof-review-data{max-height:none}}
 .madof-bank-find{display:block;width:100%;max-width:260px;margin:0 0 4px}.madof-bank-or .madof-bank-find{display:inline-block;max-width:220px;margin:0}
 .madof-bank-several .madof-bank-find{max-width:420px}.madof-bank-boxes{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
+.madof-bank-linkall{position:sticky;bottom:12px;top:auto;margin:12px 0 0;box-shadow:0 6px 0 var(--k)}.madof-bank-linkall[hidden]{display:none}.madof-bank-linkall small{flex-basis:100%}

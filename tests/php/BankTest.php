@@ -330,4 +330,35 @@ class BankTest extends MADOF_TestCase {
         foreach ( ['hostinger', 'business', '187,20', '187.20'] as $w ) $this->assertStringContainsString($w, $h['s']);
         $this->assertStringContainsString('Plan Business', $h['l'], 'the label shows what it was for');
     }
+
+    public function test_link_all_the_chosen_ones_at_once(){
+        global $wpdb;
+        wp_set_current_user($this->make_admin());
+        $a = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-01', 'supplier_name' => 'Papel Uno', 'total' => 10.0, 'currency' => 'EUR']);
+        $b = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-01', 'supplier_name' => 'Papel Dos', 'total' => 5.0, 'currency' => 'EUR']);
+        $c = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-01', 'supplier_name' => 'Papel Tres', 'total' => 7.0, 'currency' => 'EUR']);
+        $inv = $this->invoice(['total' => 30]);
+        $imp = Bank::import(['account' => '', 'rows' => [
+            ['date' => '2026-03-02', 'value_date' => null, 'concept' => 'COMPRA 1', 'amount' => -10.0, 'balance' => null],
+            ['date' => '2026-03-03', 'value_date' => null, 'concept' => 'COMPRA 2', 'amount' => -12.0, 'balance' => null],
+            ['date' => '2026-03-04', 'value_date' => null, 'concept' => 'COMPRA 3', 'amount' => -3.0, 'balance' => null],
+        ]]);
+        [$m1, $m2, $m3] = $imp['ids'];
+        $_POST = $_REQUEST = ['do' => 'link_all', '_wpnonce' => wp_create_nonce('madof_billing_bank_action'), 'pairs' => [
+            $m1 => ['expense:' . $a], $m2 => ['expense:' . $b, 'expense:' . $c], $m3 => ['expense:' . $c, 'invoice:' . $inv], // the last one mixes: refused alone
+        ]];
+        $stop = function(){ throw new \RuntimeException('redirect'); };
+        add_filter('wp_redirect', $stop);
+        try { MAD_Oficina_Core::instance()->get_module('billing')->handle_billing_bank_action(); } catch ( \RuntimeException $e ) {}
+        remove_filter('wp_redirect', $stop);
+        $_POST = $_REQUEST = [];
+        $st = fn($id) => $wpdb->get_row($wpdb->prepare('SELECT status, match_type, match_ids FROM ' . Bank::table() . ' WHERE id = %d', $id), ARRAY_A);
+        $this->assertSame(['matched', 'expense', (string) $a], array_values($st($m1)));
+        $this->assertSame(['matched', 'expense', $b . ',' . $c], array_values($st($m2)), 'one charge, two receipts');
+        $this->assertSame('unmatched', $st($m3)['status']);
+        $notice = get_transient('madof_notice_' . get_current_user_id());
+        $this->assertSame('error', $notice['type']);
+        $this->assertStringContainsString('2 movimientos vinculados', $notice['text']);
+        $this->assertStringContainsString('COMPRA 3: Marca solo', $notice['text'], 'and says which one and why');
+    }
 }

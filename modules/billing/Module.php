@@ -416,10 +416,17 @@ return new class($core) implements MAD_Oficina_Module {
         $view = sanitize_key($p['view'] ?? 'unmatched');
         if ( $do === 'link' ) {
             // One target (the quick menu) or several ticked (one charge, several receipts).
-            $targets = ! empty($p['targets']) ? (array) $p['targets'] : [(string) ($p['target'] ?? '')];
-            $by = [];
-            foreach ( $targets as $t ) { [$type, $ref] = array_pad(explode(':', (string) $t, 2), 2, ''); if ( absint($ref) ) $by[sanitize_key($type)][] = absint($ref); }
-            $r = count($by) === 1 ? \MAD_Oficina\Billing\Bank::link($id, key($by), reset($by)) : new \WP_Error('madof_bank', count($by) ? __('Marca solo facturas a clientes, o solo de proveedores: no mezcladas.', 'mad-oficina') : __('Elige con qué va.', 'mad-oficina'));
+            $r = self::bank_link($id, ! empty($p['targets']) ? (array) $p['targets'] : [(string) ($p['target'] ?? '')]);
+        } elseif ( $do === 'link_all' ) {
+            // «Vincular todas las elegidas»: what she chose in each row, in one go.
+            $ok = 0; $errors = [];
+            foreach ( (array) ($p['pairs'] ?? []) as $mid => $targets ) {
+                $r = self::bank_link(absint($mid), (array) $targets);
+                if ( is_wp_error($r) ) { $m = \MAD_Oficina\Billing\Bank::get(absint($mid)); $errors[] = ($m ? $m['concept'] . ': ' : '') . $r->get_error_message(); }
+                else $ok++;
+            }
+            $msg = sprintf(_n('%d movimiento vinculado.', '%d movimientos vinculados.', $ok, 'mad-oficina'), $ok) . ( $errors ? ' ' . implode(' · ', $errors) : '' );
+            $this->back(['tab' => 'bank'], $msg, $errors ? 'error' : 'success');
         } elseif ( $do === 'ignore' ) {
             $r = \MAD_Oficina\Billing\Bank::ignore($id, sanitize_key($p['kind'] ?? ''), ! empty($p['remember']) ? sanitize_text_field($p['pattern'] ?? '') : '', sanitize_text_field($p['label'] ?? ''));
         } elseif ( $do === 'unlink' ) {
@@ -448,6 +455,13 @@ return new class($core) implements MAD_Oficina_Module {
             \MAD_Oficina\Billing\Bank::delete_rule(sanitize_text_field($p['pattern'] ?? '')); $r = true;
         } else $r = new \WP_Error('madof_bank', __('Acción desconocida.', 'mad-oficina'));
         $this->back(['tab' => 'bank', 'view' => $view], is_wp_error($r) ? $r->get_error_message() : __('Hecho.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+    }
+
+    /** @param string[] $targets «type:id» — all clients' invoices or all suppliers' (never mixed) @return true|\WP_Error */
+    private static function bank_link($movement_id, array $targets){
+        $by = [];
+        foreach ( $targets as $t ) { [$type, $ref] = array_pad(explode(':', (string) $t, 2), 2, ''); if ( absint($ref) ) $by[sanitize_key($type)][] = absint($ref); }
+        return count($by) === 1 ? \MAD_Oficina\Billing\Bank::link($movement_id, key($by), reset($by)) : new \WP_Error('madof_bank', count($by) ? __('Marca solo facturas a clientes, o solo de proveedores: no mezcladas.', 'mad-oficina') : __('Elige con qué va.', 'mad-oficina'));
     }
 
     public function handle_billing_ar_issued(){
