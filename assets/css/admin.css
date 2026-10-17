@@ -202,3 +202,13 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-bank-find{display:block;width:100%;max-width:260px;margin:0 0 4px}.madof-bank-or .madof-bank-find{display:inline-block;max-width:220px;margin:0}
 .madof-bank-several .madof-bank-find{max-width:420px}.madof-bank-boxes{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
 .madof-bank-linkall{position:sticky;bottom:12px;top:auto;margin:12px 0 0;box-shadow:0 6px 0 var(--k)}.madof-bank-linkall[hidden]{display:none}.madof-bank-linkall small{flex-basis:100%}
+/* Campañas · bitácora */
+.madof-ads-log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.madof-ads-change{margin:0;border-left:8px solid var(--y)}.madof-ads-change.has-reason{border-left-color:var(--g)}
+.madof-ads-change header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.madof-ads-change ul{margin:8px 0;padding-left:18px;list-style:square}
+.madof-ads-reason{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 12px;margin-top:6px}
+.madof-ads-reason label:first-child{flex:1 1 420px;display:flex;flex-direction:column;gap:4px}
+.madof-ads-reason textarea{width:100%}
+.madof-ads-google{background:#fff;border:1px solid var(--k)}.madof-ads-meta{background:var(--g);border:1px solid var(--k)}
+.madof-ads-notes td{padding-top:0}.madof-ads-notes textarea{width:100%}

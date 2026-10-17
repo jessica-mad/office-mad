@@ -19,6 +19,7 @@ final class Cli {
         Installer::maybe_upgrade();
         $result = Seeder::seed();
         \WP_CLI::success(sprintf('Datos demo creados: %d clientes, %d usuarios.', $result['clients'], $result['users']));
+        if ( class_exists('MAD_Oficina\\Ads\\Demo') ) \WP_CLI::success(sprintf('Campañas demo: %d cambios inventados.', \MAD_Oficina\Ads\Demo::seed()));
     }
 
     /**
@@ -27,6 +28,7 @@ final class Cli {
      * @subcommand purge-demo
      */
     public function purge_demo($args, $assoc){
+        if ( class_exists('MAD_Oficina\\Ads\\Demo') ) \MAD_Oficina\Ads\Demo::purge();
         Seeder::purge();
         \WP_CLI::success('Datos demo eliminados.');
     }
