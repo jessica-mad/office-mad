@@ -73,6 +73,9 @@ return new class($core) implements MAD_Oficina_Module {
         // Cobros: due and not collected → Jessica is asked; a friendly reminder goes through the inbox.
         add_action(self::CRON_HOOK, fn() => (new \MAD_Oficina\Billing\Collections($this->settings()))->run());
         add_action('madoficina_tick', fn() => (new \MAD_Oficina\Billing\Collections($this->settings()))->run());
+        // Amparo's quiet daily shifts (bank, waiting supplier invoices) and her Friday report.
+        add_action(self::CRON_HOOK, fn() => (new \MAD_Oficina\Billing\Shifts($this->settings()))->run());
+        add_action('madoficina_tick', fn() => (new \MAD_Oficina\Billing\Shifts($this->settings()))->run());
         add_filter('madoficina_chat_action', ['MAD_Oficina\\Billing\\Collections', 'chat_action'], 10, 5);
         $reminder = \MAD_Oficina\Billing\Collections::ACTION;
         add_filter('madoficina_approval_handler_' . $reminder, fn() => ['MAD_Oficina\\Billing\\Collections', 'approve']);
@@ -424,6 +427,9 @@ return new class($core) implements MAD_Oficina_Module {
         } elseif ( $do === 'rematch' ) {
             $r = \MAD_Oficina\Billing\Bank::match();
             $this->back(['tab' => 'bank'], sprintf(__('Vuelto a cruzar: %1$d cuadran ahora, %2$d siguen sin cuadrar.', 'mad-oficina'), $r['matched'] + $r['ignored'], $r['unmatched']));
+        } elseif ( $do === 'report' ) {
+            $ok = (new \MAD_Oficina\Billing\Shifts($this->settings()))->report();
+            $this->back(['tab' => 'bank'], $ok ? __('Informe enviado a tu Chat.', 'mad-oficina') : __('No he podido enviarlo: mira la conexión del bot de Chat.', 'mad-oficina'), $ok ? 'success' : 'error');
         } elseif ( $do === 'bulk_link' ) {
             [$type, $ref] = array_pad(explode(':', (string) ($p['item'] ?? ''), 2), 2, '');
             $n = \MAD_Oficina\Billing\Bank::link_many(array_map('absint', (array) ($p['ids'] ?? [])), sanitize_key($type), absint($ref));

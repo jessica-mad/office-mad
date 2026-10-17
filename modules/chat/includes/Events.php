@@ -234,6 +234,15 @@ final class Events {
         if ( $fn === 'task_undo' && ! empty($params['token']) ) {
             $r = ['changed' => [], 'denied' => []];
             foreach ( array_slice(explode(',', (string) $params['token']), 0, 10) as $token ) {
+                if ( strpos($token, 'f:') === 0 ) {
+                    // Finanzas (what Amparo changed): only Jessica, and only if Finanzas is hers.
+                    $uid = $email === $this->manager_email() ? Assistant::manager_user_id($email) : 0;
+                    if ( ! $uid || ! class_exists('MAD_Oficina\\Billing\\FinanceUndo') || ! \MAD_Oficina\Core\FinanceAccess::can($uid) ) return $this->text(__('Eso solo lo puede deshacer Jessica.', 'mad-oficina'));
+                    $n = \MAD_Oficina\Billing\FinanceUndo::restore($token);
+                    if ( is_wp_error($n) ) return $this->text($n->get_error_message());
+                    $r['changed'][] = ['title' => sprintf(__('Finanzas: %d cambios deshechos', 'mad-oficina'), $n)];
+                    continue;
+                }
                 $one = TaskList::restore($token, $email, $this->manager_email());
                 if ( is_wp_error($one) ) return $this->text($one->get_error_message());
                 $r['changed'] = array_merge($r['changed'], $one['changed']); $r['denied'] = array_merge($r['denied'], $one['denied']);

@@ -383,7 +383,30 @@ class ChatTest extends MADOF_TestCase {
         $this->assertStringNotContainsString('F-2026-010', $found, 'the most recent only');
         $this->assertStringContainsString('drive.google.com/file/d/NEW', $this->last_to_jessica());
         $this->assertContains('ask_finanzas', $this->tool_names($this->prompts[0]), 'Jessica reaches Finanzas');
-        $this->assertSame(['find_invoices', 'invoice_detail', 'find_quotes', 'find_expenses', 'bank_movements', 'totals'], $this->tool_names($this->prompts[1]), 'Finanzas is read-only');
+        $this->assertNotContains('issue_invoice', $this->tool_names($this->prompts[1]), 'Finanzas never issues or sends');
+        $this->assertNotContains('send_invoice', $this->tool_names($this->prompts[1]));
+    }
+
+    public function test_amparo_changes_finanzas_when_asked_and_jessica_can_undo(){
+        $this->key();
+        $wp = $this->factory()->user->create(['role' => 'administrator', 'user_email' => 'jessica@imad.example']);
+        get_user_by('id', $wp)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        $GLOBALS['wpdb']->insert(Schema::table('invoices'), ['series' => 'F', 'number' => 'F-2026-020', 'seq' => 20, 'year' => 2026, 'issue_date' => '2026-10-01', 'client_id' => $this->client, 'client_name' => 'Lanas del Norte SL',
+            'status' => 'sent', 'base' => 100, 'total' => 121, 'paid' => 0, 'created_at' => '2026-10-01 00:00:00', 'updated_at' => '2026-10-01 00:00:00']);
+        $inv = (int) $GLOBALS['wpdb']->insert_id;
+        $this->claude = [
+            ['tool' => 'ask_finanzas', 'input' => ['question' => 'Marca como cobrada hoy la F-2026-020']],
+            ['tool' => 'set_invoice_paid', 'input' => ['invoice_id' => $inv, 'paid' => true, 'date' => '2026-10-16']],
+            ['text' => 'F-2026-020 marcada como cobrada el 16/10/2026.'],
+            ['text' => 'Hecho: la F-2026-020 ya está cobrada.'],
+        ];
+        $this->say('marca como cobrada la última de Lanas');
+        $this->assertSame(1, (int) \MAD_Oficina\Billing\Invoices::get($inv)['paid']);
+        preg_match('/"key":"token","value":"(f:[A-Za-z0-9]+)"/', $this->last_to_jessica(), $m);
+        $this->assertNotEmpty($m[1] ?? '', 'with «Deshacer»');
+        $this->assertStringContainsString('solo lo puede deshacer Jessica', $this->click('task_undo', ['token' => $m[1]], 'liz@imad.example')->get_data()['text']);
+        $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
+        $this->assertSame(0, (int) \MAD_Oficina\Billing\Invoices::get($inv)['paid']);
     }
 
     public function test_liz_only_reaches_her_own_tasks(){

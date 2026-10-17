@@ -224,6 +224,54 @@ class BankTest extends MADOF_TestCase {
         $this->assertSame(1, Bank::match($next['ids'])['ignored'], 'next statements: settled by the rule');
     }
 
+    /* ───────── Amparo's shifts and Friday report ───────── */
+
+    public function test_waiting_supplier_invoices_that_pass_the_checks_register_themselves(){
+        $known = \MAD_Oficina\Suppliers\Suppliers::save(['name' => 'Hosting Inventado', 'tax_id' => 'B11111111', 'usual_amount' => '12,10']);
+        $this->assertIsInt($known);
+        // 1. «¿Proveedor nuevo?» — but she gave it a card meanwhile.
+        $new = $this->insert('expenses', ['status' => 'review', 'reason' => 'supplier', 'supplier_name' => 'Hosting Inventado', 'supplier_tax_id' => 'B11111111', 'issue_date' => '2026-10-01', 'total' => 12.10, 'currency' => 'EUR']);
+        $a1 = Approvals::create('reader', 'supplier_new', 'Proveedor nuevo', ['expense_id' => $new], ['object_type' => 'expense', 'object_id' => $new]);
+        // 2. «¿Es tuya?» from a supplier that always invoices her, usual amount.
+        foreach ( [1, 2] as $i ) $this->insert('expenses', ['status' => 'registered', 'supplier_id' => $known, 'supplier_name' => 'Hosting Inventado', 'issue_date' => "2026-0{$i}-01", 'total' => 12.10, 'currency' => 'EUR']);
+        $mine = $this->insert('expenses', ['status' => 'review', 'reason' => 'recipient', 'supplier_id' => $known, 'supplier_name' => 'Hosting Inventado', 'issue_date' => '2026-10-02', 'total' => 12.10, 'currency' => 'EUR']);
+        $a2 = Approvals::create('reader', 'expense_review', '¿Es tuya?', ['expense_id' => $mine], ['object_type' => 'expense', 'object_id' => $mine]);
+        // 3. Same, but three times the usual amount: stays for her.
+        $odd = $this->insert('expenses', ['status' => 'review', 'reason' => 'recipient', 'supplier_id' => $known, 'supplier_name' => 'Hosting Inventado', 'issue_date' => '2026-10-03', 'total' => 36.30, 'currency' => 'EUR']);
+        $a3 = Approvals::create('reader', 'expense_review', '¿Es tuya?', ['expense_id' => $odd], ['object_type' => 'expense', 'object_id' => $odd]);
+        // 4. Truly unknown supplier: stays for her.
+        $unknown = $this->insert('expenses', ['status' => 'review', 'reason' => 'supplier', 'supplier_name' => 'Nadie Conocido', 'issue_date' => '2026-10-04', 'total' => 5, 'currency' => 'EUR']);
+        $a4 = Approvals::create('reader', 'supplier_new', 'Proveedor nuevo', ['expense_id' => $unknown], ['object_type' => 'expense', 'object_id' => $unknown]);
+
+        $this->assertSame(2, (new \MAD_Oficina\Billing\Shifts([]))->review_supplier_invoices());
+        $this->assertSame([Approvals::APPROVED, Approvals::APPROVED, Approvals::PENDING, Approvals::PENDING], array_map(fn($id) => Approvals::get($id)['status'], [$a1, $a2, $a3, $a4]));
+        $this->assertSame('registered', \MAD_Oficina\Suppliers\Expenses::get($mine)['status']);
+        $this->assertSame('auto', Approvals::get($a2)['channel']);
+    }
+
+    public function test_friday_report_once_with_what_is_missing_and_links(){
+        $this->invoice(['total' => 1210, 'due_date' => '2026-10-01', 'client_name' => 'Luz Clara SL']);
+        $imp = Bank::import(['account' => '', 'rows' => [['date' => '2026-10-10', 'value_date' => null, 'concept' => 'Cargo misterioso', 'amount' => -9.99, 'balance' => null]]]);
+        Bank::match($imp['ids']);
+        delete_option(\MAD_Oficina\Billing\Shifts::REPORT_DAY); delete_option(\MAD_Oficina\Billing\Shifts::DAY);
+        $shifts = new \MAD_Oficina\Billing\Shifts([]);
+        $thu = (new DateTimeImmutable('2026-10-15 13:00', wp_timezone()))->getTimestamp();
+        $fri_morning = (new DateTimeImmutable('2026-10-16 10:00', wp_timezone()))->getTimestamp();
+        $fri_noon = (new DateTimeImmutable('2026-10-16 12:05', wp_timezone()))->getTimestamp();
+        $this->assertArrayNotHasKey('report', $shifts->run($thu));
+        $this->assertArrayNotHasKey('report', $shifts->run($fri_morning));
+        $this->assertTrue($shifts->run($fri_noon)['report']);
+        $text = end($this->sent)['text'];
+        $this->assertStringContainsString('tu semana en Finanzas', $text);
+        $this->assertStringContainsString('1 movimiento del banco sin cuadrar', $text);
+        $this->assertStringContainsString('tab=bank', $text, 'with the link');
+        $this->assertStringContainsString('Luz Clara SL debe 1.210,00', $text);
+        $this->assertStringContainsString('Trimestre 4', $text);
+        $n = count($this->sent);
+        $shifts->run($fri_noon + 3600);
+        $this->assertCount($n, $this->sent, 'once per Friday');
+    }
+
     /* ───────── cobros ───────── */
 
     public function test_due_and_not_collected_asks_jessica_once_a_week_argentina_included(){

@@ -37,6 +37,7 @@ $pattern = function($concept){
         </div>
         <button class="madof-btn"><?php esc_html_e('Subir y cruzar', 'mad-oficina'); ?></button>
     </form>
+    <p class="description"><?php echo esc_html(sprintf(__('Cada día %s vuelve a cruzar lo pendiente con lo que haya llegado y registra las facturas de proveedor que pasan las comprobaciones; los viernes a las 12:00 te manda por Chat lo que se ha hecho y lo que falta.', 'mad-oficina'), \MAD_Oficina\Core\Agents\Characters::get('contable')['name'] ?? 'Amparo')); ?></p>
     <?php if ( $from ) : ?>
         <p class="description"><?php echo esc_html(sprintf(__('Extractos cargados del %1$s al %2$s. Lo que cuadra se apunta solo (y las facturas emitidas se marcan cobradas con la fecha del banco); si algo no cuadra, te aviso por Chat con el enlace a esta página.', 'mad-oficina'), date_i18n('j/m/Y', strtotime($from)), date_i18n('j/m/Y', strtotime($to)))); ?></p>
     <?php endif; ?>
@@ -45,6 +46,7 @@ $pattern = function($concept){
 <nav class="madof-filters" aria-label="<?php esc_attr_e('Vista', 'mad-oficina'); ?>">
     <?php foreach ( $views as $k => $l ) : ?><a class="madof-pill <?php echo $k === $view ? 'is-on' : ''; ?>" href="<?php echo esc_url($url . $k); ?>"><?php echo esc_html($l); ?></a><?php endforeach; ?>
     <?php echo AdminUi::form_open('billing_bank_action', 'madof-inline'); ?><input type="hidden" name="do" value="rematch"><button class="madof-link"><?php esc_html_e('Volver a cruzar lo pendiente', 'mad-oficina'); ?></button></form>
+    <?php echo AdminUi::form_open('billing_bank_action', 'madof-inline'); ?><input type="hidden" name="do" value="report"><button class="madof-link"><?php esc_html_e('Enviarme ahora el informe de Amparo', 'mad-oficina'); ?></button></form>
 </nav>
 
 <section class="madof-card">
