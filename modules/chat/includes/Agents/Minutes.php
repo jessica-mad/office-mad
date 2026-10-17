@@ -18,7 +18,7 @@ final class Minutes extends Specialist {
     public function scope(){ return 'reuniones con clientes: fecha, resumen, acuerdos, tareas que salieron, próxima reunión, temas pendientes de confirmar, grabación y transcripción (búsqueda por palabras)'; }
 
     public function routing(){
-        return 'Todo lo que se HABLÓ en reuniones: cuándo fue la última reunión con un cliente, qué se acordó o decidió, quién dijo qué, cuándo es la próxima reunión acordada, temas pendientes de confirmar, la grabación o la transcripción. '
+        return 'Lo que se HABLÓ en reuniones cuando la pregunta NO es sobre tareas (para tareas, aunque haga falta el acta, pregunta solo a Proyectos: ella lee las actas): cuándo fue la última reunión con un cliente, qué se acordó o decidió, quién dijo qué, cuándo es la próxima reunión acordada, temas pendientes de confirmar, la grabación o la transcripción. '
             . 'Ejemplos: «¿qué acordamos con MOM sobre la web?», «¿cuándo fue la última reunión con LCS?», «¿qué quedó pendiente de confirmar con Lanas?», «¿dijimos algo del presupuesto de Navidad?».';
     }
 

@@ -364,6 +364,26 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame('open', $this->status($dup), '«Deshacer» brings it back');
     }
 
+    public function test_for_tasks_valle_reads_the_minutes_herself_in_one_answer(){
+        $this->key();
+        $meeting = Meetings::upsert(['source' => 'manual', 'title' => 'LN x MAD', 'starts_at' => '2026-10-07 17:00', 'transcript' => 'x', 'client_id' => $this->client]);
+        Meetings::update($meeting, ['status' => 'approved', 'summary' => 'Catálogo de invierno', 'extraction' => ['summary_internal' => 'Catálogo de invierno', 'client_decisions' => ['Fotos por colores']]]);
+        $t = $this->insert('action_items', ['client_id' => $this->client, 'meeting_id' => $meeting, 'title' => 'Enviar fotos', 'owner' => 'cliente', 'status' => 'open', 'evidence' => 'Os mando las fotos el lunes']);
+        $this->claude = [
+            ['tool' => 'ask_proyectos', 'input' => ['question' => '¿De dónde sale la tarea de las fotos de LN y qué se acordó?']],
+            ['tool' => 'meeting_context', 'input' => ['task_id' => $t]],
+            ['text' => 'Salió de la reunión del 7/10: «Os mando las fotos el lunes». Acuerdo: fotos por colores.'],
+            ['text' => 'Salió de la reunión del 7 de octubre: Rosa dijo «Os mando las fotos el lunes».'],
+        ];
+        $this->say('¿de dónde salió lo de las fotos de Lanas?');
+        $ctx = $this->tool_result($this->prompts[2]);
+        $this->assertStringContainsString('Os mando las fotos el lunes', $ctx);
+        $this->assertStringContainsString('Fotos por colores', $ctx);
+        $this->assertCount(4, $this->prompts, 'one area, one answer: Actas was not asked');
+        $this->assertStringContainsString('SOLO a Proyectos', $this->prompts[0]['system']);
+        $this->assertContains('meeting_context', $this->tool_names($this->prompts[1]));
+    }
+
     public function test_finanzas_finds_the_last_invoice_with_its_pdf(){
         $this->key();
         $wp = $this->factory()->user->create(['role' => 'administrator', 'user_email' => 'jessica@imad.example']);
