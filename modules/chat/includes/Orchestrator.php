@@ -23,6 +23,8 @@ final class Orchestrator {
     private $progress;
     /** @var string[] */
     public $undo = [];
+    /** @var array<int,int[]> team member id => tasks just given to them */
+    public $notify = [];
     /** @var string[] areas consulted, for the log */
     public $asked = [];
     /** @var array<string,string> answers already given in this turn, by area and question */
@@ -107,6 +109,7 @@ final class Orchestrator {
                     $agent->progress = fn($line) => $this->say($agent->name() . ' ' . $line . '…');
                     $answer = $agent->ask((string) ($in['question'] ?? ''));
                     $this->undo = array_merge($this->undo, $agent->undo);
+                    foreach ( (array) ($agent->notify ?? []) as $mid => $ids ) $this->notify[$mid] = array_values(array_unique(array_merge($this->notify[$mid] ?? [], $ids)));
                     if ( is_wp_error($answer) ) return $answer;
                     $this->answers[$key] = $answer;
                     $this->say(sprintf('%s ya me ha contestado. Te lo preparo…', $agent->name()));

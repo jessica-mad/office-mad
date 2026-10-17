@@ -189,6 +189,7 @@ final class TaskList {
             ];
             if ( array_key_exists('title', $was) ) { $fields['title'] = $was['title']; $fields['description'] = $was['description']; } // edits from TaskChanges
             if ( ! empty($was['priority']) ) $fields['priority'] = $was['priority'];
+            if ( ! empty($was['owner']) ) { $fields['owner'] = $was['owner']; $fields['team_member_id'] = $was['team_member_id'] ?: null; $fields['visibility'] = $was['visibility'] ?: 'internal'; } // a reassignment
             $wpdb->update(Schema::table('action_items'), $fields, ['id' => $id]);
             $out['changed'][] = $t;
         }

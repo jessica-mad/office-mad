@@ -19,7 +19,8 @@ final class TaskChanges {
     public static function snapshot(array $rows){
         $token = wp_generate_password(16, false);
         $data = [];
-        foreach ( $rows as $t ) $data[(int) $t['id']] = ['status' => $t['status'], 'due_date' => $t['due_date'], 'completed_at' => $t['completed_at'] ?? null, 'title' => $t['title'], 'description' => $t['description'], 'priority' => $t['priority'] ?? 'normal'];
+        foreach ( $rows as $t ) $data[(int) $t['id']] = ['status' => $t['status'], 'due_date' => $t['due_date'], 'completed_at' => $t['completed_at'] ?? null, 'title' => $t['title'], 'description' => $t['description'], 'priority' => $t['priority'] ?? 'normal',
+            'owner' => $t['owner'] ?? null, 'team_member_id' => $t['team_member_id'] ?? null, 'visibility' => $t['visibility'] ?? null];
         set_transient('madof_task_undo_' . $token, $data, 14 * DAY_IN_SECONDS);
         return $token;
     }

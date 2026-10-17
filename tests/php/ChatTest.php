@@ -429,6 +429,38 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame(0, (int) \MAD_Oficina\Billing\Invoices::get($inv)['paid']);
     }
 
+    public function test_jessica_hands_tasks_to_liz_and_decides_when_she_is_told(){
+        $this->key();
+        $t = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Montar vídeo de bufandas', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $this->claude = [
+            ['tool' => 'ask_proyectos', 'input' => ['question' => 'Asigna a Liz el vídeo de bufandas y crea para ella «Retocar fotos» para el viernes']],
+            ['tool' => 'update_tasks', 'input' => ['assign' => [['id' => $t, 'to' => 'Liz']]]],
+            ['tool' => 'create_task', 'input' => ['title' => 'Retocar fotos', 'client' => 'LN', 'owner' => 'liz', 'due_date' => '2026-10-23']],
+            ['text' => 'Hecho: dos tareas para Liz.'],
+            ['text' => 'Listo, Liz tiene el vídeo y el retoque de fotos.'],
+        ];
+        $this->say('el vídeo de bufandas es de Liz, y que retoque las fotos para el viernes');
+        $row = $GLOBALS['wpdb']->get_row('SELECT owner, team_member_id, visibility FROM ' . Schema::table('action_items') . " WHERE id = {$t}", ARRAY_A);
+        $this->assertSame(['liz', (string) $this->liz, 'team'], [$row['owner'], $row['team_member_id'], $row['visibility']], 'hers now, and she can see it');
+        $new = (int) $GLOBALS['wpdb']->get_var('SELECT id FROM ' . Schema::table('action_items') . " WHERE title = 'Retocar fotos'");
+        $this->assertSame((string) $this->liz, $GLOBALS['wpdb']->get_var('SELECT team_member_id FROM ' . Schema::table('action_items') . " WHERE id = {$new}"));
+        $this->assertSame([], array_filter($this->sent, fn($x) => strpos($x['url'], 'spaces/LIZDM') !== false), 'Liz is not told until Jessica says so');
+
+        $final = $this->last_to_jessica();
+        $this->assertStringContainsString('Avisar a Liz', $final);
+        preg_match('/"key":"ids","value":"([\d,]+)"/', $final, $ids);
+        $this->assertStringContainsString('Solo Jessica', $this->click('notify_member', ['member_id' => (string) $this->liz, 'ids' => $ids[1]], 'liz@imad.example')->get_data()['text']);
+        $this->click('notify_member', ['member_id' => (string) $this->liz, 'ids' => $ids[1]], 'jessica@imad.example');
+        $to_liz = array_values(array_filter($this->sent, fn($x) => strpos($x['url'], 'spaces/LIZDM') !== false));
+        $this->assertCount(2, $to_liz, 'one card per task, in her DM');
+        $this->assertStringContainsString('task_done', wp_json_encode($to_liz[0]['body']));
+
+        preg_match('/"key":"token","value":"([A-Za-z0-9,]+)"/', $final, $m);
+        $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
+        $row = $GLOBALS['wpdb']->get_row('SELECT owner, team_member_id, visibility FROM ' . Schema::table('action_items') . " WHERE id = {$t}", ARRAY_A);
+        $this->assertSame(['jessica', null, 'internal'], [$row['owner'], $row['team_member_id'], $row['visibility']], '«Deshacer» gives it back');
+    }
+
     public function test_liz_only_reaches_her_own_tasks(){
         $this->key();
         $hers = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Montar vídeo', 'owner' => 'liz', 'team_member_id' => $this->liz, 'status' => 'open']);

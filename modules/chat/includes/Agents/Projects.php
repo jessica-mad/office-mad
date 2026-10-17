@@ -33,6 +33,7 @@ final class Projects extends Specialist {
         return "- Cambia tareas (hecha, reabrir, anular, fecha, crear) solo si la pregunta lo pide claramente; si hay duda entre varias, NO cambies nada y da las opciones con su id.\n"
             . "- Tras cambiar algo, di exactamente qué cambiaste (id, título, nuevo estado o fecha).\n"
             . "- Si te cuentan algo nuevo de un cliente (una llamada, un WhatsApp, «ahora quiere X en vez de Y»), busca la tarea relacionada y ACTUALÍZALA con revise (nuevo título y/o fecha y una nota de qué cambió), dala por hecha o anúlala; si se vuelve a hablar de ella y sigue sin hacer, still_pending (sube su prioridad). Crea una nueva solo si no hay ninguna relacionada.\n"
+            . "- Para repartir tareas («esa es de Liz») usa assign; para una nueva, create_task con owner. Quien la recibe no se entera hasta que Jessica pulse «Avisar»: dilo.\n"
             . "- Si necesitas saber de dónde sale una tarea o qué se acordó sobre ella, usa meeting_context: tú misma lees las actas y das UNA respuesta completa (no hace falta preguntar a nadie más).\n"
             . "- Duplicadas: usa find_duplicates y revisa cada grupo; si de verdad son la misma tarea, deja la más completa (la que tenga fecha, descripción o la visible para el cliente; si empatan, la más antigua) y anula las demás con cancel. Si dos se parecen pero no son lo mismo, no las toques y dilo.\n"
             . ($this->ctx['member'] ? "- Solo trabajas con las tareas de {$this->ctx['member']['name']}.\n" : '');
@@ -62,6 +63,9 @@ final class Projects extends Specialist {
                     'id' => ['type' => 'integer'], 'title' => ['type' => 'string'], 'due_date' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'note' => ['type' => 'string'],
                 ], 'required' => ['id', 'note']]],
                 'still_pending' => ['type' => 'array', 'description' => 'Se ha vuelto a hablar de ellas y siguen sin hacer: sube su prioridad.', 'items' => ['type' => 'integer']],
+                'assign' => ['type' => 'array', 'description' => 'Cambiar quién la hace: «to» = jessica, mad, cliente o el nombre de alguien del equipo (' . implode(', ', array_column(Team::all(true), 'name')) . ').', 'items' => ['type' => 'object', 'properties' => [
+                    'id' => ['type' => 'integer'], 'to' => ['type' => 'string'],
+                ], 'required' => ['id', 'to']]],
                 'reopen' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'due' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer'], 'date' => ['type' => 'string', 'description' => 'AAAA-MM-DD']], 'required' => ['id', 'date']]],
              ]), 'handler' => [$this, 'update_tasks']],
@@ -69,7 +73,7 @@ final class Projects extends Specialist {
              'input_schema' => self::obj([
                 'title' => ['type' => 'string'], 'description' => ['type' => 'string'],
                 'client' => ['type' => 'string', 'description' => 'Código o nombre del cliente (opcional)'],
-                'owner' => ['type' => 'string', 'enum' => ['jessica', 'mad', 'liz', 'cliente']],
+                'owner' => ['type' => 'string', 'description' => 'jessica, mad, cliente o el nombre de alguien del equipo (' . implode(', ', array_column(Team::all(true), 'name')) . ')'],
                 'due_date' => ['type' => 'string', 'description' => 'AAAA-MM-DD'],
              ], ['title']), 'handler' => [$this, 'create_task']],
             ['name' => 'meeting_context', 'description' => 'El contexto de una tarea en las actas: la reunión o WhatsApp del que salió (fecha, resumen, acuerdos, próxima reunión) y la frase que la justifica. Úsalo tú misma en vez de pedírselo a Actas.',
@@ -122,7 +126,7 @@ final class Projects extends Specialist {
         $due = [];
         foreach ( (array) ($in['due'] ?? []) as $d ) if ( ($date = self::date_arg($d['date'] ?? '')) && abs(strtotime($date) - time()) < 2 * YEAR_IN_SECONDS ) $due[(int) ($d['id'] ?? 0)] = $date;
         $rows = TaskList::rows(array_merge($done, $reopen, $cancel, array_keys($due)));
-        if ( ! $rows && empty($in['revise']) && empty($in['still_pending']) ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
+        if ( ! $rows && empty($in['revise']) && empty($in['still_pending']) && empty($in['assign']) ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
         $token = TaskList::snapshot(array_values($rows));
         $pick = fn($ids) => array_values(array_intersect_key($rows, array_flip($ids)));
         $a = TaskList::mark($pick($done), $email, $manager);
@@ -137,7 +141,45 @@ final class Projects extends Specialist {
             'reopened' => array_map($t, $b['changed']), 'cancelled' => array_map($t, $x['changed']), 'new_dates' => array_map(fn($x) => $t($x['task']) + ['due' => $x['date']], $c['changed']),
             'not_allowed' => array_map($t, array_merge($a['denied'], $b['denied'], $c['denied'], $x['denied'])),
             'missing_ids' => array_values(array_diff(array_merge($done, $reopen, $cancel, array_keys($due)), array_keys($rows))),
-        ] + $this->revise($in);
+        ] + $this->revise($in) + $this->assign($in);
+    }
+
+    /** @var array<int,int[]> team member id => tasks just given to them (Jessica can send them with one click) */
+    public $notify = [];
+
+    /** «jessica», «cliente», «Liz»… → [owner, team member row|null] or null if unknown. */
+    private static function assignee($to){
+        $k = strtolower(remove_accents(trim((string) $to)));
+        if ( in_array($k, ['jessica', 'yo', 'mi', 'gerencia'], true) ) return ['jessica', null];
+        if ( in_array($k, ['mad', 'nosotros', 'equipo mad'], true) ) return ['mad', null];
+        if ( in_array($k, ['cliente', 'client'], true) ) return ['cliente', null];
+        foreach ( Team::all(true) as $m ) {
+            if ( $k === strtolower($m['slug']) || $k === strtolower(remove_accents($m['name'])) || strpos(strtolower(remove_accents($m['name'])), $k) === 0 ) return [$m['slug'] === 'liz' ? 'liz' : 'mad', $m];
+        }
+        return null;
+    }
+
+    /** Reassign tasks (only Jessica). A task given to the team becomes visible to the team. */
+    private function assign(array $in){
+        global $wpdb;
+        $list = (array) ($in['assign'] ?? []);
+        if ( ! $list ) return [];
+        if ( empty($this->ctx['is_manager']) ) return ['assign_not_allowed' => 'Solo Jessica reparte tareas.'];
+        $rows = TaskList::rows(array_map(fn($a) => (int) ($a['id'] ?? 0), $list));
+        if ( $rows ) $this->undo[] = \MAD_Oficina\Core\TaskChanges::snapshot(array_values($rows));
+        $done = []; $unknown = [];
+        foreach ( $list as $a ) {
+            $t = $rows[(int) ($a['id'] ?? 0)] ?? null;
+            $who = self::assignee($a['to'] ?? '');
+            if ( ! $t || ! $who ) { $unknown[] = ['id' => (int) ($a['id'] ?? 0), 'to' => (string) ($a['to'] ?? '')]; continue; }
+            [$owner, $member] = $who;
+            $fields = ['owner' => $owner, 'team_member_id' => $member ? (int) $member['id'] : null, 'updated_at' => Time::now()];
+            if ( $member && $t['visibility'] === 'internal' ) $fields['visibility'] = 'team'; // so she sees it
+            $wpdb->update(Schema::table('action_items'), $fields, ['id' => $t['id']]);
+            if ( $member ) $this->notify[(int) $member['id']][] = (int) $t['id'];
+            $done[] = ['id' => (int) $t['id'], 'title' => $t['title'], 'now_for' => $member ? $member['name'] : $owner];
+        }
+        return ['assigned' => $done, 'assign_unknown' => $unknown, 'note' => $this->notify ? 'Jessica tendrá un botón para avisar por Chat a quien le toca.' : null];
     }
 
     /** Revisions and «still pending», through TaskChanges (note in the task, priority up). */
@@ -204,18 +246,18 @@ final class Projects extends Specialist {
             if ( count($ids) !== 1 ) return new \WP_Error('madof_task_client', $ids ? 'Hay varios clientes que coinciden; pregunta cuál.' : 'No hay ningún cliente que coincida.');
             $client = $ids[0];
         }
-        $owner = in_array($in['owner'] ?? '', ['jessica', 'mad', 'liz', 'cliente'], true) ? $in['owner'] : 'jessica';
-        $member = null;
+        [$owner, $m] = self::assignee($in['owner'] ?? 'jessica') ?: ['jessica', null];
+        $member = $m ? (int) $m['id'] : null;
         if ( $this->member_id() ) { $owner = 'liz'; $member = $this->member_id(); }
-        elseif ( $owner === 'liz' ) { foreach ( Team::all(true) as $m ) if ( $m['slug'] === 'liz' || ! $member ) $member = (int) $m['id']; }
         $wpdb->insert(Schema::table('action_items'), [
             'client_id' => $client, 'title' => $title, 'description' => sanitize_textarea_field((string) ($in['description'] ?? '')) ?: null,
-            'owner' => $owner === 'liz' ? 'liz' : $owner, 'team_member_id' => $member, 'due_date' => self::date_arg($in['due_date'] ?? ''),
-            'status' => 'open', 'visibility' => 'internal', 'source' => 'assistant', 'created_at' => Time::now(), 'updated_at' => Time::now(),
+            'owner' => $owner, 'team_member_id' => $member, 'due_date' => self::date_arg($in['due_date'] ?? ''),
+            'status' => 'open', 'visibility' => $member ? 'team' : 'internal', 'source' => 'assistant', 'created_at' => Time::now(), 'updated_at' => Time::now(),
         ]);
         $id = (int) $wpdb->insert_id;
+        if ( $member && ! $this->member_id() ) $this->notify[$member][] = $id;
         $this->undo[] = TaskList::snapshot([], [$id]);
-        return ['created' => ['id' => $id, 'title' => $title, 'client' => self::client_label($client), 'owner' => $owner, 'due' => self::date_arg($in['due_date'] ?? ''), 'client_sees_it' => false]];
+        return ['created' => ['id' => $id, 'title' => $title, 'client' => self::client_label($client), 'owner' => $m['name'] ?? $owner, 'due' => self::date_arg($in['due_date'] ?? ''), 'client_sees_it' => false, 'team_sees_it' => (bool) $member]];
     }
 
     /** Read-only look at the minutes (no other agent involved): where a task came from, or a client's latest meetings. */

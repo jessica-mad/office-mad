@@ -230,6 +230,24 @@ final class Events {
             return $this->update(TaskList::card($title, $ids));
         }
 
+        // «Avisar a Liz»: the tasks Jessica just gave her, as task cards in her DM.
+        if ( $fn === 'notify_member' ) {
+            if ( $email !== $this->manager_email() ) return $this->text(__('Solo Jessica reparte tareas.', 'mad-oficina'));
+            $member = Team::get((int) ($params['member_id'] ?? 0));
+            if ( ! $member ) return $this->text(__('Esa persona ya no está en el equipo.', 'mad-oficina'));
+            $chat = \MAD_Oficina_Core::instance()->get_module('chat');
+            $sent = 0; $err = '';
+            foreach ( TaskList::rows(TaskList::parse_ids($params['ids'] ?? '')) as $t ) {
+                if ( (int) $t['team_member_id'] !== (int) $member['id'] || ! in_array($t['status'], TaskList::STATUSES_OPEN, true) ) continue; // reassigned or closed meanwhile
+                $client = $t['client_id'] ? \MAD_Oficina\Core\Repo\Clients::get((int) $t['client_id']) : null;
+                $r = $chat->messenger()->to_team_member($member, Cards::task_for_team($t, $client, $chat->portal_url()));
+                is_wp_error($r) ? $err = $r->get_error_message() : $sent++;
+            }
+            return $this->update(Cards::card('notify-' . (int) $member['id'] . '-' . substr(md5((string) ($params['ids'] ?? '')), 0, 6), __('Tareas repartidas', 'mad-oficina'), '', [
+                ['textParagraph' => ['text' => esc_html($sent ? sprintf(_n('Avisada: %1$s tiene %2$d tarea nueva en su Chat.', 'Avisada: %1$s tiene %2$d tareas nuevas en su Chat.', $sent, 'mad-oficina'), $member['name'], $sent) : ($err ?: __('No había nada que avisar.', 'mad-oficina')))]],
+            ]));
+        }
+
         // «Deshacer» after marking by words.
         if ( $fn === 'task_undo' && ! empty($params['token']) ) {
             $r = ['changed' => [], 'denied' => []];

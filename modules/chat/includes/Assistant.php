@@ -130,9 +130,16 @@ final class Assistant {
         $this->log('answered', ['asked' => $boss->asked, 'changes' => count($boss->undo), 'error' => is_wp_error($answer) ? $answer->get_error_message() : null]);
         if ( is_wp_error($answer) ) return $this->reply($member, ['text' => trim($prefix . "\n\n" . $answer->get_error_message())]);
         $message = ['text' => $answer];
-        if ( $boss->undo ) {
-            $message += Cards::card('undo-' . substr(md5(implode(',', $boss->undo)), 0, 8), __('Cambios hechos', 'mad-oficina'), '', [
-                ['buttonList' => ['buttons' => [Cards::button(__('Deshacer', 'mad-oficina'), 'task_undo', ['token' => implode(',', $boss->undo)])]]],
+        $buttons = [];
+        // Tasks just given to someone in the team: telling them is a message to them, so it is her click.
+        foreach ( $boss->notify as $mid => $ids ) {
+            $m = \MAD_Oficina\Core\Repo\Team::get((int) $mid);
+            if ( $m ) $buttons[] = Cards::button(sprintf(__('Avisar a %s', 'mad-oficina'), $m['name']), 'notify_member', ['member_id' => (int) $mid, 'ids' => implode(',', $ids)]);
+        }
+        if ( $boss->undo ) $buttons[] = Cards::button(__('Deshacer', 'mad-oficina'), 'task_undo', ['token' => implode(',', $boss->undo)]);
+        if ( $buttons ) {
+            $message += Cards::card('undo-' . substr(md5(implode(',', $boss->undo) . wp_json_encode($boss->notify)), 0, 8), __('Cambios hechos', 'mad-oficina'), '', [
+                ['buttonList' => ['buttons' => $buttons]],
             ]);
         }
         return $this->reply($member, $this->with_prefix($message, $prefix));
