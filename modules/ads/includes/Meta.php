@@ -30,6 +30,8 @@ final class Meta {
 
     public function ready(){ return $this->token() !== ''; }
 
+    public function missing(){ return $this->ready() ? '' : __('Falta el token de Meta (pestaña Conexión). Mientras tanto, sube los informes en «Informes de Meta».', 'mad-oficina'); }
+
     /** @return array[]|\WP_Error every item of an edge (pages followed). */
     public function get($path, array $params = []){
         if ( ! $this->ready() ) return new \WP_Error('madof_meta', __('Falta el token de Meta (Campañas → Conexión).', 'mad-oficina'));

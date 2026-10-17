@@ -212,3 +212,4 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-ads-reason textarea{width:100%}
 .madof-ads-google{background:#fff;border:1px solid var(--k)}.madof-ads-meta{background:var(--g);border:1px solid var(--k)}
 .madof-ads-notes td{padding-top:0}.madof-ads-notes textarea{width:100%}
+.madof-ads-find{display:flex;flex-wrap:wrap;gap:12px 28px;margin:8px 0 16px}.madof-ads-find>div{display:flex;flex-direction:column;gap:4px;max-width:440px}

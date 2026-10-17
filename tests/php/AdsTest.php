@@ -288,4 +288,24 @@ class AdsTest extends MADOF_TestCase {
         $this->assertFalse(\MAD_Oficina\Ads\MetaImport::remind($settings, strtotime('2026-10-17 15:00:00 Europe/Madrid')), 'once a day');
         remove_filter('pre_http_request', $chat, 5);
     }
+
+    public function test_searching_accounts_says_what_is_missing_for_each_platform(){
+        $google = MAD_Oficina_Core::instance()->get_module('google')->oauth();
+        update_option(MAD_Oficina_Core::option_key('google'), ['refresh_token' => Crypto::encrypt('refresh'), 'access_token' => Crypto::encrypt('access'), 'expires_at' => time() + 3600, 'scopes' => ['openid', 'email']]);
+        $r = $this->sync()->discover('google');
+        $this->assertSame(0, $r['found']);
+        $this->assertStringContainsString('Reconectar', $r['errors'][0], 'the Ads permission is missing: she is told to reconnect');
+        $this->assertSame([], $this->requests, 'nothing sent without the permission');
+
+        update_option(MAD_Oficina_Core::option_key('google'), ['refresh_token' => Crypto::encrypt('refresh'), 'access_token' => Crypto::encrypt('access'), 'expires_at' => time() + 3600, 'scopes' => $google->required_scopes()]);
+        $deny = fn($pre, $args, $url) => strpos($url, 'https://googleads.googleapis.com/') === 0 ? ['response' => ['code' => 403], 'body' => wp_json_encode(['error' => ['code' => 403, 'status' => 'PERMISSION_DENIED',
+            'details' => [['errors' => [['errorCode' => ['authorizationError' => 'DEVELOPER_TOKEN_NOT_APPROVED'], 'message' => 'The developer token is only approved for use with test accounts.']]]]]])] : $pre;
+        add_filter('pre_http_request', $deny, 20, 3); // after the general fake
+        $r = $this->sync()->discover('google');
+        remove_filter('pre_http_request', $deny, 20);
+        $this->assertStringContainsString('acceso de prueba', $r['errors'][0]);
+
+        $this->g['accounts'] = [];
+        $this->assertStringContainsString('no tiene cuentas de cliente', $this->sync()->discover('google')['errors'][0], 'an empty MCC is said, not silent');
+    }
 }

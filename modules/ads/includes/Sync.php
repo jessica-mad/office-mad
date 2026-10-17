@@ -52,11 +52,13 @@ final class Sync {
         return $platform === 'google' ? $this->google()->ready() : $this->meta()->ready();
     }
 
-    /** Finds the accounts on both platforms (new ones wait to be linked). @return array{found:int, errors:string[]} */
-    public function discover(){
+    public function missing($platform){ return $this->client($platform)->missing(); }
+
+    /** Finds the accounts of one platform (or both); new ones wait to be linked. @return array{found:int, errors:string[]} */
+    public function discover($only = null){
         $found = 0; $errors = [];
-        foreach ( ['google', 'meta'] as $p ) {
-            if ( ! $this->ready($p) ) continue;
+        foreach ( $only ? [$only] : ['google', 'meta'] as $p ) {
+            if ( ( $why = $this->missing($p) ) !== '' ) { if ( $only ) $errors[] = Accounts::PLATFORMS[$p] . ': ' . $why; continue; }
             $list = $this->client($p)->accounts();
             if ( is_wp_error($list) ) { $errors[] = Accounts::PLATFORMS[$p] . ': ' . $list->get_error_message(); continue; }
             foreach ( $list as $a ) {
@@ -66,6 +68,9 @@ final class Sync {
                 if ( ! $acc['client_id'] && ( $c = Accounts::suggest($a['name']) ) ) Accounts::link($id, $c);
                 $found++;
             }
+            if ( ! $list ) $errors[] = Accounts::PLATFORMS[$p] . ': ' . ( $p === 'google'
+                ? __('la MCC no tiene cuentas de cliente vinculadas, o la cuenta de Google conectada no las ve.', 'mad-oficina')
+                : __('el token no tiene ninguna cuenta publicitaria asignada.', 'mad-oficina') );
         }
         return ['found' => $found, 'errors' => $errors];
     }

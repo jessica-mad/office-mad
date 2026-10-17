@@ -93,7 +93,8 @@ return new class($core) implements MAD_Oficina_Module {
 
     public function handle_ads_discover(){
         $this->guard('ads_discover');
-        $r = $this->sync()->discover();
+        $platform = in_array($_POST['platform'] ?? '', ['google', 'meta'], true) ? $_POST['platform'] : null;
+        $r = $this->sync()->discover($platform);
         $msg = sprintf(_n('%d cuenta encontrada.', '%d cuentas encontradas.', $r['found'], 'mad-oficina'), $r['found']) . ( $r['errors'] ? ' ' . implode(' · ', $r['errors']) : '' );
         $this->back(['tab' => 'accounts'], $msg, $r['errors'] ? 'error' : 'success');
     }

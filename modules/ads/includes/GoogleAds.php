@@ -70,6 +70,7 @@ final class GoogleAds {
                 $err = $data[0]['error'] ?? $data['error'] ?? [];
                 $detail = $err['details'][0]['errors'][0]['message'] ?? ($err['message'] ?? '');
                 if ( $code === 404 ) $detail = sprintf(__('la versión %s de la API ya no existe: súbela en Campañas → Conexión', 'mad-oficina'), $version);
+                elseif ( $known = self::explain($err) ) $detail = $known;
                 return new \WP_Error('madof_gads_http', sprintf(__('Google Ads respondió %1$d: %2$s', 'mad-oficina'), $code, $detail), ['status' => $code]);
             }
             $rows = array_merge($rows, $data['results'] ?? []);
@@ -77,6 +78,39 @@ final class GoogleAds {
             if ( $page === '' ) break;
         }
         return $rows;
+    }
+
+    /** Google's error codes, said in plain words (what she has to do). */
+    public static function explain(array $err){
+        $codes = [];
+        foreach ( $err['details'] ?? [] as $d ) {
+            foreach ( $d['errors'] ?? [] as $e ) foreach ( (array) ($e['errorCode'] ?? []) as $c ) $codes[] = (string) $c;
+            if ( ! empty($d['reason']) ) $codes[] = (string) $d['reason'];
+        }
+        $codes[] = (string) ($err['status'] ?? '');
+        $all = implode(' ', $codes) . ' ' . ($err['message'] ?? '');
+        if ( str_contains($all, 'DEVELOPER_TOKEN_NOT_APPROVED') || stripos($all, 'only approved for use with test accounts') !== false )
+            return __('tu developer token sigue en «acceso de prueba» y no puede leer cuentas reales. Hasta que Google apruebe el acceso básico no aparecerá nada.', 'mad-oficina');
+        if ( str_contains($all, 'DEVELOPER_TOKEN_PROHIBITED') || str_contains($all, 'DEVELOPER_TOKEN_INVALID') || str_contains($all, 'INVALID_DEVELOPER_TOKEN') )
+            return __('el developer token no es válido o no corresponde a este proyecto de Google Cloud. Cópialo de nuevo desde el Centro de API de tu MCC.', 'mad-oficina');
+        if ( str_contains($all, 'SERVICE_DISABLED') || stripos($all, 'has not been used in project') !== false )
+            return __('la «Google Ads API» no está habilitada en el proyecto de Google Cloud del plugin: console.cloud.google.com → APIs y servicios → Biblioteca → Google Ads API → Habilitar.', 'mad-oficina');
+        if ( str_contains($all, 'USER_PERMISSION_DENIED') )
+            return __('la cuenta de Google conectada en Conexiones no tiene acceso a esa MCC, o el ID de la MCC no es el correcto.', 'mad-oficina');
+        if ( str_contains($all, 'CUSTOMER_NOT_ENABLED') ) return __('esa cuenta de Google Ads está cancelada o sin activar.', 'mad-oficina');
+        if ( str_contains($all, 'ACCESS_TOKEN_SCOPE_INSUFFICIENT') || str_contains($all, 'insufficient authentication scopes') )
+            return __('falta el permiso de Google Ads: reconecta Google en Conexiones.', 'mad-oficina');
+        return '';
+    }
+
+    /** What is missing before it can read, in plain words ('' = ready). */
+    public function missing(){
+        if ( $this->token() === '' ) return __('Falta el developer token (pestaña Conexión).', 'mad-oficina');
+        if ( self::digits($this->s['google_mcc'] ?? '') === '' ) return __('Falta el ID de tu cuenta de administrador (MCC) en la pestaña Conexión.', 'mad-oficina');
+        $o = $this->oauth();
+        if ( ! $o || ! $o->is_connected() ) return __('Google no está conectado: ve a MAD Oficina → Conexiones y conéctalo.', 'mad-oficina');
+        if ( in_array(self::SCOPE, $o->missing_scopes(), true) ) return __('Falta el permiso de Google Ads: en MAD Oficina → Conexiones pulsa «Reconectar» y acepta el permiso nuevo.', 'mad-oficina');
+        return '';
     }
 
     /** The client accounts under the MCC. @return array[]|\WP_Error [external_id, name, currency, status] */

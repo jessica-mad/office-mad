@@ -148,7 +148,15 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
 
 <?php elseif ( $tab === 'accounts' ) : $accounts = Accounts::all(); ?>
     <p class="description"><?php esc_html_e('Las cuentas que ven tus conexiones. Vincula cada una a su cliente: solo las vinculadas se leen cada mañana. Las que no son de clientes (pruebas, antiguas) déjalas sin cliente.', 'mad-oficina'); ?></p>
-    <?php echo AdminUi::form_open('ads_discover', 'madof-inline'); ?><button class="madof-btn is-small" <?php disabled(! $sync->ready('google') && ! $sync->ready('meta')); ?>><?php esc_html_e('Buscar cuentas en Google Ads y Meta', 'mad-oficina'); ?></button></form>
+    <div class="madof-ads-find">
+    <?php foreach ( Accounts::PLATFORMS as $p => $label ) : $why = $sync->missing($p); ?>
+        <div>
+            <?php echo AdminUi::form_open('ads_discover', 'madof-inline'); ?><input type="hidden" name="platform" value="<?php echo esc_attr($p); ?>">
+                <button class="madof-btn is-small" <?php disabled($why !== ''); ?>><?php echo esc_html(sprintf(__('Buscar cuentas en %s', 'mad-oficina'), $label)); ?></button></form>
+            <small class="<?php echo $why ? 'madof-muted' : ''; ?>"><?php echo $why ? esc_html($why) : AdminUi::icon('check') . ' ' . esc_html__('Lista.', 'mad-oficina'); ?></small>
+        </div>
+    <?php endforeach; ?>
+    </div>
     <?php if ( ! $accounts ) : ?><p class="madof-empty"><?php esc_html_e('Aún no hay cuentas. Configura la conexión y pulsa «Buscar cuentas».', 'mad-oficina'); ?></p><?php else : ?>
     <?php echo AdminUi::form_open('ads_link', 'madof-form'); ?>
     <table class="madof-table"><thead><tr><th><?php esc_html_e('Cuenta', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Última lectura', 'mad-oficina'); ?></th><th></th></tr></thead><tbody>
@@ -195,13 +203,11 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
     <?php endforeach; ?></tbody></table>
     <?php endif; ?>
 
-<?php else : $g = $sync->google(); $m = $sync->meta();
-    $google_mod = \MAD_Oficina_Core::instance()->get_module('google');
-    $missing = $google_mod && $g->token() !== '' && in_array(GoogleAds::SCOPE, $google_mod->oauth()->missing_scopes(), true); ?>
+<?php else : $g = $sync->google(); $m = $sync->meta(); ?>
     <?php echo AdminUi::form_open('ads_settings', 'madof-form'); ?>
     <section class="madof-card">
         <span class="madof-kicker">Google Ads</span>
-        <p><?php echo $g->ready() ? AdminUi::icon('check') . ' ' . esc_html__('Lista para leer.', 'mad-oficina') : esc_html($missing ? __('Falta un paso: reconecta Google en Conexiones para dar el permiso de Google Ads.', 'mad-oficina') : __('Sin configurar.', 'mad-oficina')); ?></p>
+        <p><?php echo $g->ready() ? AdminUi::icon('check') . ' ' . esc_html__('Lista para leer.', 'mad-oficina') : esc_html($g->missing()); ?></p>
         <div class="madof-cols">
             <label><?php esc_html_e('ID de tu cuenta de administrador (MCC)', 'mad-oficina'); ?><input type="text" name="google_mcc" value="<?php echo esc_attr((string) ($settings['google_mcc'] ?? '')); ?>" placeholder="123-456-7890"></label>
             <label><?php esc_html_e('Developer token', 'mad-oficina'); ?><input type="password" name="google_dev_token" autocomplete="off" placeholder="<?php echo esc_attr($g->token() !== '' ? __('Guardado (escribe para cambiarlo)', 'mad-oficina') : ''); ?>"></label>
