@@ -25,6 +25,21 @@ final class BankStatement {
         return self::table(self::csv($text));
     }
 
+    /**
+     * Any spreadsheet (xlsx, old xls, csv, html) as rows of cells, for other importers
+     * (e.g. Meta Ads Manager reports). @return array<array<int,string|float>>|\WP_Error
+     */
+    public static function grid($path){
+        $raw = (string) @file_get_contents($path);
+        if ( $raw === '' ) return new \WP_Error('madof_grid_empty', __('El archivo está vacío.', 'mad-oficina'));
+        if ( substr($raw, 0, 2) === 'PK' ) return self::xlsx($path);
+        if ( substr($raw, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" ) return XlsReader::rows($raw);
+        if ( substr($raw, 0, 2) === "\xFF\xFE" ) $raw = mb_convert_encoding(substr($raw, 2), 'UTF-8', 'UTF-16LE'); // Excel «Unicode text»
+        $text = self::utf8($raw);
+        if ( stripos(ltrim($text), '<') === 0 || stripos($text, '<table') !== false ) return self::html($text);
+        return self::csv($text);
+    }
+
     private static function utf8($s){
         $s = preg_replace('/^\xEF\xBB\xBF/', '', $s);
         return mb_check_encoding($s, 'UTF-8') ? $s : mb_convert_encoding($s, 'UTF-8', 'Windows-1252');

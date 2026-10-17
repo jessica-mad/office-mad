@@ -51,7 +51,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('madoficina_tick', fn() => $this->sync()->run());
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
 
-        foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes', 'ads_meta_import'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         add_action('wp_ajax_madof_ads_reason', [$this, 'ajax_reason']);
     }
 
@@ -122,6 +122,26 @@ return new class($core) implements MAD_Oficina_Module {
         $this->back(['tab' => 'campaigns', 'client' => $c['client_id']], __('Notas guardadas.', 'mad-oficina'));
     }
 
+    /** Ads Manager reports (one or several files at once). */
+    public function handle_ads_meta_import(){
+        $this->guard('ads_meta_import');
+        if ( function_exists('set_time_limit') ) @set_time_limit(120);
+        $files = $_FILES['reports'] ?? null;
+        if ( ! $files || empty($files['tmp_name']) ) $this->back(['tab' => 'meta'], __('Elige el informe exportado del Administrador de anuncios.', 'mad-oficina'), 'error');
+        $client = absint($_POST['client'] ?? 0);
+        $ok = []; $errors = [];
+        foreach ( (array) $files['tmp_name'] as $i => $tmp ) {
+            $name = sanitize_file_name((string) ((array) $files['name'])[$i]);
+            if ( ! $tmp || ! is_uploaded_file($tmp) ) continue;
+            if ( (int) ((array) $files['size'])[$i] > 15 * MB_IN_BYTES ) { $errors[] = $name . ': ' . __('demasiado grande', 'mad-oficina'); continue; }
+            $r = \MAD_Oficina\Ads\MetaImport::import($tmp, $client);
+            if ( is_wp_error($r) ) { $errors[] = $name . ': ' . $r->get_error_message(); continue; }
+            $ok[] = sprintf(__('%1$s: %2$d campañas, %3$d días (%4$s → %5$s)%6$s', 'mad-oficina'), implode(', ', $r['accounts']), $r['campaigns'], $r['days'],
+                date_i18n('j M', strtotime($r['from'])), date_i18n('j M', strtotime($r['to'])), $r['changes'] ? ' · ' . sprintf(_n('%d cambio a explicar en la bitácora', '%d cambios a explicar en la bitácora', $r['changes'], 'mad-oficina'), $r['changes']) : '');
+        }
+        $this->back(['tab' => 'meta'], implode(' · ', array_merge($ok, $errors)) ?: __('No he recibido ningún archivo.', 'mad-oficina'), $errors ? 'error' : 'success');
+    }
+
     /** The why, typed in the log: saved without reloading. */
     public function ajax_reason(){
         if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_send_json_error(['message' => __('No tienes permisos suficientes.', 'mad-oficina')], 403);
@@ -134,7 +154,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     public function render_settings_page(){
         if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
-        $tab = in_array($_GET['tab'] ?? '', ['log', 'campaigns', 'accounts', 'connection'], true) ? $_GET['tab'] : 'log';
+        $tab = in_array($_GET['tab'] ?? '', ['log', 'campaigns', 'accounts', 'meta', 'connection'], true) ? $_GET['tab'] : 'log';
         $settings = $this->settings();
         $sync = $this->sync();
         include __DIR__ . '/views/ads.php';

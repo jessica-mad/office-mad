@@ -221,4 +221,45 @@ class AdsTest extends MADOF_TestCase {
         $this->assertSame(1, $this->sync()->run(strtotime('2026-10-17 09:00:00 Europe/Madrid')));
         $this->assertSame(0, $this->sync()->run(strtotime('2026-10-17 09:10:00 Europe/Madrid')), 'once a day');
     }
+
+    private function report($csv){
+        $f = get_temp_dir() . 'meta-' . wp_generate_password(6, false) . '.csv';
+        file_put_contents($f, $csv);
+        return $f;
+    }
+
+    public function test_meta_reports_from_ads_manager_fill_campaigns_metrics_and_the_log(){
+        $head = '"Inicio del informe";"Fin del informe";"Nombre de la cuenta";"Identificador de la cuenta";"Nombre de la campaña";"Identificador de la campaña";"Día";"Entrega de la campaña";"Presupuesto de la campaña";"Resultados";"Indicador de resultado";"Importe gastado (EUR)";"Impresiones";"Clics en el enlace"' . "\n";
+        $row = fn($day, $budget, $spend, $res, $status = 'Activa') => "\"{$day}\";\"{$day}\";\"Luz Clara\";\"778899\";\"Leads otoño\";\"2385\";\"{$day}\";\"{$status}\";\"{$budget}\";\"{$res}\";\"Clientes potenciales\";\"{$spend}\";\"1.200\";\"35\"\n";
+        $csv = $head . $row('2026-10-14', '15,00', '14,80', '3') . $row('2026-10-15', '15,00', '15,20', '4') . '"";"";"";"";"Resultados de 2 campañas";"";"";"";"";"7";"";"30,00";"2.400";"70"' . "\n";
+        $r = \MAD_Oficina\Ads\MetaImport::import($this->report($csv), 0, '2026-10-16');
+        $this->assertNotWPError($r);
+        $this->assertSame(['campaigns' => 1, 'days' => 2, 'changes' => 0, 'from' => '2026-10-14', 'to' => '2026-10-15'], array_diff_key($r, ['accounts' => 1]));
+        $c = Accounts::campaigns_of($this->client, '2026-10-16')[0];
+        $this->assertSame(['Leads otoño', '15.00', 'active', '30.00', '7.00', '2400', '70'], [$c['name'], $c['budget'], $c['status'], $c['spend'], $c['conversions'], (string) $c['impressions'], (string) $c['clicks']], 'linked by the account name; totals row skipped; 1.200 = 1200');
+
+        // The same days again (overlap) + a new day with another budget: nothing duplicated, the change is logged.
+        $csv = $head . $row('2026-10-15', '15,00', '15,20', '4') . $row('2026-10-16', '25,00', '22,00', '6');
+        $r = \MAD_Oficina\Ads\MetaImport::import($this->report($csv), 0, '2026-10-17');
+        $this->assertSame(1, $r['changes']);
+        $this->assertSame('52.00', Accounts::campaigns_of($this->client, '2026-10-17')[0]['spend']);
+        $log = Changes::find(['client_id' => $this->client]);
+        $this->assertSame(['budget', '15.00', '25', 'import'], [$log[0]['field'], $log[0]['old_value'], $log[0]['new_value'], $log[0]['source']]);
+        $this->assertStringContainsString('15,00 € → 25,00 €', $log[0]['summary']);
+    }
+
+    public function test_meta_reports_in_english_without_account_id_need_the_client_and_the_day(){
+        $csv = "Campaign name,Reporting starts,Reporting ends,Amount spent (EUR),Impressions,Link clicks,Results\nSpring sale,2026-10-01,2026-10-07,70.50,5000,120,9\n";
+        $r = \MAD_Oficina\Ads\MetaImport::import($this->report($csv), $this->client);
+        $this->assertWPError($r, 'one row for a whole week: she is told to break it down by day');
+        $this->assertStringContainsString('Desglose → Por tiempo → Día', $r->get_error_message());
+
+        $csv = "Campaign name,Day,Amount spent (EUR),Impressions,Link clicks,Results\nSpring sale,2026-10-01,10.50,700,20,1\n";
+        $this->assertWPError(\MAD_Oficina\Ads\MetaImport::import($this->report($csv), 0), 'no account in the file: she must say whose it is');
+        $r = \MAD_Oficina\Ads\MetaImport::import($this->report($csv), $this->client);
+        $this->assertNotWPError($r);
+        $acc = Accounts::all(['client_id' => $this->client])[0];
+        $this->assertSame('import-' . $this->client, $acc['external_id']);
+        $this->assertSame(0, $this->sync()->run(strtotime('2026-10-17 09:00:00 Europe/Madrid')), 'imported accounts are never read through the API');
+    }
 }

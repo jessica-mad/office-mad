@@ -19,6 +19,7 @@ $tabs = [
     'log' => $counts['pending'] ? sprintf(__('Bitácora (%d sin motivo)', 'mad-oficina'), $counts['pending']) : __('Bitácora', 'mad-oficina'),
     'campaigns' => __('Campañas', 'mad-oficina'),
     'accounts' => $unlinked ? sprintf(__('Cuentas (%d sin cliente)', 'mad-oficina'), $unlinked) : __('Cuentas', 'mad-oficina'),
+    'meta' => __('Informes de Meta', 'mad-oficina'),
     'connection' => __('Conexión', 'mad-oficina'),
 ];
 $name = \MAD_Oficina\Core\Agents\Characters::get('analista')['name'] ?? 'Nuria';
@@ -162,6 +163,36 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
     <button class="madof-btn"><?php esc_html_e('Guardar vínculos', 'mad-oficina'); ?></button>
     </form>
     <?php foreach ( $accounts as $a ) if ( $a['client_id'] ) echo str_replace('<form ', '<form id="madof-ads-sync-' . (int) $a['id'] . '" ', AdminUi::form_open('ads_sync', 'madof-inline')) . '<input type="hidden" name="account" value="' . (int) $a['id'] . '"></form>'; ?>
+    <?php endif; ?>
+
+<?php elseif ( $tab === 'meta' ) :
+    $imported = array_values(array_filter(Accounts::all(['platform' => 'meta']), fn($a) => $a['last_sync'])); ?>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php esc_html_e('Subir informes del Administrador de anuncios', 'mad-oficina'); ?></span>
+        <p><?php esc_html_e('Mientras Meta no nos deje leer por la API, sus métricas llegan así: exportas el informe y lo subes aquí. Rellena las campañas y métricas de cada cliente igual que la conexión; si el presupuesto o el estado de una campaña cambia entre un informe y el siguiente, aparece en la bitácora para que apuntes por qué.', 'mad-oficina'); ?></p>
+        <?php echo str_replace('<form ', '<form enctype="multipart/form-data" ', AdminUi::form_open('ads_meta_import', 'madof-form')); ?>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Informes (CSV o Excel; puedes elegir varios)', 'mad-oficina'); ?><input type="file" name="reports[]" accept=".csv,.xlsx,.xls,.txt" multiple required></label>
+                <label><?php esc_html_e('Cliente', 'mad-oficina'); ?><select name="client"><option value="0"><?php esc_html_e('Lo deduzco de la cuenta del informe', 'mad-oficina'); ?></option><?php foreach ( $clients as $c ) echo '<option value="' . (int) $c['id'] . '">' . esc_html($c['code'] . ' · ' . $c['name']) . '</option>'; ?></select>
+                    <small><?php esc_html_e('Hace falta si el informe no trae el identificador de la cuenta, o si la cuenta aún no está vinculada y su nombre no lleva el del cliente.', 'mad-oficina'); ?></small></label>
+            </div>
+            <button class="madof-btn"><?php esc_html_e('Subir', 'mad-oficina'); ?></button>
+        </form>
+        <details class="madof-more" open><summary><?php esc_html_e('Cómo exportar el informe (una vez; luego se reutiliza)', 'mad-oficina'); ?></summary>
+            <ol>
+                <li><?php esc_html_e('En el Administrador de anuncios, pestaña Campañas, elige el periodo (por ejemplo, los últimos 7 o 30 días; si se solapan con un informe anterior no se duplica nada).', 'mad-oficina'); ?></li>
+                <li><?php esc_html_e('Desglose → Por tiempo → Día.', 'mad-oficina'); ?></li>
+                <li><?php esc_html_e('Columnas → Personalizar: deja Nombre de la campaña, Entrega, Presupuesto, Resultados, Importe gastado, Impresiones y Clics en el enlace; añade Nombre e Identificador de la cuenta y de la campaña. Guárdalo como columnas predeterminadas «MAD Oficina».', 'mad-oficina'); ?></li>
+                <li><?php esc_html_e('Informes → Exportar datos de la tabla → CSV o Excel. Con varias cuentas, puedes hacerlo desde la vista de todas las cuentas del negocio y subir un solo archivo.', 'mad-oficina'); ?></li>
+            </ol>
+        </details>
+    </section>
+    <?php if ( $imported ) : ?>
+    <table class="madof-table"><thead><tr><th><?php esc_html_e('Cuenta de Meta', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Último informe', 'mad-oficina'); ?></th></tr></thead><tbody>
+    <?php global $wpdb; foreach ( $imported as $a ) : $last = $wpdb->get_var($wpdb->prepare('SELECT MAX(m.date) FROM ' . \MAD_Oficina\Core\Schema::table('ad_metrics_daily') . ' m JOIN ' . \MAD_Oficina\Core\Schema::table('ad_campaigns') . ' c ON c.id = m.campaign_id WHERE c.account_id = %d', $a['id'])); $cl = $a['client_id'] ? Clients::get((int) $a['client_id']) : null; ?>
+        <tr><td><?php echo esc_html($a['name']); ?></td><td><?php echo esc_html($cl ? $cl['code'] . ' · ' . $cl['name'] : '—'); ?></td>
+            <td><?php echo $last ? esc_html(sprintf(__('datos hasta el %s', 'mad-oficina'), date_i18n('j M Y', strtotime($last)))) : '—'; ?><?php if ( $last && strtotime($last) < strtotime('-8 days') ) echo ' <span class="madof-pill is-alert">' . esc_html__('desactualizado', 'mad-oficina') . '</span>'; ?></td></tr>
+    <?php endforeach; ?></tbody></table>
     <?php endif; ?>
 
 <?php else : $g = $sync->google(); $m = $sync->meta();

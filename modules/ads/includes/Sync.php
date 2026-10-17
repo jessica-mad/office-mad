@@ -37,7 +37,7 @@ final class Sync {
         if ( (int) $local->format('G') < self::START_HOUR ) return 0;
         $today = $local->format('Y-m-d');
         $due = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . Schema::table('ad_accounts')
-            . " WHERE client_id IS NOT NULL AND tracking = 1 AND status = 'active' AND (last_sync IS NULL OR last_sync < %s) ORDER BY last_sync IS NOT NULL, last_sync LIMIT %d", $today . ' 00:00:00', self::PER_TICK), ARRAY_A);
+            . " WHERE client_id IS NOT NULL AND tracking = 1 AND status = 'active' AND external_id NOT LIKE 'import-%%' AND external_id NOT LIKE 'demo-%%' AND (last_sync IS NULL OR last_sync < %s) ORDER BY last_sync IS NOT NULL, last_sync LIMIT %d", $today . ' 00:00:00', self::PER_TICK), ARRAY_A);
         $n = 0;
         foreach ( $due as $a ) {
             if ( ! $this->ready($a['platform']) ) continue;
