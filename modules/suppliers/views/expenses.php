@@ -36,13 +36,13 @@ $reason = function(array $e){
         'unmatched' => __('Aún no sé qué factura paga', 'mad-oficina'),
     ][$r] ?? '';
 };
-$table = function(array $list, $show_reason = false, $pick = false) use ($base, $codes, $reason){
+$table = function(array $list, $show_reason = false, $pick = false, $review = false) use ($base, $codes, $reason){
     if ( ! $list ) { echo '<p class="madof-empty">' . esc_html__('Nada por aquí.', 'mad-oficina') . '</p>'; return; } ?>
     <table class="madof-table">
         <thead><tr><?php if ( $pick ) : ?><th><input type="checkbox" class="madof-select-all" aria-label="<?php esc_attr_e('Seleccionar todas', 'mad-oficina'); ?>"></th><?php endif; ?><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Proveedor', 'mad-oficina'); ?></th><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('IVA', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th></th></tr></thead>
         <tbody>
         <?php foreach ( $list as $e ) : ?>
-            <tr>
+            <tr data-expense="<?php echo (int) $e['id']; ?>">
                 <?php if ( $pick ) : ?><td><input type="checkbox" form="madof-exp-bulk" name="ids[]" value="<?php echo (int) $e['id']; ?>" class="madof-pick" aria-label="<?php echo esc_attr($e['supplier_name'] ?: $e['sender']); ?>"></td><?php endif; ?>
                 <td class="madof-nowrap"><a href="<?php echo esc_url($base . '&expense=' . $e['id']); ?>"><?php echo esc_html($e['issue_date'] ? date_i18n('j M Y', strtotime($e['issue_date'])) : '—'); ?></a>
                     <?php if ( $e['received_at'] && $e['received_at'] !== $e['issue_date'] ) echo '<br><small class="madof-muted">' . esc_html(sprintf(__('llegó %s', 'mad-oficina'), date_i18n('j M Y', strtotime($e['received_at'])))) . '</small>'; ?>
@@ -57,7 +57,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
                 <td class="madof-nowrap"><?php echo $e['vat'] !== null ? esc_html(Money::format($e['vat'])) : '—'; ?></td>
                 <td class="madof-nowrap"><strong><?php echo $e['total'] !== null ? esc_html(Suppliers::money($e['total'], $e['currency'])) : '—'; ?></strong>
                     <?php if ( $e['currency'] !== 'EUR' && $e['paid_eur'] ) echo '<br><small>' . esc_html(sprintf(__('pagado %s', 'mad-oficina'), Money::format($e['paid_eur']))) . '</small>'; ?></td>
-                <td class="madof-row-actions"><?php if ( $e['drive_url'] ) : ?><a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php echo esc_html(strtoupper(Expenses::ext($e))); ?></a><?php if ( $e['payment_url'] ) : ?> · <a href="<?php echo esc_url($e['payment_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('pago', 'mad-oficina'); ?></a><?php endif; ?><?php elseif ( in_array($e['status'], ['registered', 'not_mine'], true) ) : ?><small class="madof-muted"><?php esc_html_e('archivando…', 'mad-oficina'); ?></small><?php else : ?><small class="madof-muted"><?php esc_html_e('se archiva al decidir', 'mad-oficina'); ?></small><?php endif; ?></td>
+                <td class="madof-row-actions"><?php if ( $review ) : ?><button type="button" class="madof-btn is-small madof-review-open" data-expense="<?php echo (int) $e['id']; ?>"><?php esc_html_e('Revisar', 'mad-oficina'); ?></button> <?php endif; ?><?php if ( $e['drive_url'] ) : ?><a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php echo esc_html(strtoupper(Expenses::ext($e))); ?></a><?php if ( $e['payment_url'] ) : ?> · <a href="<?php echo esc_url($e['payment_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('pago', 'mad-oficina'); ?></a><?php endif; ?><?php elseif ( in_array($e['status'], ['registered', 'not_mine'], true) ) : ?><small class="madof-muted"><?php esc_html_e('archivando…', 'mad-oficina'); ?></small><?php else : ?><small class="madof-muted"><?php esc_html_e('se archiva al decidir', 'mad-oficina'); ?></small><?php endif; ?></td>
             </tr>
         <?php endforeach; ?>
         </tbody>
@@ -135,7 +135,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="madof-exp-bulk" class="madof-bulk">
             <?php wp_nonce_field('madof_expense_bulk'); ?><input type="hidden" name="action" value="madof_expense_bulk"><input type="hidden" name="tab" value="<?php echo esc_attr($tab); ?>">
             <span class="madof-bulk-count" aria-live="polite"></span>
-            <?php foreach ( $actions as $do => $label ) : ?><button class="madof-btn is-small <?php echo $do === 'aside' ? '' : 'is-ghost'; ?>" name="do" value="<?php echo esc_attr($do); ?>" disabled><?php echo esc_html($label); ?></button><?php endforeach; ?>
+            <?php foreach ( $actions as $do => $label ) : ?><button class="madof-btn is-small <?php echo $do === (isset($actions['approve']) ? 'approve' : 'aside') ? '' : 'is-ghost'; ?>" name="do" value="<?php echo esc_attr($do); ?>" disabled><?php echo esc_html($label); ?></button><?php endforeach; ?>
         </form>
         <script>
         (function () {
@@ -147,7 +147,7 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
             [].forEach.call(bulk.querySelectorAll('button'), function (b) { b.disabled = !n; });
           };
           document.addEventListener('change', function (e) {
-            if (e.target.classList.contains('madof-select-all')) picks().forEach(function (c) { c.checked = e.target.checked; });
+            if (e.target.classList && e.target.classList.contains('madof-select-all')) picks().forEach(function (c) { c.checked = e.target.checked; });
             update();
           });
           update();
@@ -155,9 +155,10 @@ $table = function(array $list, $show_reason = false, $pick = false) use ($base, 
         </script>
     <?php };
     if ( $tab === 'review' ) : ?>
-    <p class="description"><?php esc_html_e('Facturas que esperan tu decisión (también están en la bandeja): proveedores nuevos, facturas sin destinatario claro o que no he podido leer. Ábrelas para decidir una a una, o márcalas y apártalas.', 'mad-oficina'); ?></p>
-    <?php $bulk_bar(['aside' => __('No son mías: guardar aparte', 'mad-oficina'), 'discard' => __('No son facturas: descartar', 'mad-oficina'), 'read' => __('Volver a leer', 'mad-oficina')]); ?>
-    <?php $table(Expenses::all(['status' => 'review']), true, true); ?>
+    <p class="description"><?php esc_html_e('Facturas que esperan tu decisión (también están en la bandeja): proveedores nuevos, facturas sin destinatario claro o que no he podido leer. Pulsa «Revisar» para verlas una a una sin salir de aquí, o márcalas y decide en masa («Son mías» las registra con los datos leídos).', 'mad-oficina'); ?></p>
+    <?php $bulk_bar(['approve' => __('Son mías: registrarlas', 'mad-oficina'), 'aside' => __('No son mías: guardar aparte', 'mad-oficina'), 'discard' => __('No son facturas: descartar', 'mad-oficina'), 'read' => __('Volver a leer', 'mad-oficina')]); ?>
+    <?php $table(Expenses::all(['status' => 'review']), true, true, true); ?>
+    <?php include __DIR__ . '/expense-review.php'; ?>
     <?php else : ?>
     <?php if ( ! empty($settings['paused']) ) : ?><p class="madof-warn"><?php esc_html_e('La lectura está en pausa (Ajustes): no se lee nada hasta que la reactives.', 'mad-oficina'); ?></p><?php endif; ?>
     <p class="description"><?php esc_html_e('PDFs que han llegado y la Contable aún no ha leído. Se leen solos en segundo plano (unos pocos cada pocos minutos); si uno falla, se reintenta hasta 3 veces y aquí ves por qué.', 'mad-oficina'); ?></p>

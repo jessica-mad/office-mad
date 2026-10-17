@@ -86,6 +86,8 @@ return new class($core) implements MAD_Oficina_Module {
             add_submenu_page('mad-finanzas', __('Proveedores', 'mad-oficina'), __('Proveedores', 'mad-oficina'), $cap, 'admin.php?page=' . $this->menu_slug() . '&tab=suppliers', '', 11);
         }, 11);
 
+        add_action('wp_ajax_madof_expense_panel', [$this, 'ajax_expense_panel']);
+        add_action('wp_ajax_madof_expense_decide', [$this, 'ajax_expense_decide']);
         foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice', 'expense_file'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
@@ -230,12 +232,74 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('expense_bulk');
         $tab = sanitize_key($_POST['tab'] ?? 'review');
         $do = sanitize_key($_POST['do'] ?? '');
+        if ( $do === 'approve' ) {
+            $r = $this->intake()->bulk_approve((array) ($_POST['ids'] ?? []));
+            $msg = sprintf(_n('%d registrada como gasto.', '%d registradas como gasto.', $r['done'], 'mad-oficina'), $r['done']);
+            if ( $r['skipped'] ) $msg .= ' ' . sprintf(_n('%d sin leer: ábrela, corrige los datos y regístrala.', '%d sin leer: ábrelas, corrige los datos y regístralas.', $r['skipped'], 'mad-oficina'), $r['skipped']);
+            if ( $r['errors'] ) $msg .= ' ' . implode(' · ', $r['errors']);
+            $this->back(['tab' => $tab], $msg, $r['done'] ? 'success' : 'error');
+        }
         if ( ! in_array($do, ['aside', 'discard', 'read'], true) ) $this->back(['tab' => $tab], __('Elige qué hacer.', 'mad-oficina'), 'error');
         $n = $this->intake()->bulk($do, (array) ($_POST['ids'] ?? []));
         $msg = ['aside' => _n('%d guardada aparte, en «No son mías».', '%d guardadas aparte, en «No son mías».', $n, 'mad-oficina'),
             'discard' => _n('%d descartada.', '%d descartadas.', $n, 'mad-oficina'),
             'read' => _n('%d vuelve a la cola de lectura.', '%d vuelven a la cola de lectura.', $n, 'mad-oficina')][$do];
         $this->back(['tab' => $tab], sprintf($msg, $n), $n ? 'success' : 'error');
+    }
+
+    /* ==== «Revisar» window in Por revisar: one invoice at a time, without reloading ==== */
+
+    private function ajax_guard(){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_send_json_error(['message' => __('No tienes permisos suficientes.', 'mad-oficina')], 403);
+        if ( ! check_ajax_referer('madof_expense_panel', '_ajax_nonce', false) ) wp_send_json_error(['message' => __('La página ha caducado: recárgala.', 'mad-oficina')], 403);
+        $e = \MAD_Oficina\Suppliers\Expenses::get(absint($_REQUEST['expense_id'] ?? 0));
+        if ( ! $e ) wp_send_json_error(['message' => __('Ese gasto ya no existe.', 'mad-oficina')], 404);
+        return $e;
+    }
+
+    /** The invoice next to its question (the same form as the inbox). */
+    public function ajax_expense_panel(){
+        $e = $this->ajax_guard();
+        $a = \MAD_Oficina\Suppliers\Intake::pending_approval($e['id']);
+        $edit = admin_url('admin.php?page=' . $this->menu_slug() . '&expense=' . $e['id']);
+        if ( $a ) {
+            $html = (string) apply_filters('madoficina_approval_form_' . $a['action_type'], '', $a);
+        } else {
+            // Unread (or long): nothing to approve yet, the data has to be typed in its page.
+            $html = '<p>' . esc_html(trim(($e['supplier_name'] ?: $e['sender'] ?: __('Factura', 'mad-oficina')) . ' · ' . ($e['subject'] ?: ''), ' ·')) . '</p>'
+                . \MAD_Oficina\Suppliers\Uploads::preview($e)
+                . ($e['notes'] ? '<p class="madof-warn">' . esc_html($e['notes']) . '</p>' : '')
+                . '<p class="description">' . esc_html__('No la he podido leer: ábrela para escribir los datos y registrarla, o vuelve a intentarlo.', 'mad-oficina') . '</p>';
+        }
+        wp_send_json_success([
+            'title' => $a ? $a['title'] : ($e['supplier_name'] ?: __('Factura sin leer', 'mad-oficina')),
+            'html' => $html,
+            'can_approve' => (bool) $a,
+            'approve_label' => $a && $a['action_type'] === \MAD_Oficina\Suppliers\Intake::NEW_SUPPLIER ? __('Dar de alta y registrar', 'mad-oficina') : __('Es mía: registrarla', 'mad-oficina'),
+            'edit_url' => $edit,
+        ]);
+    }
+
+    /** approve (with the form's input) · aside · discard · read */
+    public function ajax_expense_decide(){
+        $e = $this->ajax_guard();
+        $do = sanitize_key($_POST['do'] ?? '');
+        if ( $do === 'approve' ) {
+            $a = \MAD_Oficina\Suppliers\Intake::pending_approval($e['id']);
+            if ( ! $a ) wp_send_json_error(['message' => __('Esta ya no espera tu decisión (¿la resolviste en otra pestaña?).', 'mad-oficina')], 409);
+            $input = isset($_POST['input']) && is_array($_POST['input']) ? wp_unslash($_POST['input']) : []; // the handler sanitises it, as in the inbox
+            $r = \MAD_Oficina\Core\Approvals::resolve($a['id'], 'approve', $input, get_current_user_id());
+            if ( is_wp_error($r) ) wp_send_json_error(['message' => $r->get_error_message()], 400);
+            if ( \MAD_Oficina\Suppliers\Intake::pending_approval($e['id']) ) {
+                // Hers, but from a supplier she doesn't have yet: the next question, same window.
+                wp_send_json_success(['again' => true, 'message' => __('Es tuya. Ahora dime quién es el proveedor.', 'mad-oficina')]);
+            }
+            wp_send_json_success(['message' => sprintf(__('%s: registrada.', 'mad-oficina'), $e['supplier_name'] ?: __('Factura', 'mad-oficina'))]);
+        }
+        if ( ! in_array($do, ['aside', 'discard', 'read'], true) ) wp_send_json_error(['message' => __('Elige qué hacer.', 'mad-oficina')], 400);
+        $this->intake()->bulk($do, [$e['id']]);
+        $label = ['aside' => __('guardada aparte', 'mad-oficina'), 'discard' => __('descartada', 'mad-oficina'), 'read' => __('vuelve a la cola de lectura', 'mad-oficina')][$do];
+        wp_send_json_success(['message' => sprintf('%s: %s.', $e['supplier_name'] ?: ($e['sender'] ?: __('Factura', 'mad-oficina')), $label)]);
     }
 
     /** «Leer ahora»: the waiting ones, in this request (about a minute at most). */

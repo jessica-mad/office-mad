@@ -505,6 +505,42 @@ final class Intake {
      * «discard» (not an invoice: forgotten) or «read» (read again now).
      * @return int how many
      */
+    /**
+     * «Son mías: registrarlas»: each one's pending question (new supplier or «¿es tuya?»)
+     * approved with what was read, as «Aprobar tal cual» in the inbox.
+     * @return array{done:int, skipped:int, errors:string[]} skipped = nothing to approve (unread)
+     */
+    public function bulk_approve(array $ids){
+        $out = ['done' => 0, 'skipped' => 0, 'errors' => []];
+        foreach ( array_unique(array_map('intval', $ids)) as $id ) {
+            $pending = self::pending_approval($id);
+            if ( ! $pending ) {
+                // Its card closed itself when a sibling invoice of the same new supplier was approved.
+                $e = Expenses::get($id);
+                if ( $e && $e['status'] === 'registered' ) $out['done']++; else $out['skipped']++;
+                continue;
+            }
+            // «Es mía» on an unknown supplier opens its «¿Proveedor nuevo?» card: answered too, with what was read.
+            for ( $step = 0; $pending && $step < 2; $step++ ) {
+                $r = Approvals::resolve_many([$pending['id']], 'approve', get_current_user_id());
+                $out['errors'] = array_merge($out['errors'], $r['errors']);
+                if ( $r['errors'] ) break;
+                $pending = self::pending_approval($id);
+            }
+            $e = Expenses::get($id);
+            if ( $e && $e['status'] === 'registered' ) $out['done']++;
+        }
+        return $out;
+    }
+
+    /** The question waiting on this expense, if any. */
+    public static function pending_approval($expense_id){
+        foreach ( Approvals::for_object('expense', (int) $expense_id) as $a ) {
+            if ( $a['status'] === Approvals::PENDING && in_array($a['action_type'], [self::NEW_SUPPLIER, self::REVIEW], true) ) return $a;
+        }
+        return null;
+    }
+
     public function bulk($action, array $ids){
         $n = 0;
         foreach ( array_unique(array_map('intval', $ids)) as $id ) {

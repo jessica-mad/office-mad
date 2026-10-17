@@ -181,3 +181,21 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-invoice-view iframe{width:100%;height:560px;border:1px solid var(--k,#0B0B0B);border-radius:12px;background:#fff;margin-top:8px}.madof-invoice-view summary{cursor:pointer;font-weight:600}
 .madof-bank-filter{margin:0 0 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.madof-bank-filter input[type=search]{min-width:280px}.madof-bank-bulk{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;margin:0 0 12px;background:var(--g,#F2F2DC);border-radius:16px}
 .madof-bank-or{display:flex;flex-wrap:wrap;gap:8px;align-items:center;flex-basis:100%;padding-top:8px;border-top:1px dashed rgba(0,0,0,.15)}.madof-bank-or select{max-width:420px}.madof-bank-several{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+/* «Revisar» window in Gastos → Por revisar */
+.madof-review{width:min(1240px,96vw);max-height:94vh;border:2px solid var(--k);border-radius:22px;padding:0;background:var(--c);color:var(--k)}
+.madof-review::backdrop{background:rgba(11,11,11,.55)}
+.madof-review-form{display:flex;flex-direction:column;gap:12px;padding:18px 22px}
+.madof-review-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.madof-review-head h2{margin:0;flex:1 1 300px;font-size:20px}
+.madof-review-body{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px;align-items:start}
+.madof-review-file iframe{height:min(66vh,720px);margin-top:0}
+.madof-review-file .madof-invoice-view summary{display:none}
+.madof-review-data{max-height:66vh;overflow:auto;background:var(--g);border-radius:16px;padding:12px 16px}
+.madof-review-data .madof-cols{display:flex;flex-wrap:wrap;gap:8px 12px}
+.madof-review-data label{display:flex;flex-direction:column;gap:2px;flex:1 1 160px}
+.madof-review-data label.madof-check{flex-direction:row;align-items:center;gap:6px}
+.madof-review-foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.madof-review-foot .madof-btn[disabled]{opacity:.45;cursor:not-allowed}
+.madof-review-skip{margin-left:auto}
+.madof-review-msg{margin:0;min-height:1.2em;font-weight:500}
+@media (max-width:900px){.madof-review-body{grid-template-columns:1fr}.madof-review-file iframe{height:50vh}.madof-review-data{max-height:none}}

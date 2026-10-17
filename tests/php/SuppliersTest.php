@@ -347,4 +347,58 @@ class SuppliersTest extends MADOF_TestCase {
         $this->assertNotSame('queued', Expenses::get($r['expense_id'])['status']);
         $this->assertSame(9, \MAD_Oficina\Suppliers\Reader::pages($pdf));
     }
+
+    public function test_bulk_approve_registers_what_was_read(){
+        $a = $this->receive($this->x(['number' => 'M1']))['expense_id']; // new supplier
+        $b = $this->receive($this->x(['number' => 'M2']))['expense_id']; // same new supplier: joined, not duplicated
+        $c = $this->receive($this->x(['number' => 'M3', 'supplier_name' => 'Luz SA', 'supplier_tax_id' => 'A22222222', 'recipient_name' => '', 'recipient_tax_id' => '']), 'Luz <f@luz.example>')['expense_id'];
+        $this->next = 'error';
+        $u = $this->receive('error')['expense_id']; // unread: nothing to approve
+        $r = $this->intake()->bulk_approve([$a, $b, $c, $u]);
+        $this->assertSame([3, 1, []], [$r['done'], $r['skipped'], $r['errors']]);
+        foreach ( [$a, $b, $c] as $id ) $this->assertSame('registered', Expenses::get($id)['status']);
+        $this->assertSame(Expenses::get($a)['supplier_id'], Expenses::get($b)['supplier_id']);
+        $this->assertCount(1, array_filter(Suppliers::all(), fn($s) => $s['name'] === 'Nube SL'));
+        $this->assertNotSame('registered', Expenses::get($u)['status']);
+        $this->assertNull(Intake::pending_approval($a));
+    }
+
+    private function ajax($method, array $post){
+        $_POST = $_REQUEST = $post + ['_ajax_nonce' => wp_create_nonce('madof_expense_panel')];
+        add_filter('wp_doing_ajax', '__return_true');
+        $die = fn() => function(){ throw new \RuntimeException('die'); };
+        add_filter('wp_die_ajax_handler', $die);
+        ob_start();
+        try { MAD_Oficina_Core::instance()->get_module('suppliers')->$method(); } catch ( \RuntimeException $e ) {}
+        $out = ob_get_clean();
+        remove_filter('wp_die_ajax_handler', $die);
+        remove_filter('wp_doing_ajax', '__return_true');
+        $_POST = $_REQUEST = [];
+        return json_decode($out, true);
+    }
+
+    public function test_review_window_shows_and_decides_without_reloading(){
+        $id = $this->receive($this->x(['number' => 'W1']))['expense_id'];
+        $r = $this->ajax('ajax_expense_panel', ['expense_id' => $id]);
+        $this->assertTrue($r['success']);
+        $this->assertTrue($r['data']['can_approve']);
+        $this->assertStringContainsString('input[name]', $r['data']['html'], 'the same form as the inbox');
+        $this->assertStringContainsString('<iframe', $r['data']['html'], 'with the invoice itself');
+
+        $r = $this->ajax('ajax_expense_decide', ['expense_id' => $id, 'do' => 'approve', 'input' => ['mode' => 'new', 'name' => 'Nube Cloud SL', 'tax_id' => 'B99999999', 'category' => 'hosting', 'periodicity' => 'monthly']]);
+        $this->assertTrue($r['success'], wp_json_encode($r));
+        $e = Expenses::get($id);
+        $this->assertSame('registered', $e['status']);
+        $this->assertSame('Nube Cloud SL', Suppliers::get($e['supplier_id'])['name'], 'what she corrected in the window counts');
+
+        $other = $this->receive($this->x(['number' => 'W2', 'recipient_name' => '', 'recipient_tax_id' => '']))['expense_id'];
+        $this->assertTrue($this->ajax('ajax_expense_decide', ['expense_id' => $other, 'do' => 'aside'])['success']);
+        $this->assertSame('not_mine', Expenses::get($other)['status']);
+        $this->assertFalse($this->ajax('ajax_expense_decide', ['expense_id' => $id, 'do' => 'approve'])['success'], 'nothing left to approve');
+
+        // Only Finanzas, and with a fresh nonce.
+        $this->assertFalse($this->ajax('ajax_expense_panel', ['expense_id' => $other, '_ajax_nonce' => 'bad'])['success']);
+        wp_set_current_user(self::factory()->user->create(['role' => 'subscriber']));
+        $this->assertFalse($this->ajax('ajax_expense_panel', ['expense_id' => $other])['success']);
+    }
 }
