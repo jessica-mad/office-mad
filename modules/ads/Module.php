@@ -49,6 +49,7 @@ return new class($core) implements MAD_Oficina_Module {
         });
         add_action(self::CRON_HOOK, fn() => $this->sync()->run());
         add_action('madoficina_tick', fn() => $this->sync()->run());
+        add_action('madoficina_tick', fn() => \MAD_Oficina\Ads\MetaImport::remind($this->settings())); // no Meta report lately: Nuria asks for it
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
 
         foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes', 'ads_meta_import'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);

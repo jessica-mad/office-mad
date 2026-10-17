@@ -262,4 +262,30 @@ class AdsTest extends MADOF_TestCase {
         $this->assertSame('import-' . $this->client, $acc['external_id']);
         $this->assertSame(0, $this->sync()->run(strtotime('2026-10-17 09:00:00 Europe/Madrid')), 'imported accounts are never read through the API');
     }
+
+    public function test_nuria_asks_for_the_meta_report_once_a_day_when_it_stops_arriving(){
+        update_option(MAD_Oficina_Core::option_key('ads'), ['google_mcc' => '111-222-3333', 'google_dev_token' => Crypto::encrypt('dev-token-inventado')]); // no Meta API
+        openssl_pkey_export(openssl_pkey_new(['private_key_bits' => 2048]), $key);
+        update_option(MAD_Oficina_Core::option_key('chat'), ['manager_email' => 'jessica@imad.example', 'manager_dm' => 'spaces/JESSDM',
+            'service_account' => Crypto::encrypt(wp_json_encode(['type' => 'service_account', 'client_email' => 'bot@proj.iam.gserviceaccount.com', 'private_key' => $key, 'token_uri' => 'https://oauth2.googleapis.com/token']))]);
+        delete_option(\MAD_Oficina\Ads\MetaImport::ASKED);
+        $sent = [];
+        $chat = function($pre, $args, $url) use (&$sent){
+            if ( $url === 'https://oauth2.googleapis.com/token' ) return ['response' => ['code' => 200], 'body' => wp_json_encode(['access_token' => 't', 'expires_in' => 3600])];
+            if ( strpos($url, 'https://chat.googleapis.com/') === 0 ) { $sent[] = json_decode($args['body'], true)['text'] ?? ''; return ['response' => ['code' => 200], 'body' => '{"name":"spaces/JESSDM/messages/1"}']; }
+            return $pre;
+        };
+        add_filter('pre_http_request', $chat, 5, 3);
+        $csv = "Nombre de la cuenta;Identificador de la cuenta;Nombre de la campaña;Día;Importe gastado (EUR)\nLuz Clara;778899;Leads;2026-10-14;10,00\n";
+        \MAD_Oficina\Ads\MetaImport::import($this->report($csv), 0);
+        $settings = get_option(MAD_Oficina_Core::option_key('ads'));
+        $this->assertFalse(\MAD_Oficina\Ads\MetaImport::remind($settings, strtotime('2026-10-15 11:00:00 Europe/Madrid')), 'data up to yesterday: nothing to ask');
+        $this->assertFalse(\MAD_Oficina\Ads\MetaImport::remind($settings, strtotime('2026-10-17 08:00:00 Europe/Madrid')), 'not before 10:00');
+        $this->assertTrue(\MAD_Oficina\Ads\MetaImport::remind($settings, strtotime('2026-10-17 11:00:00 Europe/Madrid')));
+        $this->assertCount(1, $sent);
+        $this->assertStringContainsString('Luz Clara (hasta el 14/10)', $sent[0]);
+        $this->assertStringContainsString('tab=meta', $sent[0]);
+        $this->assertFalse(\MAD_Oficina\Ads\MetaImport::remind($settings, strtotime('2026-10-17 15:00:00 Europe/Madrid')), 'once a day');
+        remove_filter('pre_http_request', $chat, 5);
+    }
 }

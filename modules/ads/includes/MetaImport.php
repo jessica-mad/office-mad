@@ -128,6 +128,39 @@ final class MetaImport {
         return $out;
     }
 
+    const ASKED = 'madoficina_ads_meta_asked';
+    const ASK_HOUR = 10;
+
+    /**
+     * Meta accounts fed by reports whose data stopped (no report for yesterday or the day
+     * before): Nuria asks for it once a day, with the link to upload it. @return string[] accounts asked for
+     */
+    public static function stale($today, $days = 2){
+        global $wpdb;
+        $limit = gmdate('Y-m-d', strtotime($today . ' -' . max(1, (int) $days) . ' days'));
+        $rows = $wpdb->get_results('SELECT a.id, a.name, MAX(m.date) last FROM ' . \MAD_Oficina\Core\Schema::table('ad_accounts') . ' a JOIN ' . \MAD_Oficina\Core\Schema::table('ad_campaigns') . ' c ON c.account_id = a.id'
+            . ' LEFT JOIN ' . \MAD_Oficina\Core\Schema::table('ad_metrics_daily') . " m ON m.campaign_id = c.id WHERE a.platform = 'meta' AND a.client_id IS NOT NULL AND a.status = 'active' AND a.external_id NOT LIKE 'demo-%' GROUP BY a.id", ARRAY_A);
+        return array_values(array_filter($rows, fn($r) => ! $r['last'] || $r['last'] < $limit));
+    }
+
+    /** @return bool asked */
+    public static function remind(array $settings, $now = null){
+        if ( (new Meta($settings))->ready() ) return false; // the API reads it by itself
+        $local = (new \DateTimeImmutable('@' . ($now ?? time())))->setTimezone(wp_timezone());
+        $today = $local->format('Y-m-d');
+        if ( (int) $local->format('G') < self::ASK_HOUR || get_option(self::ASKED) === $today ) return false;
+        $stale = self::stale($today, (int) ($settings['meta_stale_days'] ?? 2));
+        if ( ! $stale ) return false;
+        update_option(self::ASKED, $today, false);
+        $chat = \MAD_Oficina_Core::instance()->get_module('chat');
+        if ( ! $chat ) return false;
+        $name = \MAD_Oficina\Core\Agents\Characters::get('analista')['name'] ?? 'Nuria';
+        $list = implode(', ', array_map(fn($r) => $r['name'] . ' (' . ( $r['last'] ? sprintf(__('hasta el %s', 'mad-oficina'), date_i18n('j/m', strtotime($r['last']))) : __('sin datos', 'mad-oficina') ) . ')', array_slice($stale, 0, 8)));
+        $r = $chat->messenger()->to_manager(['text' => sprintf(__('*%1$s* · Me falta el informe de Meta de: %2$s. Expórtalo del Administrador de anuncios (desglose por día) y súbelo aquí: %3$s', 'mad-oficina'),
+            $name, $list, admin_url('admin.php?page=mad-oficina-campanas&tab=meta'))]);
+        return ! is_wp_error($r);
+    }
+
     /** The account the file names (linked to the client if it wasn't), or the client's «imported» one. */
     private static function account($ext, $name, $client_id){
         if ( $ext === 'import' ) {
