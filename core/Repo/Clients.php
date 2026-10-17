@@ -102,6 +102,9 @@ final class Clients {
         foreach ( ['invoices', 'billing_profiles', 'billing_items', 'quotes', 'suppliers', 'expenses'] as $table ) {
             $wpdb->update(Schema::table($table), ['client_id' => null], ['client_id' => $id]);
         }
+        // Ad accounts belong to the client's business: unlinked; the log of changes and reasons goes.
+        $wpdb->update(Schema::table('ad_accounts'), ['client_id' => null], ['client_id' => $id]);
+        $wpdb->delete(Schema::table('ad_changes'), ['client_id' => $id]);
         foreach ( array_merge(self::CONTENT_TABLES, ['contact_emails', 'client_contacts', 'client_users']) as $table ){
             $wpdb->delete(Schema::table($table), ['client_id' => $id]);
         }
