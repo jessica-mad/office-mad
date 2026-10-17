@@ -169,6 +169,44 @@ class BankTest extends MADOF_TestCase {
         $this->assertSame([], array_column(Bank::unpaid_expenses(), 'id'), 'the Adobe one was paid');
     }
 
+    public function test_one_charge_several_receipts_and_one_invoice_paid_in_instalments(){
+        global $wpdb;
+        // Three receipts of the same supplier, one card charge.
+        $r1 = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-02', 'supplier_name' => 'Imprenta Inventada', 'total' => 40.0, 'currency' => 'EUR']);
+        $r2 = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-03', 'supplier_name' => 'Imprenta Inventada', 'total' => 25.5, 'currency' => 'EUR']);
+        $r3 = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-04', 'supplier_name' => 'Imprenta Inventada', 'total' => 10.0, 'currency' => 'EUR']);
+        // A client invoice paid in two parts.
+        $inv = $this->invoice(['total' => 1000, 'issue_date' => '2026-03-01']);
+        $imp = Bank::import(['account' => '', 'rows' => [
+            ['date' => '2026-03-06', 'value_date' => null, 'concept' => 'Pago con tarjeta IMPRENTA INVENTADA', 'amount' => -75.5, 'balance' => null],
+            ['date' => '2026-03-10', 'value_date' => null, 'concept' => 'Transferencia LUZ CLARA SL primer pago', 'amount' => 400.0, 'balance' => null],
+        ]]);
+        $this->assertSame(['matched' => 2, 'ignored' => 0, 'unmatched' => 0], Bank::match($imp['ids']));
+        $card = $wpdb->get_row('SELECT match_type, match_ids FROM ' . Bank::table() . ' WHERE amount = -75.5', ARRAY_A);
+        $this->assertSame('expense', $card['match_type']);
+        $this->assertEqualsCanonicalizing([$r1, $r2, $r3], array_map('intval', explode(',', $card['match_ids'])), 'the three receipts go with the one charge');
+        $this->assertSame([], Bank::unpaid_expenses());
+
+        $this->assertSame(0, (int) $this->inv($inv)['paid'], 'only part of it: not collected yet');
+        $this->assertStringContainsString('faltan 600,00', $wpdb->get_var('SELECT note FROM ' . Bank::table() . ' WHERE amount = 400'));
+        $this->assertSame(600.0, Bank::uncollected()[0]['left']);
+
+        // The rest arrives in two more transfers that do not name the client: linked together by hand.
+        $more = Bank::import(['account' => '', 'rows' => [
+            ['date' => '2026-04-10', 'value_date' => null, 'concept' => 'Transferencia recibida', 'amount' => 300.0, 'balance' => null],
+            ['date' => '2026-05-10', 'value_date' => null, 'concept' => 'Transferencia recibida 2', 'amount' => 300.0, 'balance' => null],
+        ]]);
+        Bank::match($more['ids']);
+        $this->assertContains('invoice:' . $inv, array_map(fn($c) => $c['type'] . ':' . $c['id'], Bank::open_items('in')), 'still open, with what is left');
+        $this->assertSame(2, Bank::link_many($more['ids'], 'invoice', $inv));
+        $this->assertSame(['1', '2026-05-10 12:00:00'], [(string) $this->inv($inv)['paid'], $this->inv($inv)['paid_at']], 'collected when the last part arrives');
+        $this->assertNotContains('invoice:' . $inv, array_map(fn($c) => $c['type'] . ':' . $c['id'], Bank::open_items('in')));
+
+        // Undoing one part: no longer fully collected.
+        Bank::unlink($more['ids'][0]);
+        $this->assertSame(0, (int) $this->inv($inv)['paid']);
+    }
+
     public function test_own_transfers_in_bulk_and_by_rule(){
         $imp = Bank::import(['account' => '', 'rows' => [
             ['date' => '2026-03-01', 'value_date' => null, 'concept' => 'Transferencia a favor de Ana Prueba Gómez', 'amount' => -500.0, 'balance' => null],

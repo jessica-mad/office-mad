@@ -63,13 +63,25 @@ final class Bank {
 
     /* ───────── matching ───────── */
 
-    private static function linked($type){
+    /**
+     * How much of each invoice / expense / tax the bank already covers. One movement can
+     * cover several (a card charge for three receipts: each counts as paid) and several
+     * movements can cover one (paid in instalments: their amounts add up).
+     * @return array<int,float> id => amount covered
+     */
+    public static function coverage($type){
         global $wpdb;
         $out = [];
-        foreach ( $wpdb->get_col($wpdb->prepare('SELECT match_ids FROM ' . self::table() . " WHERE match_type = %s AND status = 'matched'", $type)) as $csv ) {
-            foreach ( explode(',', (string) $csv) as $id ) if ( (int) $id ) $out[(int) $id] = true;
+        foreach ( $wpdb->get_results($wpdb->prepare('SELECT amount, match_ids FROM ' . self::table() . " WHERE match_type = %s AND status = 'matched'", $type), ARRAY_A) as $r ) {
+            $ids = array_filter(array_map('intval', explode(',', (string) $r['match_ids'])));
+            if ( count($ids) === 1 ) { $id = reset($ids); $out[$id] = ($out[$id] ?? 0) + abs((float) $r['amount']); }
+            else foreach ( $ids as $id ) $out[$id] = INF;
         }
         return $out;
+    }
+
+    private static function remaining($total, array $cov, $id){
+        return round((float) $total - (float) ($cov[(int) $id] ?? 0), 2);
     }
 
     public static function rules(){ $r = get_option(self::RULES, []); return is_array($r) ? $r : []; }
@@ -105,7 +117,8 @@ final class Bank {
         $expenses = $wpdb->get_results('SELECT id, issue_date, total, paid_eur, currency, supplier_name, number FROM ' . Schema::table('expenses') . " WHERE status = 'registered'", ARRAY_A);
         $taxes = $wpdb->get_results('SELECT id, kind, period, paid_on, amount FROM ' . Schema::table('taxes'), ARRAY_A);
         $suppliers = $wpdb->get_col('SELECT name FROM ' . Schema::table('suppliers') . " WHERE status = 'active'");
-        $used = ['invoice' => self::linked('invoice'), 'expense' => self::linked('expense'), 'tax' => self::linked('tax')];
+        $cov = ['invoice' => self::coverage('invoice'), 'expense' => self::coverage('expense'), 'tax' => self::coverage('tax')];
+        $eur = fn($e) => $e['currency'] === 'EUR' ? (float) $e['total'] : (float) $e['paid_eur'];
         $rules = self::rules();
 
         foreach ( $movements as $m ) {
@@ -123,15 +136,16 @@ final class Bank {
             }
 
             if ( $amount > 0 ) {
-                // 2. Money in: an issued invoice for that amount (or two of the same client that add up).
+                // 2. Money in: an issued invoice for what is left of it (or two of the same client that add up).
                 $cands = [];
                 foreach ( $invoices as $inv ) {
-                    if ( isset($used['invoice'][$inv['id']]) || abs((float) $inv['total'] - $amount) > 0.01 ) continue;
+                    $left = self::remaining($inv['total'], $cov['invoice'], $inv['id']);
+                    if ( $left <= 0.01 || abs($left - $amount) > 0.01 ) continue;
                     $gap = ($day - strtotime($inv['issue_date'])) / DAY_IN_SECONDS;
                     if ( $gap < -10 || $gap > 240 ) continue;
                     $score = 0;
                     if ( $inv['number'] && strpos($concept, self::norm($inv['number'])) !== false ) $score += 3;
-                    if ( self::mentions($m['concept'], $inv['client_name']) || ($inv['office_name'] && self::mentions($m['concept'], $inv['office_name'])) ) $score += 2;
+                    if ( self::names($m['concept'], $inv) ) $score += 2;
                     if ( ! $inv['paid'] ) $score += 1;
                     $cands[] = ['inv' => $inv, 'score' => $score, 'gap' => abs($gap)];
                 }
@@ -141,31 +155,39 @@ final class Bank {
                 $clear = $clear || ($best && count($cands) === 1 && ! $best['inv']['paid']);
                 if ( $clear ) {
                     self::match_invoices($m, [$best['inv']]);
-                    $used['invoice'][$best['inv']['id']] = true;
+                    $cov['invoice'] = self::coverage('invoice');
                     $out['matched']++;
                     continue;
                 }
-                $pair = self::pair($m, $invoices, $used['invoice']);
+                $pair = self::pair($m, $invoices, $cov['invoice']);
                 if ( $pair ) {
                     self::match_invoices($m, $pair);
-                    foreach ( $pair as $p ) $used['invoice'][$p['id']] = true;
+                    $cov['invoice'] = self::coverage('invoice');
+                    $out['matched']++;
+                    continue;
+                }
+                // Paid in instalments: the client is named and has exactly one invoice with more left than this.
+                $open = array_values(array_filter($invoices, fn($i) => ! $i['paid'] && self::names($m['concept'], $i) && self::remaining($i['total'], $cov['invoice'], $i['id']) > $amount + 0.01
+                    && strtotime($i['issue_date']) <= $day + 10 * DAY_IN_SECONDS));
+                if ( count($open) === 1 ) {
+                    self::match_invoices($m, $open);
+                    $cov['invoice'] = self::coverage('invoice');
                     $out['matched']++;
                     continue;
                 }
                 $who = null;
                 foreach ( $invoices as $inv ) if ( self::mentions($m['concept'], $inv['client_name']) ) { $who = $inv['office_name'] ?: $inv['client_name']; break; }
-                self::set($m, 'unmatched', null, [], $who ? sprintf(__('Parece de %s, pero ninguna factura suya es de este importe. ¿Falta emitirla o paga varias?', 'mad-oficina'), $who) : __('Entrada sin factura que coincida.', 'mad-oficina'));
+                self::set($m, 'unmatched', null, [], $who ? sprintf(__('Parece de %s, pero ninguna factura suya es de este importe. ¿Falta emitirla, paga varias o es un pago parcial?', 'mad-oficina'), $who) : __('Entrada sin factura que coincida.', 'mad-oficina'));
                 $out['unmatched']++;
                 continue;
             }
 
-            // 3. Money out: a supplier invoice, or a tax payment.
+            // 3. Money out: a supplier invoice (what is left of it), several receipts of one supplier, or a tax.
             $abs = -$amount;
             $cands = [];
             foreach ( $expenses as $e ) {
-                if ( isset($used['expense'][$e['id']]) ) continue;
-                $eur = $e['currency'] === 'EUR' ? (float) $e['total'] : (float) $e['paid_eur'];
-                if ( ! $eur || abs($eur - $abs) > 0.01 ) continue;
+                $left = self::remaining($eur($e), $cov['expense'], $e['id']);
+                if ( $left <= 0.01 || abs($left - $abs) > 0.01 ) continue;
                 $gap = ($day - strtotime((string) $e['issue_date'])) / DAY_IN_SECONDS;
                 if ( $gap < -20 || $gap > 90 ) continue;
                 $cands[] = ['e' => $e, 'score' => self::mentions($m['concept'], $e['supplier_name']) ? 2 : 0, 'gap' => abs($gap)];
@@ -173,17 +195,37 @@ final class Bank {
             usort($cands, fn($a, $b) => [$b['score'], $a['gap']] <=> [$a['score'], $b['gap']]);
             $best = $cands[0] ?? null;
             if ( $best && ($best['score'] >= 2 || count($cands) === 1) && (! isset($cands[1]) || $cands[1]['score'] < $best['score'] || count($cands) === 1) ) {
-                self::set($m, 'matched', 'expense', [$best['e']['id']], $best['e']['supplier_name'] . ($best['e']['number'] ? ' · ' . $best['e']['number'] : ''));
-                $used['expense'][$best['e']['id']] = true;
+                self::link_expenses($m, [$best['e']]);
+                $cov['expense'] = self::coverage('expense');
+                $out['matched']++;
+                continue;
+            }
+            // One charge, several receipts of the same supplier (named in the concept) that add up.
+            $pool = array_values(array_filter($expenses, function($e) use ($m, $day, $cov, $eur){
+                $gap = ($day - strtotime((string) $e['issue_date'])) / DAY_IN_SECONDS;
+                return $gap >= -20 && $gap <= 60 && self::remaining($eur($e), $cov['expense'], $e['id']) > 0.01 && ! isset($cov['expense'][$e['id']]) && self::mentions($m['concept'], $e['supplier_name']);
+            }));
+            if ( $set = self::subset($pool, $abs, $eur) ) {
+                self::link_expenses($m, $set);
+                $cov['expense'] = self::coverage('expense');
+                $out['matched']++;
+                continue;
+            }
+            // An instalment of a bigger supplier invoice (the supplier named, only one with more left).
+            $open = array_values(array_filter($expenses, fn($e) => self::mentions($m['concept'], $e['supplier_name']) && self::remaining($eur($e), $cov['expense'], $e['id']) > $abs + 0.01
+                && ($day - strtotime((string) $e['issue_date'])) / DAY_IN_SECONDS >= -20));
+            if ( count($open) === 1 ) {
+                self::link_expenses($m, $open);
+                $cov['expense'] = self::coverage('expense');
                 $out['matched']++;
                 continue;
             }
             if ( preg_match(self::TAX_WORDS, $concept) ) {
                 foreach ( $taxes as $t ) {
-                    if ( isset($used['tax'][$t['id']]) || abs((float) $t['amount'] - $abs) > 0.01 ) continue;
+                    if ( abs(self::remaining($t['amount'], $cov['tax'], $t['id']) - $abs) > 0.01 ) continue;
                     if ( $t['paid_on'] && abs($day - strtotime($t['paid_on'])) > 25 * DAY_IN_SECONDS ) continue;
                     self::set($m, 'matched', 'tax', [$t['id']], (Taxes::KINDS[$t['kind']] ?? $t['kind']) . ' · ' . $t['period']);
-                    $used['tax'][$t['id']] = true;
+                    $cov['tax'] = self::coverage('tax');
                     $out['matched']++;
                     continue 2;
                 }
@@ -199,30 +241,75 @@ final class Bank {
         return $out;
     }
 
-    /** One transfer paying two invoices of the same client (named in the concept). */
-    private static function pair(array $m, array $invoices, array $used){
-        $amount = (float) $m['amount'];
-        $pool = array_values(array_filter($invoices, fn($i) => ! $i['paid'] && ! isset($used[$i['id']]) && strtotime($i['issue_date']) <= strtotime($m['date']) + 10 * DAY_IN_SECONDS
-            && (self::mentions($m['concept'], $i['client_name']) || ($i['office_name'] && self::mentions($m['concept'], $i['office_name'])))));
-        $n = count($pool);
-        for ( $a = 0; $a < $n; $a++ ) for ( $b = $a + 1; $b < $n; $b++ ) {
-            if ( $pool[$a]['profile_id'] === $pool[$b]['profile_id'] && abs((float) $pool[$a]['total'] + (float) $pool[$b]['total'] - $amount) <= 0.01 ) return [$pool[$a], $pool[$b]];
-        }
-        return null;
+    /** The client of an invoice is named in the concept (legal name or name in the office). */
+    private static function names($concept, array $inv){
+        return self::mentions($concept, $inv['client_name']) || (! empty($inv['office_name']) && self::mentions($concept, $inv['office_name']));
     }
 
-    /** Linked to invoices: those not yet collected are marked collected on the bank's date. */
+    /** One transfer paying two or three invoices of the same client (named in the concept). */
+    private static function pair(array $m, array $invoices, array $cov){
+        $amount = (float) $m['amount'];
+        $pool = array_values(array_filter($invoices, fn($i) => ! $i['paid'] && ! isset($cov[$i['id']]) && strtotime($i['issue_date']) <= strtotime($m['date']) + 10 * DAY_IN_SECONDS && self::names($m['concept'], $i)));
+        $set = self::subset($pool, $amount, fn($i) => (float) $i['total'], 3);
+        if ( ! $set ) return null;
+        return count(array_unique(array_column($set, 'profile_id'))) === 1 ? $set : null;
+    }
+
+    /** 2–4 items whose amounts add up exactly (first found, by date). @return array[]|null */
+    private static function subset(array $pool, $target, callable $value, $max = 4){
+        $pool = array_slice($pool, 0, 14);
+        $n = count($pool);
+        $best = null;
+        $walk = function($start, array $chosen, $sum) use (&$walk, &$best, $pool, $n, $target, $value, $max){
+            if ( $best ) return;
+            if ( count($chosen) >= 2 && abs($sum - $target) <= 0.01 ) { $best = $chosen; return; }
+            if ( count($chosen) >= $max || $sum > $target + 0.01 ) return;
+            for ( $i = $start; $i < $n; $i++ ) $walk($i + 1, array_merge($chosen, [$pool[$i]]), $sum + $value($pool[$i]));
+        };
+        $walk(0, [], 0.0);
+        return $best;
+    }
+
+    /**
+     * Linked to invoices: an invoice is marked collected (on the bank's date) when the bank
+     * covers all of it; until then the movement says what is left.
+     */
     public static function match_invoices(array $m, array $invoices){
         global $wpdb;
-        $marked = [];
-        foreach ( $invoices as $inv ) {
-            if ( empty($inv['paid']) ) {
-                $wpdb->update(Invoices::table(), ['paid' => 1, 'paid_at' => $m['date'] . ' 12:00:00', 'updated_at' => Time::now()], ['id' => $inv['id']]);
-                $marked[] = (int) $inv['id'];
+        $ids = array_map(fn($i) => (int) $i['id'], $invoices);
+        self::set($m, 'matched', 'invoice', $ids, null);
+        $cov = self::coverage('invoice');
+        $marked = []; $notes = [];
+        foreach ( $ids as $id ) {
+            $inv = $wpdb->get_row($wpdb->prepare('SELECT id, number, total, paid FROM ' . Invoices::table() . ' WHERE id = %d', $id), ARRAY_A);
+            if ( ! $inv ) continue;
+            $left = self::remaining($inv['total'], $cov, $id);
+            if ( $left <= 0.01 ) {
+                if ( ! $inv['paid'] ) {
+                    $wpdb->update(Invoices::table(), ['paid' => 1, 'paid_at' => $m['date'] . ' 12:00:00', 'updated_at' => Time::now()], ['id' => $id]);
+                    $marked[] = $id;
+                }
+                $notes[] = $inv['number'];
+            } else {
+                $notes[] = sprintf(__('%1$s (pago parcial: faltan %2$s)', 'mad-oficina'), $inv['number'], Money::format($left));
             }
         }
-        self::set($m, 'matched', 'invoice', array_column($invoices, 'id'), implode(' + ', array_column($invoices, 'number')) . ($marked ? ' · ' . __('marcada cobrada por el banco', 'mad-oficina') . ' [' . implode(',', $marked) . ']' : ''));
+        self::set($m, 'matched', 'invoice', $ids, implode(' + ', $notes) . ($marked ? ' · ' . __('marcada cobrada por el banco', 'mad-oficina') . ' [' . implode(',', $marked) . ']' : ''));
         if ( $marked ) Issuing::queue_libro($marked);
+    }
+
+    /** Linked to supplier invoices (one or several receipts); says what is left when it is an instalment. */
+    private static function link_expenses(array $m, array $expenses){
+        $ids = array_map(fn($e) => (int) $e['id'], $expenses);
+        self::set($m, 'matched', 'expense', $ids, null);
+        $cov = self::coverage('expense');
+        $notes = [];
+        foreach ( $expenses as $e ) {
+            $total = ($e['currency'] ?? 'EUR') === 'EUR' ? (float) $e['total'] : (float) $e['paid_eur'];
+            $left = self::remaining($total, $cov, $e['id']);
+            $notes[] = $e['supplier_name'] . (! empty($e['number']) ? ' · ' . $e['number'] : '') . ($left > 0.01 ? ' ' . sprintf(__('(pago parcial: faltan %s)', 'mad-oficina'), Money::format($left)) : '');
+        }
+        self::set($m, 'matched', 'expense', $ids, implode(' + ', $notes));
     }
 
     /* ───────── Jessica's decisions ───────── */
@@ -232,25 +319,45 @@ final class Bank {
         return $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE id = %d', $id), ARRAY_A);
     }
 
-    /** @return true|\WP_Error */
+    /** One movement with one or several invoices / receipts / taxes (same kind). @return true|\WP_Error */
     public static function link($id, $type, array $ids){
         global $wpdb;
         $m = self::get($id);
         if ( ! $m ) return new \WP_Error('madof_bank', __('Ese movimiento no existe.', 'mad-oficina'));
-        $ids = array_values(array_filter(array_map('intval', $ids)));
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if ( ! $ids || ! in_array($type, ['invoice', 'expense', 'tax'], true) ) return new \WP_Error('madof_bank', __('Elige con qué va.', 'mad-oficina'));
+        $in = implode(',', $ids);
         if ( $type === 'invoice' ) {
-            $rows = $wpdb->get_results('SELECT id, number, paid FROM ' . Invoices::table() . ' WHERE id IN (' . implode(',', $ids) . ')', ARRAY_A);
+            $rows = $wpdb->get_results('SELECT id, number, paid, total FROM ' . Invoices::table() . " WHERE id IN ({$in})", ARRAY_A);
             if ( ! $rows ) return new \WP_Error('madof_bank', __('Esa factura no existe.', 'mad-oficina'));
             self::match_invoices($m, $rows);
             return true;
         }
-        $table = $type === 'expense' ? Schema::table('expenses') : Schema::table('taxes');
-        $label = $type === 'expense' ? 'supplier_name' : 'kind';
-        $names = $wpdb->get_col('SELECT ' . $label . ' FROM ' . $table . ' WHERE id IN (' . implode(',', $ids) . ')');
+        if ( $type === 'expense' ) {
+            $rows = $wpdb->get_results('SELECT id, supplier_name, number, total, paid_eur, currency FROM ' . Schema::table('expenses') . " WHERE id IN ({$in})", ARRAY_A);
+            if ( ! $rows ) return new \WP_Error('madof_bank', __('Eso ya no existe.', 'mad-oficina'));
+            self::link_expenses($m, $rows);
+            return true;
+        }
+        $names = $wpdb->get_col('SELECT CONCAT(kind, " · ", period) FROM ' . Schema::table('taxes') . " WHERE id IN ({$in})");
         if ( ! $names ) return new \WP_Error('madof_bank', __('Eso ya no existe.', 'mad-oficina'));
-        self::set($m, 'matched', $type, $ids, implode(' + ', $names));
+        self::set($m, 'matched', 'tax', $ids, implode(' + ', array_map(fn($n) => (Taxes::KINDS[strtok($n, ' ')] ?? strtok($n, ' ')) . substr($n, strpos($n, ' ')), $names)));
         return true;
+    }
+
+    /** Several movements with one invoice / receipt (paid in instalments). @return int|\WP_Error how many linked */
+    public static function link_many(array $movement_ids, $type, $item_id){
+        global $wpdb;
+        $ids = array_values(array_unique(array_filter(array_map('intval', $movement_ids))));
+        if ( ! $ids ) return new \WP_Error('madof_bank', __('Marca primero los movimientos.', 'mad-oficina'));
+        $rows = $wpdb->get_results('SELECT * FROM ' . self::table() . ' WHERE id IN (' . implode(',', $ids) . ") AND status = 'unmatched' ORDER BY date, id", ARRAY_A);
+        $n = 0;
+        foreach ( $rows as $m ) {
+            $r = self::link((int) $m['id'], $type, [(int) $item_id]);
+            if ( is_wp_error($r) ) return $r;
+            $n++;
+        }
+        return $n;
     }
 
     public static function ignore($id, $kind, $remember = '', $label = ''){
@@ -261,19 +368,28 @@ final class Bank {
         return true;
     }
 
-    /** Back to «sin cuadrar»; an invoice the bank marked as collected goes back to unpaid. */
+    /** Back to «sin cuadrar»; an invoice the bank had marked as collected goes back to unpaid if it is no longer fully covered. */
     public static function unlink($id){
         global $wpdb;
         $m = self::get($id);
         if ( ! $m ) return;
-        if ( $m['match_type'] === 'invoice' && preg_match('/\[([\d,]+)\]/', (string) $m['note'], $x) ) {
-            $marked = array_filter(array_map('intval', explode(',', $x[1])));
-            if ( $marked ) {
-                $wpdb->query('UPDATE ' . Invoices::table() . ' SET paid = 0, paid_at = NULL WHERE id IN (' . implode(',', $marked) . ')');
-                Issuing::queue_libro($marked);
-            }
+        $was = $m['match_type'] === 'invoice' ? array_filter(array_map('intval', explode(',', (string) $m['match_ids']))) : [];
+        $by_bank = [];
+        if ( $was ) foreach ( $wpdb->get_col('SELECT note FROM ' . self::table() . " WHERE match_type = 'invoice' AND note LIKE '%[%'") as $note ) {
+            if ( preg_match('/\[([\d,]+)\]/', (string) $note, $x) ) foreach ( explode(',', $x[1]) as $i ) $by_bank[(int) $i] = true;
         }
         self::set($m, 'unmatched', null, [], null);
+        if ( ! $was ) return;
+        $cov = self::coverage('invoice');
+        $undo = [];
+        foreach ( $was as $iid ) {
+            $inv = $wpdb->get_row($wpdb->prepare('SELECT total, paid FROM ' . Invoices::table() . ' WHERE id = %d', $iid), ARRAY_A);
+            if ( $inv && $inv['paid'] && isset($by_bank[$iid]) && self::remaining($inv['total'], $cov, $iid) > 0.01 ) $undo[] = $iid;
+        }
+        if ( $undo ) {
+            $wpdb->query('UPDATE ' . Invoices::table() . ' SET paid = 0, paid_at = NULL WHERE id IN (' . implode(',', $undo) . ')');
+            Issuing::queue_libro($undo);
+        }
     }
 
     /* ───────── what she sees ───────── */
@@ -317,44 +433,78 @@ final class Bank {
         return [$r['a'] ?? null, $r['b'] ?? null];
     }
 
-    /** Issued (Spanish) invoices of the period the statements cover, not collected: no money arrived for them. */
+    /** Issued (Spanish) invoices of the period the statements cover, not collected: what is left of each. */
     public static function uncollected(){
         global $wpdb;
         [$from, $to] = self::covered();
         if ( ! $to ) return [];
-        return $wpdb->get_results($wpdb->prepare('SELECT id, number, issue_date, due_date, client_name, total FROM ' . Invoices::table()
+        $cov = self::coverage('invoice');
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT id, number, issue_date, due_date, client_name, total FROM ' . Invoices::table()
             . " WHERE number IS NOT NULL AND series <> 'AR' AND status <> 'cancelled' AND paid = 0 AND issue_date BETWEEN %s AND %s ORDER BY issue_date", gmdate('Y-m-d', strtotime($from . ' -60 days')), $to), ARRAY_A);
+        foreach ( $rows as &$r ) $r['left'] = self::remaining($r['total'], $cov, $r['id']);
+        return $rows;
     }
 
-    /** Supplier invoices of the covered period with no payment found (maybe paid from another account or by card). */
+    /** Supplier invoices of the covered period not (fully) paid in the bank (maybe paid from another account or by card). */
     public static function unpaid_expenses(){
         global $wpdb;
         [$from, $to] = self::covered();
         if ( ! $from ) return [];
-        $used = self::linked('expense');
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, total, currency, drive_url FROM ' . Schema::table('expenses')
+        $cov = self::coverage('expense');
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, total, paid_eur, currency, drive_url FROM ' . Schema::table('expenses')
             . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s ORDER BY issue_date", $from, gmdate('Y-m-d', strtotime($to . ' -10 days'))), ARRAY_A);
-        return array_values(array_filter($rows, fn($r) => ! isset($used[$r['id']])));
-    }
-
-    /** What a movement could go with, for the «Vincular» menu. @return array[] */
-    public static function candidates(array $m){
-        global $wpdb;
-        $abs = abs((float) $m['amount']);
-        if ( (float) $m['amount'] > 0 ) {
-            $used = self::linked('invoice');
-            $rows = $wpdb->get_results($wpdb->prepare('SELECT id, number, issue_date, client_name, total, paid FROM ' . Invoices::table()
-                . " WHERE number IS NOT NULL AND series <> 'AR' AND status <> 'cancelled' AND issue_date <= %s ORDER BY ABS(total - %f), paid, issue_date DESC LIMIT 15", gmdate('Y-m-d', strtotime($m['date'] . ' +10 days')), $abs), ARRAY_A);
-            return array_map(fn($r) => ['type' => 'invoice', 'id' => (int) $r['id'], 'label' => $r['number'] . ' · ' . $r['client_name'] . ' · ' . Money::format($r['total']) . ($r['paid'] ? ' · ' . __('ya cobrada', 'mad-oficina') : '')],
-                array_filter($rows, fn($r) => ! isset($used[$r['id']])));
-        }
-        $used = self::linked('expense');
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, total FROM ' . Schema::table('expenses')
-            . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s ORDER BY ABS(total - %f) LIMIT 15", gmdate('Y-m-d', strtotime($m['date'] . ' -120 days')), gmdate('Y-m-d', strtotime($m['date'] . ' +20 days')), $abs), ARRAY_A);
-        $out = array_map(fn($r) => ['type' => 'expense', 'id' => (int) $r['id'], 'label' => $r['supplier_name'] . ' · ' . mysql2date('j/m', $r['issue_date']) . ' · ' . Money::format($r['total'])], array_filter($rows, fn($r) => ! isset($used[$r['id']])));
-        foreach ( $wpdb->get_results($wpdb->prepare('SELECT id, kind, period, amount FROM ' . Schema::table('taxes') . ' ORDER BY ABS(amount - %f) LIMIT 5', $abs), ARRAY_A) as $t ) {
-            $out[] = ['type' => 'tax', 'id' => (int) $t['id'], 'label' => (Taxes::KINDS[$t['kind']] ?? $t['kind']) . ' · ' . $t['period'] . ' · ' . Money::format($t['amount'])];
+        $out = [];
+        foreach ( $rows as $r ) {
+            $total = $r['currency'] === 'EUR' ? (float) $r['total'] : (float) $r['paid_eur'];
+            $r['left'] = $total ? self::remaining($total, $cov, $r['id']) : (float) $r['total'];
+            if ( $r['left'] > 0.01 ) $out[] = $r;
         }
         return $out;
+    }
+
+    /** What a movement could go with (what is still open), for «Vincular». @return array[] */
+    public static function candidates(array $m, $limit = 15){
+        return self::open_items((float) $m['amount'] > 0 ? 'in' : 'out', abs((float) $m['amount']), $m['date'], $limit);
+    }
+
+    /**
+     * Invoices (money in) or receipts and taxes (money out) still open, closest amount first.
+     * @return array[] [type, id, label, left]
+     */
+    public static function open_items($side, $amount = 0.0, $date = null, $limit = 40){
+        global $wpdb;
+        $date = $date ?: current_time('Y-m-d');
+        if ( $side === 'in' ) {
+            $cov = self::coverage('invoice');
+            $rows = $wpdb->get_results($wpdb->prepare('SELECT id, number, issue_date, client_name, total, paid FROM ' . Invoices::table()
+                . " WHERE number IS NOT NULL AND series <> 'AR' AND status <> 'cancelled' AND issue_date BETWEEN %s AND %s ORDER BY paid, issue_date DESC LIMIT 400",
+                gmdate('Y-m-d', strtotime($date . ' -18 months')), gmdate('Y-m-d', strtotime($date . ' +10 days'))), ARRAY_A);
+            $out = [];
+            foreach ( $rows as $r ) {
+                $left = self::remaining($r['total'], $cov, $r['id']);
+                if ( $left <= 0.01 ) continue;
+                $out[] = ['type' => 'invoice', 'id' => (int) $r['id'], 'left' => $left, 'label' => $r['number'] . ' · ' . $r['client_name'] . ' · ' . Money::format($r['total'])
+                    . ($left < (float) $r['total'] - 0.01 ? ' · ' . sprintf(__('faltan %s', 'mad-oficina'), Money::format($left)) : '') . ($r['paid'] ? ' · ' . __('ya cobrada', 'mad-oficina') : '')];
+            }
+        } else {
+            $cov = self::coverage('expense');
+            $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, total, paid_eur, currency FROM ' . Schema::table('expenses')
+                . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s ORDER BY issue_date DESC LIMIT 400", gmdate('Y-m-d', strtotime($date . ' -12 months')), gmdate('Y-m-d', strtotime($date . ' +20 days'))), ARRAY_A);
+            $out = [];
+            foreach ( $rows as $r ) {
+                $total = $r['currency'] === 'EUR' ? (float) $r['total'] : (float) $r['paid_eur'];
+                $left = $total ? self::remaining($total, $cov, $r['id']) : (float) $r['total'];
+                if ( $left <= 0.01 ) continue;
+                $out[] = ['type' => 'expense', 'id' => (int) $r['id'], 'left' => $left, 'label' => $r['supplier_name'] . ($r['number'] ? ' · ' . $r['number'] : '') . ' · ' . mysql2date('j/m/y', $r['issue_date']) . ' · ' . Money::format($r['total'])
+                    . ($total && $left < $total - 0.01 ? ' · ' . sprintf(__('faltan %s', 'mad-oficina'), Money::format($left)) : '')];
+            }
+            $tcov = self::coverage('tax');
+            foreach ( $wpdb->get_results('SELECT id, kind, period, amount FROM ' . Schema::table('taxes') . ' ORDER BY paid_on DESC LIMIT 40', ARRAY_A) as $t ) {
+                $left = self::remaining($t['amount'], $tcov, $t['id']);
+                if ( $left > 0.01 ) $out[] = ['type' => 'tax', 'id' => (int) $t['id'], 'left' => $left, 'label' => (Taxes::KINDS[$t['kind']] ?? $t['kind']) . ' · ' . $t['period'] . ' · ' . Money::format($t['amount'])];
+            }
+        }
+        if ( $amount > 0 ) usort($out, fn($a, $b) => abs($a['left'] - $amount) <=> abs($b['left'] - $amount));
+        return array_slice($out, 0, $limit);
     }
 }

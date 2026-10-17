@@ -412,8 +412,11 @@ return new class($core) implements MAD_Oficina_Module {
         $do = sanitize_key($p['do'] ?? '');
         $view = sanitize_key($p['view'] ?? 'unmatched');
         if ( $do === 'link' ) {
-            [$type, $ref] = array_pad(explode(':', (string) ($p['target'] ?? ''), 2), 2, '');
-            $r = \MAD_Oficina\Billing\Bank::link($id, sanitize_key($type), [absint($ref)]);
+            // One target (the quick menu) or several ticked (one charge, several receipts).
+            $targets = ! empty($p['targets']) ? (array) $p['targets'] : [(string) ($p['target'] ?? '')];
+            $by = [];
+            foreach ( $targets as $t ) { [$type, $ref] = array_pad(explode(':', (string) $t, 2), 2, ''); if ( absint($ref) ) $by[sanitize_key($type)][] = absint($ref); }
+            $r = count($by) === 1 ? \MAD_Oficina\Billing\Bank::link($id, key($by), reset($by)) : new \WP_Error('madof_bank', count($by) ? __('Marca solo facturas a clientes, o solo de proveedores: no mezcladas.', 'mad-oficina') : __('Elige con qué va.', 'mad-oficina'));
         } elseif ( $do === 'ignore' ) {
             $r = \MAD_Oficina\Billing\Bank::ignore($id, sanitize_key($p['kind'] ?? ''), ! empty($p['remember']) ? sanitize_text_field($p['pattern'] ?? '') : '', sanitize_text_field($p['label'] ?? ''));
         } elseif ( $do === 'unlink' ) {
@@ -421,6 +424,10 @@ return new class($core) implements MAD_Oficina_Module {
         } elseif ( $do === 'rematch' ) {
             $r = \MAD_Oficina\Billing\Bank::match();
             $this->back(['tab' => 'bank'], sprintf(__('Vuelto a cruzar: %1$d cuadran ahora, %2$d siguen sin cuadrar.', 'mad-oficina'), $r['matched'] + $r['ignored'], $r['unmatched']));
+        } elseif ( $do === 'bulk_link' ) {
+            [$type, $ref] = array_pad(explode(':', (string) ($p['item'] ?? ''), 2), 2, '');
+            $n = \MAD_Oficina\Billing\Bank::link_many(array_map('absint', (array) ($p['ids'] ?? [])), sanitize_key($type), absint($ref));
+            $this->back(['tab' => 'bank'], is_wp_error($n) ? $n->get_error_message() : sprintf(_n('%d movimiento vinculado a esa factura.', '%d movimientos vinculados a esa factura.', $n, 'mad-oficina'), $n), is_wp_error($n) ? 'error' : 'success');
         } elseif ( $do === 'bulk' ) {
             $ids = array_map('absint', (array) ($p['ids'] ?? []));
             if ( ! $ids ) $this->back(['tab' => 'bank'], __('Marca primero los movimientos.', 'mad-oficina'), 'error');
