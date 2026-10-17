@@ -464,7 +464,27 @@ final class Bank {
 
     /** What a movement could go with (what is still open), for «Vincular». @return array[] */
     public static function candidates(array $m, $limit = 15){
-        return self::open_items((float) $m['amount'] > 0 ? 'in' : 'out', abs((float) $m['amount']), $m['date'], $limit);
+        $items = self::open_items((float) $m['amount'] > 0 ? 'in' : 'out', abs((float) $m['amount']), $m['date'], 400);
+        // Whoever the concept names goes first: its brand (the first word of the name) before a
+        // generic word («Nube Hosting» for «HOSTINGER* HOSTING»); within each, closest amount.
+        $c = ' ' . self::norm($m['concept']) . ' ';
+        $tier = function($i) use ($c){
+            $words = self::tokens($i['name']);
+            if ( ! $words ) return 0;
+            if ( strpos($c, ' ' . $words[0] . ' ') !== false ) return 2;
+            foreach ( $words as $w ) if ( strpos($c, ' ' . $w . ' ') !== false ) return 1;
+            return 0;
+        };
+        $ranked = [];
+        foreach ( $items as $n => $i ) $ranked[] = [$tier($i), $n, $i];
+        usort($ranked, fn($a, $b) => [$b[0], $a[1]] <=> [$a[0], $b[1]]);
+        return array_slice(array_column($ranked, 2), 0, $limit);
+    }
+
+    /** Every open item of both sides, for the search box in «Vincular». @return array{in:array[], out:array[]} */
+    public static function searchable(){
+        $pack = fn($i) => ['v' => $i['type'] . ':' . $i['id'], 'l' => $i['label'], 's' => self::norm($i['label'] . ' ' . $i['name']) . ' ' . strtolower(remove_accents($i['label'])) . ' ' . number_format($i['left'], 2, '.', '') . ' ' . number_format($i['left'], 2, ',', '')];
+        return ['in' => array_map($pack, self::open_items('in', 0, null, 1000)), 'out' => array_map($pack, self::open_items('out', 0, null, 1000))];
     }
 
     /**
@@ -477,31 +497,32 @@ final class Bank {
         if ( $side === 'in' ) {
             $cov = self::coverage('invoice');
             $rows = $wpdb->get_results($wpdb->prepare('SELECT id, number, issue_date, client_name, total, paid FROM ' . Invoices::table()
-                . " WHERE number IS NOT NULL AND series <> 'AR' AND status <> 'cancelled' AND issue_date BETWEEN %s AND %s ORDER BY paid, issue_date DESC LIMIT 400",
+                . " WHERE number IS NOT NULL AND series <> 'AR' AND status <> 'cancelled' AND issue_date BETWEEN %s AND %s ORDER BY paid, issue_date DESC LIMIT 1000",
                 gmdate('Y-m-d', strtotime($date . ' -18 months')), gmdate('Y-m-d', strtotime($date . ' +10 days'))), ARRAY_A);
             $out = [];
             foreach ( $rows as $r ) {
                 $left = self::remaining($r['total'], $cov, $r['id']);
                 if ( $left <= 0.01 ) continue;
-                $out[] = ['type' => 'invoice', 'id' => (int) $r['id'], 'left' => $left, 'label' => $r['number'] . ' · ' . $r['client_name'] . ' · ' . Money::format($r['total'])
+                $out[] = ['type' => 'invoice', 'id' => (int) $r['id'], 'left' => $left, 'name' => (string) $r['client_name'], 'label' => $r['number'] . ' · ' . $r['client_name'] . ' · ' . Money::format($r['total'])
                     . ($left < (float) $r['total'] - 0.01 ? ' · ' . sprintf(__('faltan %s', 'mad-oficina'), Money::format($left)) : '') . ($r['paid'] ? ' · ' . __('ya cobrada', 'mad-oficina') : '')];
             }
         } else {
             $cov = self::coverage('expense');
-            $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, total, paid_eur, currency FROM ' . Schema::table('expenses')
-                . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s ORDER BY issue_date DESC LIMIT 400", gmdate('Y-m-d', strtotime($date . ' -12 months')), gmdate('Y-m-d', strtotime($date . ' +20 days'))), ARRAY_A);
+            $rows = $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, supplier_name, number, concept, total, paid_eur, currency FROM ' . Schema::table('expenses')
+                . " WHERE status = 'registered' AND issue_date BETWEEN %s AND %s ORDER BY issue_date DESC LIMIT 1000", gmdate('Y-m-d', strtotime($date . ' -12 months')), gmdate('Y-m-d', strtotime($date . ' +20 days'))), ARRAY_A);
             $out = [];
             foreach ( $rows as $r ) {
                 $total = $r['currency'] === 'EUR' ? (float) $r['total'] : (float) $r['paid_eur'];
                 $left = $total ? self::remaining($total, $cov, $r['id']) : (float) $r['total'];
                 if ( $left <= 0.01 ) continue;
-                $out[] = ['type' => 'expense', 'id' => (int) $r['id'], 'left' => $left, 'label' => $r['supplier_name'] . ($r['number'] ? ' · ' . $r['number'] : '') . ' · ' . mysql2date('j/m/y', $r['issue_date']) . ' · ' . Money::format($r['total'])
+                $out[] = ['type' => 'expense', 'id' => (int) $r['id'], 'left' => $left, 'name' => (string) $r['supplier_name'], 'label' => $r['supplier_name'] . ($r['number'] ? ' · ' . $r['number'] : '') . ' · ' . mysql2date('j/m/y', $r['issue_date']) . ' · ' . Money::format($r['total'])
+                    . ($r['concept'] ? ' · ' . wp_html_excerpt($r['concept'], 40, '…') : '')
                     . ($total && $left < $total - 0.01 ? ' · ' . sprintf(__('faltan %s', 'mad-oficina'), Money::format($left)) : '')];
             }
             $tcov = self::coverage('tax');
             foreach ( $wpdb->get_results('SELECT id, kind, period, amount FROM ' . Schema::table('taxes') . ' ORDER BY paid_on DESC LIMIT 40', ARRAY_A) as $t ) {
                 $left = self::remaining($t['amount'], $tcov, $t['id']);
-                if ( $left > 0.01 ) $out[] = ['type' => 'tax', 'id' => (int) $t['id'], 'left' => $left, 'label' => (Taxes::KINDS[$t['kind']] ?? $t['kind']) . ' · ' . $t['period'] . ' · ' . Money::format($t['amount'])];
+                if ( $left > 0.01 ) $out[] = ['type' => 'tax', 'id' => (int) $t['id'], 'left' => $left, 'name' => '', 'label' => (Taxes::KINDS[$t['kind']] ?? $t['kind']) . ' · ' . $t['period'] . ' · ' . Money::format($t['amount'])];
             }
         }
         if ( $amount > 0 ) usort($out, fn($a, $b) => abs($a['left'] - $amount) <=> abs($b['left'] - $amount));

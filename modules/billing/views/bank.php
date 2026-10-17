@@ -72,6 +72,7 @@ $pattern = function($concept){
         <button class="madof-btn is-small" name="do" value="bulk"><?php esc_html_e('Marcar los seleccionados', 'mad-oficina'); ?></button>
         <span class="madof-bank-or">
             <?php esc_html_e('…o son pagos de una misma factura (a plazos):', 'mad-oficina'); ?>
+            <input type="search" class="madof-bank-find" data-side="" placeholder="<?php esc_attr_e('Buscar…', 'mad-oficina'); ?>" aria-label="<?php esc_attr_e('Buscar la factura', 'mad-oficina'); ?>" hidden>
             <select name="item" aria-label="<?php esc_attr_e('Factura', 'mad-oficina'); ?>"><option value=""><?php esc_html_e('Elige la factura…', 'mad-oficina'); ?></option>
                 <optgroup label="<?php esc_attr_e('Facturas a clientes (cobros)', 'mad-oficina'); ?>"><?php foreach ( Bank::open_items('in', 0, null, 150) as $c ) echo '<option value="' . esc_attr($c['type'] . ':' . $c['id']) . '">' . esc_html($c['label']) . '</option>'; ?></optgroup>
                 <optgroup label="<?php esc_attr_e('Facturas de proveedores e impuestos (pagos)', 'mad-oficina'); ?>"><?php foreach ( Bank::open_items('out', 0, null, 150) as $c ) echo '<option value="' . esc_attr($c['type'] . ':' . $c['id']) . '">' . esc_html($c['label']) . '</option>'; ?></optgroup>
@@ -108,15 +109,19 @@ $pattern = function($concept){
                 <?php if ( $cands ) : ?>
                 <?php echo AdminUi::form_open('billing_bank_action', 'madof-inline'); ?>
                     <input type="hidden" name="movement" value="<?php echo (int) $m['id']; ?>"><input type="hidden" name="do" value="link">
+                    <input type="search" class="madof-bank-find" data-side="<?php echo (float) $m['amount'] > 0 ? 'in' : 'out'; ?>" placeholder="<?php esc_attr_e('Buscar: proveedor, nº, importe…', 'mad-oficina'); ?>" aria-label="<?php esc_attr_e('Buscar la factura', 'mad-oficina'); ?>" hidden>
                     <select name="target" required aria-label="<?php esc_attr_e('Con qué va', 'mad-oficina'); ?>"><option value=""><?php esc_html_e('Elige con qué va…', 'mad-oficina'); ?></option><?php foreach ( $cands as $c ) echo '<option value="' . esc_attr($c['type'] . ':' . $c['id']) . '">' . esc_html($c['label']) . '</option>'; ?></select>
                     <button class="madof-btn is-small"><?php esc_html_e('Vincular', 'mad-oficina'); ?></button>
                 </form>
                 <details class="madof-more"><summary><?php esc_html_e('Con varias facturas o recibos…', 'mad-oficina'); ?></summary>
                 <?php echo AdminUi::form_open('billing_bank_action', 'madof-form madof-bank-several'); ?>
                     <input type="hidden" name="movement" value="<?php echo (int) $m['id']; ?>"><input type="hidden" name="do" value="link">
+                    <input type="search" class="madof-bank-find" data-side="<?php echo (float) $m['amount'] > 0 ? 'in' : 'out'; ?>" placeholder="<?php esc_attr_e('Buscar otras: proveedor, nº, importe…', 'mad-oficina'); ?>" aria-label="<?php esc_attr_e('Buscar facturas o recibos', 'mad-oficina'); ?>" hidden>
+                    <div class="madof-bank-boxes">
                     <?php foreach ( $cands as $c ) : ?>
                         <label class="madof-check"><input type="checkbox" name="targets[]" value="<?php echo esc_attr($c['type'] . ':' . $c['id']); ?>"> <?php echo esc_html($c['label']); ?></label>
                     <?php endforeach; ?>
+                    </div>
                     <small class="madof-muted"><?php echo esc_html(sprintf(__('Marca las que suman %s (todas cobros o todas pagos).', 'mad-oficina'), Money::format(abs((float) $m['amount'])))); ?></small>
                     <button class="madof-btn is-small"><?php esc_html_e('Vincular las marcadas', 'mad-oficina'); ?></button>
                 </form></details>
@@ -137,6 +142,7 @@ $pattern = function($concept){
             </td>
         </tr>
     <?php endforeach; ?></tbody></table>
+    <?php include __DIR__ . '/bank-find.php'; ?>
     <?php endif; ?>
 
 <?php elseif ( $view === 'invoices' ) : ?>

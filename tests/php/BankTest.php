@@ -313,4 +313,21 @@ class BankTest extends MADOF_TestCase {
         $this->assertStringContainsString('pendiente de pago', $order['email']['subject']);
         delete_option(\MAD_Oficina\Core\ClientCopy::OPTION);
     }
+
+    public function test_vincular_suggests_whoever_the_concept_names_and_searches_everything(){
+        for ( $n = 0; $n < 20; $n++ ) $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-03-01', 'supplier_name' => 'Otro Proveedor ' . $n, 'concept' => 'Varios', 'total' => 50 + $n / 100, 'currency' => 'EUR']);
+        $generic = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-02-21', 'supplier_name' => 'Nube Hosting SL', 'concept' => 'Hosting', 'total' => 49.0, 'currency' => 'EUR']);
+        $named = $this->insert('expenses', ['status' => 'registered', 'issue_date' => '2026-02-20', 'supplier_name' => 'Hostinger International', 'concept' => 'Plan Business 48 meses', 'total' => 187.20, 'currency' => 'EUR']);
+        $m = ['amount' => -50.0, 'date' => '2026-03-02', 'concept' => 'PAGO TARJETA HOSTINGER* HOSTING'];
+        $c = Bank::candidates($m);
+        $this->assertSame([$named, $generic], [$c[0]['id'], $c[1]['id']], 'the brand the bank names comes first, even with another amount; a generic word next');
+        $this->assertCount(15, $c);
+        $this->assertNotContains($named, array_column(Bank::candidates(['amount' => -50.0, 'date' => '2026-03-02', 'concept' => 'TRANSFERENCIA 0042']), 'id'), 'without a name it falls out of the suggestions…');
+
+        $all = Bank::searchable();
+        $this->assertCount(22, $all['out'], '…but the search box sees every open one, not only the suggested');
+        $h = array_values(array_filter($all['out'], fn($i) => $i['v'] === 'expense:' . $named))[0];
+        foreach ( ['hostinger', 'business', '187,20', '187.20'] as $w ) $this->assertStringContainsString($w, $h['s']);
+        $this->assertStringContainsString('Plan Business', $h['l'], 'the label shows what it was for');
+    }
 }
