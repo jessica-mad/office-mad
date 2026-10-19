@@ -55,6 +55,7 @@ final class MAD_Oficina_Core {
         add_action('admin_init', [$this,'admin_init']);
         add_action('admin_enqueue_scripts', [$this,'enqueue_admin_assets']);
         add_action('rest_api_init', [$this,'register_rest_routes']);
+        add_action('madoficina_tick', [$this, 'run_own_actions'], 1);
         add_action('admin_post_madof_toggle_module', [$this, 'handle_toggle_module']);
         add_action('admin_post_madof_approval_resolve', [$this, 'handle_approval_resolve']);
         add_action('admin_post_madof_approval_bulk', [$this, 'handle_approval_bulk']);
@@ -64,6 +65,18 @@ final class MAD_Oficina_Core {
         if ( defined('WP_CLI') && WP_CLI ) {
             \WP_CLI::add_command('mad-oficina', 'MAD_Oficina\\Core\\Cli');
         }
+    }
+
+    /**
+     * The office's own queued jobs (meetings, invoices, notices) run on the cartero's tick too,
+     * so they never wait for a WP-Cron that the server may not run. Only the «mad-oficina» group.
+     */
+    public function run_own_actions(){
+        if ( ! function_exists('as_get_scheduled_actions') || ! class_exists('ActionScheduler_QueueRunner') ) return 0;
+        $ids = as_get_scheduled_actions(['group' => 'mad-oficina', 'status' => 'pending', 'date' => gmdate('Y-m-d H:i:s'), 'date_compare' => '<=', 'per_page' => 10, 'orderby' => 'date', 'order' => 'ASC'], 'ids');
+        $runner = \ActionScheduler_QueueRunner::instance();
+        foreach ( $ids as $id ) $runner->process_action((int) $id, 'MAD Oficina tick');
+        return count($ids);
     }
 
     public function load_textdomain(){

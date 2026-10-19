@@ -65,8 +65,12 @@ final class TaskList {
         // Only numbers and connectors («2, 5», «la 2 y la 5»): an answer to the list.
         $bare = $nums && preg_match('/^(?:[\s,.;y&+e]|\d|\b(?:la|las|el|los|n|no|num|numero|numeros)\b)+$/', $t);
 
-        if ( $undo && $has ) return ['action' => 'undo', 'nums' => $target];
-        if ( $has && ($done || $bare) ) return ['action' => 'done', 'nums' => $target];
+        // Only a short reply to the list («la 2 y la 5 hechas», «reabre la 3») acts by numbers. In a long
+        // message, a pasted text or a voice note, numbers are dates, amounts, campaign figures… never tasks.
+        $short = mb_strlen($t) <= 60 && count(explode(' ', $t)) <= 10;
+        if ( $undo && $has && $short ) return ['action' => 'undo', 'nums' => $target];
+        if ( $has && ($done || $bare) && $short ) return ['action' => 'done', 'nums' => $target];
+        if ( $has && ! $short ) return ['action' => null, 'nums' => []]; // the assistant reads it
         // Only the bare request («tareas», «mis tareas», «¿qué tareas tengo?»); a sentence about tasks goes to the assistant.
         $bare_list = trim(preg_replace('/[^a-z ]+/', ' ', $t));
         if ( preg_match('/^(?:(?:dame|pasame|mandame|ensename|muestrame|ver|mis|las|que|cuales|son|tengo|hola)\s+)*(?:tareas|pendientes|lista)(?:\s+(?:abiertas|pendientes|tengo|de hoy|por favor))*$/', $bare_list) ) return ['action' => 'list', 'nums' => []];

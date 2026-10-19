@@ -67,6 +67,8 @@ final class Events {
                 return rest_ensure_response([]);
 
             case 'MESSAGE':
+                // Chat sends the same message again when the bot takes long: it is answered once.
+                if ( ! self::first_time((string) ($e['message']['name'] ?? '')) ) return rest_ensure_response(new \stdClass());
                 if ( $is_dm ) $this->remember_dm($email, $space['name'] ?? '');
                 // A voice message, or words that need understanding: answered a moment later
                 // (Chat only waits 30 s), by the assistant, as a new message.
@@ -174,6 +176,17 @@ final class Events {
     }
 
     /** Free words (not «la 2 hecha» nor «tareas») go to the assistant when Claude is configured. */
+    /** True the first time a message is seen (atomic: two deliveries at once can't both pass). */
+    public static function first_time($message_name){
+        if ( $message_name === '' ) return true;
+        global $wpdb;
+        $key = 'madof_seen_' . md5($message_name);
+        $ok = $wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $key, (string) time()));
+        if ( ! $ok ) return false;
+        if ( mt_rand(1, 50) === 1 ) $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d", $wpdb->esc_like('madof_seen_') . '%', time() - DAY_IN_SECONDS));
+        return true;
+    }
+
     private function needs_understanding($email, $text){
         if ( trim($text) === '' || ! \MAD_Oficina\Core\Agents\ClaudeClient::has_key() ) return false;
         $p = TaskList::parse($text);

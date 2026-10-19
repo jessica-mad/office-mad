@@ -119,7 +119,21 @@ final class Orchestrator {
         }
         $tools[] = ['name' => 'remember', 'description' => 'Guarda algo que la persona te pide que recuerdes (preferencias, cómo llama a un cliente, cómo quiere las cosas).',
             'input_schema' => ['type' => 'object', 'properties' => ['fact' => ['type' => 'string']], 'required' => ['fact']],
-            'handler' => fn($in) => Memory::remember($email, $in['fact'] ?? '')];
+            'handler' => function($in) use ($email){
+                // A client code in the fact that already belongs to another client: ask, don't save.
+                $fact = (string) ($in['fact'] ?? '');
+                $norm = fn($x) => strtolower(remove_accents((string) $x));
+                preg_match_all('/\b[A-Z]{2,5}\b/', $fact, $m);
+                foreach ( array_unique($m[0]) as $code ) {
+                    $c = array_values(array_filter(\MAD_Oficina\Core\Repo\Clients::all(), fn($x) => strtoupper((string) $x['code']) === $code))[0] ?? null;
+                    if ( ! $c ) continue;
+                    $words = array_filter(explode(' ', preg_replace('/[^a-z0-9 ]+/', ' ', $norm($c['name']))), fn($w) => strlen($w) >= 4);
+                    if ( $words && ! array_filter($words, fn($w) => str_contains($norm($fact), $w)) ) {
+                        return new \WP_Error('madof_memory_clash', sprintf('No lo he guardado: %1$s ya es el código de %2$s. Pregúntale si se refiere a ese cliente o quiere otro código.', $code, $c['name']));
+                    }
+                }
+                return Memory::remember($email, $fact);
+            }];
         $tools[] = ['name' => 'forget', 'description' => 'Borra algo que tenías guardado (por su id).',
             'input_schema' => ['type' => 'object', 'properties' => ['id' => ['type' => 'string']], 'required' => ['id']],
             'handler' => fn($in) => Memory::forget($email, $in['id'] ?? '') ? ['forgotten' => true] : new \WP_Error('madof_memory', 'No tenía nada con ese id.')];

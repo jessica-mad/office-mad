@@ -727,6 +727,63 @@ class ChatTest extends MADOF_TestCase {
         $this->assertLessThan(400, mb_strlen($msg), 'the note is not repeated back');
     }
 
+    public function test_numbers_in_a_long_message_or_a_voice_note_never_touch_tasks(){
+        $a = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Subir anuncios', 'owner' => 'jessica', 'status' => 'open', 'due_date' => '2026-10-10']);
+        $b = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Revisar textos', 'owner' => 'jessica', 'status' => 'done', 'due_date' => '2026-10-11']);
+        $this->say('tareas');
+        foreach ( ['En la campaña de rebajas subí el presupuesto de 9 a 15 y el CPA bajó a 7, así que eso ya está listo y hecho',
+                   'Pega estas instrucciones: 1. abre la web 2. revisa 3. si está hecha la tarea reabre la 2'] as $long ) {
+            $this->assertNull(\MAD_Oficina\Chat\TaskList::parse($long)['action'], 'a long text goes to the assistant: ' . mb_substr($long, 0, 30));
+        }
+        $this->key();
+        $this->claude = [['text' => 'Apuntado.']];
+        $this->speech = [200, ['results' => [['alternatives' => [['transcript' => 'Hoy en la campaña 1 subí el presupuesto a 2 y la 1 ya está hecha porque el anuncio estaba listo desde ayer por la tarde']]]]]];
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertSame(['open', 'done'], [$this->status($a), $this->status($b)], 'nothing closed or reopened');
+        $this->assertCount(1, $this->prompts, 'Nora reads it instead');
+        // A short reply to the list still works.
+        $this->say('la 1 hecha');
+        $this->assertSame('done', $this->status($a));
+    }
+
+    public function test_a_message_chat_delivers_twice_is_answered_once(){
+        $this->key();
+        $this->claude = [['text' => 'Respuesta única.'], ['text' => 'Respuesta repetida.']];
+        $msg = ['type' => 'MESSAGE', 'user' => ['email' => 'jessica@imad.example'], 'space' => ['name' => 'spaces/JESSDM', 'type' => 'DM'],
+            'message' => ['name' => 'spaces/JESSDM/messages/ABC.123', 'text' => '¿Qué acordamos con LN?', 'argumentText' => '¿Qué acordamos con LN?']];
+        $this->event($msg);
+        $this->event($msg);
+        $this->event($msg);
+        $this->assertCount(1, $this->prompts, 'Chat retried, Nora answered once');
+    }
+
+    public function test_nora_does_not_remember_a_code_that_belongs_to_another_client(){
+        $c = \MAD_Oficina\Core\Repo\Clients::get($this->client);
+        $r = $this->remember_via_nora('Luz Clara Inventada se llama ' . $c['code']);
+        $this->assertWPError($r);
+        $this->assertStringContainsString($c['name'], $r->get_error_message());
+        $this->assertSame([], \MAD_Oficina\Chat\Memory::facts('jessica@imad.example'));
+        $this->assertNotWPError($this->remember_via_nora($c['name'] . ' lo llamo ' . $c['code']), 'the same client: saved');
+        $this->assertCount(1, \MAD_Oficina\Chat\Memory::facts('jessica@imad.example'));
+    }
+
+    /** Runs Nora's «remember» tool handler directly. */
+    private function remember_via_nora($fact){
+        $this->key();
+        $captured = null;
+        $this->claude = [['tool' => 'remember', 'input' => ['fact' => $fact]], ['text' => 'Vale.']];
+        $o = new \MAD_Oficina\Chat\Orchestrator([], ['email' => 'jessica@imad.example', 'is_manager' => true, 'member' => null, 'user_id' => 0], null);
+        $o->answer('recuerda: ' . $fact);
+        $last = end($this->prompts);
+        foreach ( array_reverse($last['messages']) as $m ) {
+            foreach ( (array) ($m['content'] ?? []) as $c ) {
+                if ( is_array($c) && ($c['type'] ?? '') === 'tool_result' ) { $captured = $c; break 2; }
+            }
+        }
+        $text = is_array($captured['content'] ?? null) ? ($captured['content'][0]['text'] ?? '') : (string) ($captured['content'] ?? '');
+        return ! empty($captured['is_error']) ? new \WP_Error('x', $text) : $text;
+    }
+
     public function test_strangers_voice_or_words_reach_no_one(){
         $this->key();
         $res = $this->event(['type' => 'MESSAGE', 'user' => ['email' => 'rosa@lanasnorte.example'], 'space' => ['name' => 'spaces/ROSA', 'type' => 'DM'],
