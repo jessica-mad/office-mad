@@ -104,6 +104,7 @@ final class Schema {
             'meetings' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   client_id bigint(20) unsigned NULL,
+  internal tinyint(1) NOT NULL DEFAULT 0,
   source varchar(20) NOT NULL DEFAULT 'manual',
   source_key varchar(190) NULL,
   title varchar(255) NOT NULL,

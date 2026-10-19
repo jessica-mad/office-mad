@@ -61,7 +61,11 @@ return new class($core) implements MAD_Oficina_Module {
         add_filter('madoficina_approval_form_' . $review, ['MAD_Oficina\\Followup\\Reconciler', 'render_form'], 10, 2);
         add_action('madoficina_meeting_approved', function($meeting_id){
             $m = class_exists('MAD_Oficina\\Meetings\\Meetings') ? \MAD_Oficina\Meetings\Meetings::get((int) $meeting_id) : null;
-            if ( $m && $m['client_id'] ) \MAD_Oficina\Followup\Reconciler::enqueue((int) $m['client_id']);
+            if ( ! $m ) return;
+            // A team meeting touches several clients: Valle reviews each one.
+            global $wpdb;
+            $ids = array_map('intval', $wpdb->get_col($wpdb->prepare('SELECT DISTINCT client_id FROM ' . \MAD_Oficina\Core\Schema::table('action_items') . ' WHERE meeting_id = %d AND client_id IS NOT NULL', (int) $meeting_id)));
+            foreach ( array_unique(array_filter(array_merge([(int) $m['client_id']], $ids))) as $cid ) \MAD_Oficina\Followup\Reconciler::enqueue($cid);
         }, 20);
 
         add_action('admin_post_madof_followup_settings', [$this, 'handle_settings']);

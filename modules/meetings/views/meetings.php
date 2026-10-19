@@ -46,7 +46,7 @@ $clients = Clients::all();
             </div>
             <div class="madof-cols">
                 <label><?php esc_html_e('Cliente', 'mad-oficina'); ?>
-                    <select name="client_id"><option value=""><?php esc_html_e('Detectarlo automáticamente', 'mad-oficina'); ?></option>
+                    <select name="client_id"><option value=""><?php esc_html_e('Detectarlo automáticamente', 'mad-oficina'); ?></option><option value="internal"><?php esc_html_e('Interna (equipo MAD): cada tarea a su cliente', 'mad-oficina'); ?></option>
                     <?php foreach ( $clients as $c ) : ?><option value="<?php echo (int) $c['id']; ?>"><?php echo esc_html($c['code'] . ' · ' . $c['name']); ?></option><?php endforeach; ?></select></label>
                 <label><?php esc_html_e('Emails de los invitados (opcional)', 'mad-oficina'); ?><input type="text" name="attendees" placeholder="ana@cliente.com, otro@gmail.com"></label>
             </div>
@@ -105,7 +105,7 @@ $clients = Clients::all();
                 <tr>
                     <td><?php echo esc_html($m['starts_at'] ? get_date_from_gmt($m['starts_at'], 'j M Y H:i') : '—'); ?></td>
                     <td><a href="<?php echo esc_url($base . '&meeting=' . $m['id']); ?>"><strong><?php echo esc_html($m['title']); ?></strong></a></td>
-                    <td><?php echo $c ? '<span class="madof-code">' . esc_html($c['code']) . '</span>' : '—'; ?></td>
+                    <td><?php echo $c ? '<span class="madof-code">' . esc_html($c['code']) . '</span>' : ($m['internal'] ? esc_html__('Interna', 'mad-oficina') : '—'); ?></td>
                     <td><?php echo $m['source'] === 'apps_script' ? 'Apps Script' : ($m['source'] === 'whatsapp' ? 'WhatsApp' : esc_html__('Manual', 'mad-oficina')); ?></td>
                     <td><span class="madof-pill <?php echo in_array($m['status'], ['extracted', 'error', 'no_transcript'], true) ? 'is-on' : ''; ?>"><?php echo esc_html($statuses[$m['status']] ?? $m['status']); ?></span></td>
                 </tr>

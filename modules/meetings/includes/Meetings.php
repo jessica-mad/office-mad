@@ -57,6 +57,7 @@ final class Meetings {
             'updated_at'         => Time::now(),
         ];
         if ( ! empty($data['client_id']) ) $row['client_id'] = (int) $data['client_id'];
+        if ( ! empty($data['internal']) ) $row['internal'] = 1; // a team meeting: each task goes to its own client
 
         $key = isset($data['source_key']) ? mb_substr(sanitize_text_field($data['source_key']), 0, 190) : '';
         $existing = $key ? self::find_by_source_key($key) : null;
@@ -111,6 +112,7 @@ final class Meetings {
     private static function hydrate($row){
         $row['id'] = (int) $row['id'];
         $row['client_id'] = $row['client_id'] ? (int) $row['client_id'] : null;
+        $row['internal'] = (int) ($row['internal'] ?? 0);
         $row['attendees'] = $row['attendees'] ? (json_decode($row['attendees'], true) ?: []) : [];
         $row['extraction'] = $row['extraction'] ? (json_decode($row['extraction'], true) ?: []) : [];
         $row['shared_with'] = $row['shared_with'] ? (json_decode($row['shared_with'], true) ?: []) : [];

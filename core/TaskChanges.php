@@ -28,9 +28,10 @@ final class TaskChanges {
     /**
      * @param array[] $changes [['task_id', 'action' => done|cancel|change, 'title' => '', 'due_date' => null|'Y-m-d', 'note' => '', 'evidence' => '']]
      * @param string  $source  «reunión «X» del 17/10», «Valle (revisión)»… written in the note
+     * @param bool    $any_client a team meeting: its tasks span clients
      * @return array{applied:array[], skipped:array[], undo:?string}
      */
-    public static function apply(array $changes, $client_id, $source){
+    public static function apply(array $changes, $client_id, $source, $any_client = false){
         global $wpdb;
         $table = Schema::table('action_items');
         $ids = array_values(array_unique(array_filter(array_map(fn($c) => (int) ($c['task_id'] ?? 0), $changes))));
@@ -41,8 +42,8 @@ final class TaskChanges {
             $id = (int) ($c['task_id'] ?? 0);
             $action = $c['action'] ?? '';
             $t = $rows[$id] ?? null;
-            if ( ! $t || (int) $t['client_id'] !== (int) $client_id || ! in_array($t['status'], ['open', 'in_progress'], true) || ! in_array($action, self::ACTIONS, true) ) {
-                $skipped[] = $c + ['why' => ! $t ? 'no existe' : ((int) $t['client_id'] !== (int) $client_id ? 'es de otro cliente' : 'ya no está abierta')];
+            if ( ! $t || ( ! $any_client && (int) $t['client_id'] !== (int) $client_id ) || ! in_array($t['status'], ['open', 'in_progress'], true) || ! in_array($action, self::ACTIONS, true) ) {
+                $skipped[] = $c + ['why' => ! $t ? 'no existe' : (( ! $any_client && (int) $t['client_id'] !== (int) $client_id) ? 'es de otro cliente' : 'ya no está abierta')];
                 continue;
             }
             if ( ! isset($touched[$id]) ) $touched[$id] = $t;

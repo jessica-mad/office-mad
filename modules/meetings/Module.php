@@ -207,6 +207,7 @@ return new class($core) implements MAD_Oficina_Module {
             'starts_at'  => ($p['date'] ?? '') ? $p['date'] . ' ' . (($p['time'] ?? '') ?: '10:00') : null,
             'attendees'  => $attendees,
             'client_id'  => $client_id && \MAD_Oficina\Core\Repo\Clients::get($client_id) ? $client_id : null,
+            'internal'   => ($p['client_id'] ?? '') === 'internal',
             'transcript' => $text,
         ]);
 

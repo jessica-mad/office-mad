@@ -135,8 +135,8 @@ return new class($core) implements MAD_Oficina_Module {
     public function send_meeting_messages($meeting_id, $notify_team, $send_summary){
         global $wpdb;
         $m = class_exists('MAD_Oficina\\Meetings\\Meetings') ? \MAD_Oficina\Meetings\Meetings::get($meeting_id) : null;
-        if ( ! $m || ! $m['client_id'] ) return;
-        $client = \MAD_Oficina\Core\Repo\Clients::get($m['client_id']);
+        if ( ! $m || ( ! $m['client_id'] && ! $m['internal'] ) ) return;
+        $client = $m['client_id'] ? \MAD_Oficina\Core\Repo\Clients::get($m['client_id']) : null;
         $items = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . \MAD_Oficina\Core\Schema::table('action_items') . ' WHERE meeting_id = %d ORDER BY id', $meeting_id), ARRAY_A);
         $messenger = $this->messenger();
 
@@ -145,12 +145,14 @@ return new class($core) implements MAD_Oficina_Module {
                 if ( ! $t['team_member_id'] || $t['visibility'] === 'internal' ) continue;
                 $member = \MAD_Oficina\Core\Repo\Team::get((int) $t['team_member_id']);
                 if ( ! $member ) continue;
-                $res = $messenger->to_team_member($member, \MAD_Oficina\Chat\Cards::task_for_team($t, $client, $this->portal_url()));
-                if ( is_wp_error($res) ) $this->log_error('team_task', $res->get_error_message(), $client['id']);
+                // In a team meeting each task carries its own client.
+                $tc = $t['client_id'] ? \MAD_Oficina\Core\Repo\Clients::get((int) $t['client_id']) : null;
+                $res = $messenger->to_team_member($member, \MAD_Oficina\Chat\Cards::task_for_team($t, $tc, $this->portal_url()));
+                if ( is_wp_error($res) ) $this->log_error('team_task', $res->get_error_message(), $tc['id'] ?? null);
             }
         }
 
-        if ( $send_summary && $m['visibility'] === 'client' ) {
+        if ( $client && $send_summary && $m['visibility'] === 'client' ) {
             $visible = array_filter($items, fn($t) => $t['visibility'] === 'client');
             $text = \MAD_Oficina\Chat\Cards::client_summary(
                 $m, $client,

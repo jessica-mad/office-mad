@@ -17,7 +17,7 @@ $drive = fn($id) => $id ? 'https://drive.google.com/open?id=' . rawurlencode($id
     <section class="madof-card">
         <div class="madof-cols">
             <div><span class="madof-kicker"><?php esc_html_e('Cliente', 'mad-oficina'); ?></span>
-                <p><?php echo $client ? '<span class="madof-code">' . esc_html($client['code']) . '</span> ' . esc_html($client['name']) : esc_html__('Sin identificar', 'mad-oficina'); ?></p></div>
+                <p><?php echo $client ? '<span class="madof-code">' . esc_html($client['code']) . '</span> ' . esc_html($client['name']) : ($meeting['internal'] ? esc_html__('Interna (equipo MAD)', 'mad-oficina') : esc_html__('Sin identificar', 'mad-oficina')); ?></p></div>
             <div><span class="madof-kicker"><?php esc_html_e('Estado', 'mad-oficina'); ?></span><p><?php
                 $labels = ['received' => __('Recibida (se procesará sola en unos minutos)', 'mad-oficina'), 'processing' => __('Procesando…', 'mad-oficina'), 'extracted' => __('Borrador en la bandeja', 'mad-oficina'),
                     'approved' => __('Aprobada', 'mad-oficina'), 'archived' => __('Aprobada y archivada', 'mad-oficina'), 'no_transcript' => __('Sin transcripción', 'mad-oficina'),

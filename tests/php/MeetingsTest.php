@@ -9,6 +9,7 @@ use MAD_Oficina\Meetings\Hooks;
 use MAD_Oficina\Meetings\Identifier;
 use MAD_Oficina\Meetings\Meetings;
 use MAD_Oficina\Meetings\Orders;
+use MAD_Oficina\Meetings\Secretary;
 
 /**
  * Secretaria de actas: identification, signed hooks, extraction draft,
@@ -309,6 +310,58 @@ class MeetingsTest extends MADOF_TestCase {
         $this->assertContains('rosa@lanasnorte.example', $m['shared_with']);
         $this->assertSame([], Orders::pending());
         $this->assertCount(1, Portal::meetings($this->lana), 'Archived meetings stay in the portal');
+    }
+
+    public function test_a_team_meeting_is_internal_and_each_task_goes_to_its_client(){
+        global $wpdb;
+        $liz = Team::save(['name' => 'Liz', 'slug' => 'liz']);
+        $now = current_time('mysql');
+        $wpdb->insert(Schema::table('action_items'), ['client_id' => $this->vivero, 'title' => 'Banner de otoño', 'owner' => 'liz', 'status' => 'open', 'visibility' => 'team', 'created_at' => $now, 'updated_at' => $now]);
+        $old = (int) $wpdb->insert_id;
+        $this->reply = [
+            'summary_client' => '', 'summary_internal' => 'Repaso semanal con Liz.', 'decisions' => [],
+            'tasks' => [
+                ['title' => 'Montar el reel de mantas', 'description' => '', 'owner' => 'liz', 'owner_name' => 'Liz', 'due_date' => null, 'priority' => 'normal', 'client_visible' => false, 'evidence' => 'el reel de Lanas', 'sure' => true, 'client_code' => 'LN'],
+                ['title' => 'Pedir fotos del vivero', 'description' => '', 'owner' => 'jessica', 'owner_name' => 'Jessica', 'due_date' => null, 'priority' => 'normal', 'client_visible' => true, 'evidence' => 'pido las fotos a Vivero', 'sure' => true, 'client_code' => 'vs'],
+                ['title' => 'Ordenar la carpeta de plantillas', 'description' => '', 'owner' => 'mad', 'owner_name' => '', 'due_date' => null, 'priority' => 'low', 'client_visible' => true, 'evidence' => 'las plantillas', 'sure' => true, 'client_code' => null],
+            ],
+            'task_updates' => [['task_id' => $old, 'action' => 'done', 'title' => '', 'due_date' => null, 'note' => 'Liz ya lo entregó', 'evidence' => 'el banner ya está']],
+            'pending_topics' => [], 'ideas' => [['title' => 'Plantilla común de reels', 'description' => '', 'resurface_at' => null, 'client_code' => null]],
+            'next_meeting' => ['status' => 'none', 'date' => null, 'notes' => ''], 'internal_notes' => [],
+        ];
+        $id = Meetings::upsert(['source' => 'apps_script', 'source_key' => 'drive-folder:TEAM1', 'title' => 'Semanal Liz', 'starts_at' => '2026-10-19 10:00',
+            'attendees' => [['email' => 'jessica@imad.example'], ['email' => 'liz@imad.example']], 'transcript' => 'Jessica: el reel de Lanas…']);
+        $this->assertTrue($this->secretary()->process($id));
+
+        $m = Meetings::get($id);
+        $this->assertSame([1, null], [$m['internal'], $m['client_id']], 'only MAD people: internal, no client guessed');
+        $user = end($this->claude)['body']['messages'][0]['content'];
+        $this->assertStringContainsString('REUNIÓN INTERNA', $user);
+        $this->assertStringContainsString('LN · Lanas del Norte', $user, 'the secretary gets the client list');
+        $this->assertStringContainsString("[{$old}] VS · Banner de otoño", $user, 'and the team\'s open tasks of every client');
+
+        $approval = Approvals::for_object('meeting', $id)[0];
+        $html = apply_filters('madoficina_approval_form_meeting_draft', '', $approval);
+        $this->assertStringContainsString("value=\"internal\"  selected='selected'", $html);
+        $this->assertStringNotContainsString('input[send_summary]', $html, 'nothing to send to a client');
+        $this->assertMatchesRegularExpression('/name="input\[tasks\]\[0\]\[client\]".*?value="' . $this->lana . '" selected/s', $html, 'each row shows its client');
+
+        $input = Secretary::default_input([], $approval);
+        $this->assertSame('internal', $input['client_id']);
+        $result = Approvals::resolve($approval['id'], 'approve', $input + ['send_summary' => 1, 'show_in_portal' => 1], 1);
+        $this->assertIsArray($result, is_wp_error($result) ? $result->get_error_message() : '');
+
+        $tasks = $wpdb->get_results($wpdb->prepare('SELECT title, client_id, visibility, team_member_id FROM ' . Schema::table('action_items') . ' WHERE meeting_id = %d ORDER BY id', $id), ARRAY_A);
+        $this->assertSame([(string) $this->lana, (string) $this->vivero, null], array_column($tasks, 'client_id'));
+        $this->assertSame((string) $liz, $tasks[0]['team_member_id']);
+        $this->assertSame('internal', $tasks[2]['visibility'], 'without a client nobody outside MAD sees it');
+        $this->assertSame('done', $wpdb->get_var("SELECT status FROM " . Schema::table('action_items') . " WHERE id = {$old}"), 'a task of another client can be closed from a team meeting');
+        $this->assertNull($wpdb->get_var('SELECT client_id FROM ' . Schema::table('ideas') . ' WHERE meeting_id = ' . (int) $id));
+
+        $m = Meetings::get($id);
+        $this->assertSame(['internal', 1], [$m['visibility'], $m['internal']], 'never in a portal');
+        $this->assertSame([], Portal::meetings($this->lana));
+        $this->assertSame([], Orders::pending(), 'not archived into any client\'s folder');
     }
 
     public function test_approval_needs_a_client_and_reject_discards(){
