@@ -31,6 +31,7 @@ class ChatTest extends MADOF_TestCase {
     private $speech_models = [];
     private $speech_configs = [];
     private $audio_bytes = 'fake-audio-bytes';
+    private $sent_audio = [];
 
     public static function wpSetUpBeforeClass($factory){
         self::$google_key = openssl_pkey_new(['private_key_bits' => 2048]);
@@ -84,7 +85,9 @@ class ChatTest extends MADOF_TestCase {
         if ( preg_match('#^https://(?:([a-z0-9-]+)-)?speech\.googleapis\.com/v2/projects/mad-oficina-test/locations/([a-z0-9-]+)/recognizers/_:recognize#', $url, $m) ) {
             $this->speech_calls++;
             $body = json_decode($args['body'], true);
-            $this->assertSame(base64_encode($this->audio_bytes), $body['content']);
+            $sent_audio = base64_decode($body['content']);
+            if ( substr($sent_audio, 0, 4) !== 'OggS' ) $this->assertSame($this->audio_bytes, $sent_audio);
+            $this->sent_audio[] = $sent_audio;
             $this->speech_configs[] = $body['config'];
             $this->assertSame($m[1] ?: 'global', $m[2], 'regional models go to their regional endpoint');
             $this->speech_models[] = $body['config']['model'];
@@ -664,6 +667,20 @@ class ChatTest extends MADOF_TestCase {
         $this->assertArrayNotHasKey('autoDecodingConfig', $this->speech_configs[0]);
         $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
         $this->assertSame('long_m4a', get_option(\MAD_Oficina\Chat\Transcriber::WORKED));
+        $this->audio_bytes = 'fake-audio-bytes';
+    }
+
+    public function test_opus_voice_notes_in_an_m4a_box_are_rewrapped_as_ogg(){
+        $this->key();
+        $this->claude = [['text' => 'Vale.']];
+        $this->audio_bytes = file_get_contents(dirname(__DIR__) . '/fixtures/voz-opus-sintetica.m4a'); // a 3 s synthetic tone
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertSame(['long'], $this->speech_models);
+        $this->assertSame('OggS', substr($this->sent_audio[0], 0, 4), 'Google gets Ogg Opus, not the m4a');
+        $this->assertStringContainsString('OpusHead', substr($this->sent_audio[0], 0, 80));
+        $this->assertArrayHasKey('autoDecodingConfig', $this->speech_configs[0]);
+        $this->assertSame('long_ogg', get_option(\MAD_Oficina\Chat\Transcriber::WORKED));
+        $this->assertStringContainsString('Opus, fragmentado', \MAD_Oficina\Chat\Transcriber::container($this->audio_bytes));
         $this->audio_bytes = 'fake-audio-bytes';
     }
 

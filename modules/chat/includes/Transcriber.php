@@ -74,7 +74,12 @@ final class Transcriber {
     /** Google's ways of recognising, tried in order until one takes the audio; the one that worked goes first next time. */
     const ATTEMPTS = [
         // Chat's voice notes are AAC in an m4a box, which automatic detection reads as empty: said explicitly.
+        // Opus in an m4a box: rewrapped as Ogg Opus (Mp4Audio), which Google always takes.
+        'long_ogg'    => ['location' => 'global', 'model' => 'long', 'for' => 'opus'],
+        'chirp_2_ogg' => ['location' => 'europe-west4', 'model' => 'chirp_2', 'for' => 'opus'],
         'long_m4a'    => ['location' => 'global', 'model' => 'long', 'encoding' => 'M4A_AAC', 'for' => 'm4a'],
+        'chirp_3_m4a' => ['location' => 'eu', 'model' => 'chirp_3', 'encoding' => 'M4A_AAC', 'for' => 'm4a'],
+        'chirp_3'     => ['location' => 'eu', 'model' => 'chirp_3', 'for' => 'm4a'],
         'chirp_2_m4a' => ['location' => 'europe-west4', 'model' => 'chirp_2', 'encoding' => 'M4A_AAC', 'for' => 'm4a'],
         'long_mp4'    => ['location' => 'global', 'model' => 'long', 'encoding' => 'MP4_AAC', 'for' => 'm4a'],
         'long'        => ['location' => 'global', 'model' => 'long'],
@@ -87,7 +92,10 @@ final class Transcriber {
     /** What the audio really is, by its first bytes (the content type Chat gives may say little). */
     public static function container($bytes){
         $head = substr((string) $bytes, 0, 16);
-        if ( substr($head, 4, 4) === 'ftyp' ) return 'm4a/mp4 (AAC)';
+        if ( substr($head, 4, 4) === 'ftyp' ) {
+            $m = new Mp4Audio($bytes);
+            return 'm4a/mp4 (' . ($m->codec() ?: '¿?') . ($m->fragmented() ? ', fragmentado' : '') . ')';
+        }
         if ( substr($head, 0, 4) === 'OggS' ) return 'ogg (opus)';
         if ( substr($head, 0, 4) === "\x1A\x45\xDF\xA3" ) return 'webm';
         if ( substr($head, 0, 4) === 'RIFF' ) return 'wav';
@@ -115,11 +123,13 @@ final class Transcriber {
         $order = (array) apply_filters('madoficina_voice_attempts', $order);
         $tried = [];
         $is_m4a = str_starts_with($audio, 'm4a');
+        $ogg = $is_m4a && str_contains($audio, '(Opus') ? (new Mp4Audio($file['body']))->opus_to_ogg() : null;
         $params = $is_m4a ? self::mp4_audio($file['body']) : [];
         foreach ( $order as $key ) {
             $a = self::ATTEMPTS[$key] ?? null;
-            if ( ! $a || ( ($a['for'] ?? '') === 'm4a' && ! $is_m4a ) ) continue;
-            $r = self::recognize($token, $project, $a + $params, $file['body']);
+            $for = $a['for'] ?? '';
+            if ( ! $a || ( $for === 'm4a' && ( ! $is_m4a || $ogg ) ) || ( $for === 'opus' && ! $ogg ) ) continue;
+            $r = self::recognize($token, $project, $a + ($for === 'm4a' ? $params : []), $for === 'opus' ? $ogg : $file['body']);
             if ( ! is_wp_error($r) ) {
                 update_option(self::WORKED, $key, false);
                 update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => $key, 'audio' => $about], false);

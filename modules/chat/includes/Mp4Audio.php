@@ -1,0 +1,171 @@
+<?php
+namespace MAD_Oficina\Chat;
+
+if ( ! defined('ABSPATH') ) exit;
+
+/**
+ * Looks inside an m4a/mp4 voice note (which codec it carries) and, when it is Opus,
+ * rewraps it as Ogg Opus — same sound, no decoding — because Speech-to-Text takes
+ * Ogg Opus but not Opus in an mp4 box. Pure PHP: the server needs no ffmpeg.
+ */
+final class Mp4Audio {
+
+    const CONTAINERS = ['moov', 'trak', 'mdia', 'minf', 'stbl', 'moof', 'traf', 'mvex', 'edts'];
+
+    private $b;
+    private $boxes = [];
+
+    public function __construct($bytes){
+        $this->b = (string) $bytes;
+        $this->walk(0, strlen($this->b), '');
+    }
+
+    /** Every box as [path, start, header size, size]. */
+    private function walk($o, $end, $path){
+        while ( $o + 8 <= $end ) {
+            $size = unpack('N', substr($this->b, $o, 4))[1];
+            $type = substr($this->b, $o + 4, 4);
+            $hs = 8;
+            if ( $size === 1 ) { $size = (int) unpack('J', substr($this->b, $o + 8, 8))[1]; $hs = 16; }
+            elseif ( $size === 0 ) $size = $end - $o;
+            if ( $size < $hs || $o + $size > $end ) break;
+            $p = $path . '/' . $type;
+            $this->boxes[] = ['path' => $p, 'start' => $o, 'hs' => $hs, 'size' => $size];
+            if ( in_array($type, self::CONTAINERS, true) ) $this->walk($o + $hs, $o + $size, $p);
+            $o += $size;
+        }
+    }
+
+    private function find($suffix, $all = false){
+        $out = array_values(array_filter($this->boxes, fn($x) => str_ends_with($x['path'], $suffix)));
+        return $all ? $out : ($out[0] ?? null);
+    }
+
+    private function body(array $box){ return substr($this->b, $box['start'] + $box['hs'], $box['size'] - $box['hs']); }
+
+    /** «Opus», «mp4a», «alac»… ('' if it is not an mp4). */
+    public function codec(){
+        $stsd = $this->find('/stbl/stsd');
+        if ( ! $stsd ) return '';
+        return rtrim(substr($this->body($stsd), 12, 4)); // 4 version/flags, 4 count, 4 entry size, then the type
+    }
+
+    public function fragmented(){ return (bool) $this->find('/moof'); }
+
+    /** @return string[] the audio frames, in order */
+    private function samples(){
+        $out = [];
+        if ( $this->fragmented() ) {
+            $trex = $this->find('/mvex/trex');
+            $dsize = $trex ? unpack('N', substr($this->body($trex), 16, 4))[1] : 0;
+            foreach ( $this->find('/moof', true) as $moof ) {
+                foreach ( array_filter($this->boxes, fn($x) => $x['start'] > $moof['start'] && $x['start'] < $moof['start'] + $moof['size']) as $box ) {
+                    if ( str_ends_with($box['path'], '/traf/tfhd') ) {
+                        $t = $this->body($box); $flags = unpack('N', substr($t, 0, 4))[1] & 0xFFFFFF; $p = 8;
+                        $base = $moof['start'];
+                        if ( $flags & 0x01 ) { $base = (int) unpack('J', substr($t, $p, 8))[1]; $p += 8; }
+                        if ( $flags & 0x02 ) $p += 4;
+                        if ( $flags & 0x08 ) $p += 4;
+                        if ( $flags & 0x10 ) { $dsize = unpack('N', substr($t, $p, 4))[1]; $p += 4; }
+                    } elseif ( str_ends_with($box['path'], '/traf/trun') ) {
+                        $t = $this->body($box); $flags = unpack('N', substr($t, 0, 4))[1] & 0xFFFFFF;
+                        $n = unpack('N', substr($t, 4, 4))[1]; $p = 8;
+                        $off = $base ?? $moof['start'];
+                        if ( $flags & 0x01 ) { $off += unpack('l', pack('L', unpack('N', substr($t, $p, 4))[1]))[1]; $p += 4; }
+                        if ( $flags & 0x04 ) $p += 4;
+                        for ( $i = 0; $i < $n; $i++ ) {
+                            if ( $flags & 0x100 ) $p += 4;
+                            $size = $dsize;
+                            if ( $flags & 0x200 ) { $size = unpack('N', substr($t, $p, 4))[1]; $p += 4; }
+                            if ( $flags & 0x400 ) $p += 4;
+                            if ( $flags & 0x800 ) $p += 4;
+                            $out[] = substr($this->b, $off, $size);
+                            $off += $size;
+                        }
+                    }
+                }
+            }
+            return $out;
+        }
+        $stsz = $this->find('/stbl/stsz'); $stsc = $this->find('/stbl/stsc'); $stco = $this->find('/stbl/stco') ?: $this->find('/stbl/co64');
+        if ( ! $stsz || ! $stsc || ! $stco ) return [];
+        $z = $this->body($stsz); $uniform = unpack('N', substr($z, 4, 4))[1]; $count = unpack('N', substr($z, 8, 4))[1];
+        $sizes = [];
+        for ( $i = 0; $i < $count; $i++ ) $sizes[] = $uniform ?: unpack('N', substr($z, 12 + 4 * $i, 4))[1];
+        $c = $this->body($stco); $wide = str_ends_with($stco['path'], 'co64'); $chunks = unpack('N', substr($c, 4, 4))[1];
+        $offsets = [];
+        for ( $i = 0; $i < $chunks; $i++ ) $offsets[] = $wide ? (int) unpack('J', substr($c, 8 + 8 * $i, 8))[1] : unpack('N', substr($c, 8 + 4 * $i, 4))[1];
+        $s = $this->body($stsc); $runs = unpack('N', substr($s, 4, 4))[1]; $table = [];
+        for ( $i = 0; $i < $runs; $i++ ) $table[] = unpack('Nfirst/Nper/Ndesc', substr($s, 8 + 12 * $i, 12));
+        $k = 0;
+        foreach ( $offsets as $ci => $off ) {
+            $per = 0;
+            foreach ( $table as $row ) if ( $ci + 1 >= $row['first'] ) $per = $row['per'];
+            for ( $j = 0; $j < $per && $k < count($sizes); $j++, $k++ ) { $out[] = substr($this->b, $off, $sizes[$k]); $off += $sizes[$k]; }
+        }
+        return $out;
+    }
+
+    /** @return string|null the same Opus audio as an Ogg Opus file */
+    public function opus_to_ogg(){
+        if ( $this->codec() !== 'Opus' ) return null;
+        $dops = $this->find('/dOps');
+        $stsd = $this->find('/stbl/stsd');
+        if ( ! $dops && $stsd ) {
+            $raw = $this->body($stsd); $i = strpos($raw, 'dOps'); // inside the Opus sample entry
+            $d = $i !== false ? substr($raw, $i + 4, unpack('N', substr($raw, $i - 4, 4))[1] - 8) : '';
+        } else $d = $dops ? $this->body($dops) : '';
+        if ( strlen($d) < 11 ) return null;
+        $channels = ord($d[1]); $preskip = unpack('n', substr($d, 2, 2))[1]; $rate = unpack('N', substr($d, 4, 4))[1];
+        $gain = unpack('n', substr($d, 8, 2))[1]; $family = ord($d[10]);
+        $head = 'OpusHead' . chr(1) . chr($channels) . pack('v', $preskip) . pack('V', $rate) . pack('v', $gain) . chr($family) . ($family ? substr($d, 11) : '');
+        $tags = 'OpusTags' . pack('V', 11) . 'MAD Oficina' . pack('V', 0);
+        $frames = $this->samples();
+        if ( ! $frames ) return null;
+        $serial = mt_rand(1, 0x7FFFFFFF);
+        $ogg = self::page($head, 0, $serial, 0, 0x02) . self::page($tags, 0, $serial, 1, 0);
+        $granule = 0; $seq = 2; $last = count($frames) - 1;
+        foreach ( $frames as $i => $f ) {
+            $granule += self::opus_samples($f);
+            $ogg .= self::page($f, $granule, $serial, $seq++, $i === $last ? 0x04 : 0);
+        }
+        return $ogg;
+    }
+
+    /** 48 kHz samples in one Opus packet (RFC 6716, TOC byte and frame count). */
+    public static function opus_samples($packet){
+        if ( $packet === '' ) return 0;
+        $toc = ord($packet[0]); $config = $toc >> 3;
+        if ( $config < 12 ) $per = [480, 960, 1920, 2880][$config & 3];
+        elseif ( $config < 16 ) $per = [480, 960][$config & 1];
+        else $per = [120, 240, 480, 960][$config & 3];
+        $code = $toc & 3;
+        $frames = $code === 0 ? 1 : ($code === 3 ? (strlen($packet) > 1 ? ord($packet[1]) & 0x3F : 1) : 2);
+        return $per * $frames;
+    }
+
+    private static function page($packet, $granule, $serial, $seq, $type){
+        $lacing = '';
+        $len = strlen($packet);
+        for ( $n = $len; $n >= 255; $n -= 255 ) $lacing .= chr(255);
+        $lacing .= chr($n);
+        $page = 'OggS' . chr(0) . chr($type) . pack('P', $granule) . pack('V', $serial) . pack('V', $seq) . pack('V', 0) . chr(strlen($lacing)) . $lacing . $packet;
+        return substr($page, 0, 22) . pack('V', self::crc($page)) . substr($page, 26);
+    }
+
+    /** Ogg's CRC-32 (polynomial 0x04C11DB7, not reflected). */
+    private static function crc($data){
+        static $t = null;
+        if ( $t === null ) {
+            $t = [];
+            for ( $i = 0; $i < 256; $i++ ) {
+                $r = $i << 24;
+                for ( $j = 0; $j < 8; $j++ ) $r = ($r & 0x80000000) ? (($r << 1) ^ 0x04C11DB7) & 0xFFFFFFFF : ($r << 1) & 0xFFFFFFFF;
+                $t[$i] = $r;
+            }
+        }
+        $crc = 0;
+        for ( $i = 0, $n = strlen($data); $i < $n; $i++ ) $crc = (($crc << 8) & 0xFFFFFFFF) ^ $t[(($crc >> 24) ^ ord($data[$i])) & 0xFF];
+        return $crc;
+    }
+}
