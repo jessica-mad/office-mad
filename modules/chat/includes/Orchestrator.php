@@ -82,6 +82,17 @@ final class Orchestrator {
             . implode("\n", array_map(fn($c) => '- ' . ($c['code'] ?: '—') . ' · ' . $c['name'] . ($c['people'] ? ' · ' . mb_substr($c['people'], 0, 120) : ''), $rows)) . "\n";
     }
 
+    /** Images sent with this message: she can't see them, but Campañas can attach them to the change log. */
+    private function images_note(){
+        $n = count((array) ($this->ctx['images'] ?? []));
+        if ( ! $n ) return '';
+        $campanas = in_array('campanas', array_map(fn($a) => $a->slug(), $this->agents()), true);
+        return "\n" . sprintf('Este mensaje trae %d imagen(es). Tú no las ves, y no hace falta: ', $n)
+            . ( $campanas
+                ? 'si son de campañas o de la bitácora, pregúntale a Campañas (ask_campanas) diciendo a qué cambio van y que adjunte las imágenes de este mensaje; ella las recibe. Si no está claro a qué cambio van, pregúntaselo a Jessica. No digas que no te llegan.'
+                : 'por ahora solo se guardan en la bitácora de campañas, y esa área no está activa: dilo en una frase.' ) . "\n";
+    }
+
     private function say($text){ if ( $this->progress ) $this->progress->say($text); }
 
     /** @return string|\WP_Error */
@@ -148,7 +159,13 @@ final class Orchestrator {
             . "- Contesta SOLO a su último mensaje. Lo que ya le dijiste en la conversación no se repite ni se reformula.\n"
             . "- Si te corrige o un área añade o corrige algo, di solo lo nuevo o lo que cambia, en una o dos frases («Corrijo: es la F-2026-014, del 28/10»). Nada de rehacer la respuesta entera.\n"
             . "- Pregunta a cada área una sola vez, con una pregunta completa; solo repites si faltó un dato concreto. Si dos áreas dicen lo mismo, cuéntalo una vez.\n"
-            . "- Breve: lo justo para responder. Sin introducciones ni resúmenes al final.\n"
+            . "- Breve: lo justo para responder, idealmente 2–6 líneas. Sin introducciones ni resúmenes al final.\n"
+            . "- Responde SOLO a lo que pide. Si pide algo concreto, da eso: no añadas bloques que no pidió (tareas de Liz, «lo que viene», tareas sin fecha, su agenda) aunque un área te los dé. Fiel en los datos, pero elige solo la parte que contesta.\n"
+            . "- Si en un audio o mensaje largo te pide varias cosas, confirma cada una en una línea (qué hiciste o qué falta). No le resumas lo que te contó.\n"
+            . "- Enlaces: no pegues URLs largas en el texto salvo que pida el enlace o sea la única forma de llegar; como mucho uno.\n"
+            . "- No retomes mensajes antiguos («espera», una pregunta que quedó en el aire) salvo que ella vuelva a sacarlo.\n"
+            . "- Habla de personas, no de piezas: «Nuria lo ha apuntado», nunca «la herramienta» ni detalles de cómo funcionas por dentro.\n"
+            . "- Si el historial dice que pulsó «Deshacer», eso ya no existe: no lo des por hecho ni ofrezcas rehacerlo salvo que lo pida.\n"
             . "- No puedes enviar nada a clientes ni a terceros, ni crear reuniones. Si te lo piden, di que eso aún se aprueba desde la bandeja de la oficina.\n"
             . "- Si te pide que recuerdes algo, usa remember. Si no hace falta preguntar a nadie (un saludo, una charla), contesta tú.\n"
             . "- Formato de Chat: corto, *negrita* con asteriscos, listas con •, enlaces tal cual. Sin emojis. Español de España, tuteando.\n"
@@ -159,6 +176,7 @@ final class Orchestrator {
             . "- Si la pregunta toca dos temas (p. ej. «qué acordamos con MOM y qué tareas salieron»), pregunta a las dos áreas, cada una por lo suyo.\n"
             . "- Si un área te dice que eso no es lo suyo, pregunta a la que encaje según este mapa; no insistas a la misma.\n"
             . "- Todavía NO lo sabe nadie: tu calendario y huecos, tus correos, archivos sueltos de Drive, " . ( in_array('campanas', array_map(fn($a) => $a->slug(), $this->agents()), true) ? '' : 'campañas de Ads, ' ) . "datos de contacto de clientes. Si te lo piden, dilo claro y sin dar vueltas.\n"
+            . $this->images_note()
             . $this->clients_directory()
             . (string) apply_filters('madoficina_assistant_context', '', $this->ctx)
             . ($facts ? "\n\nLo que te ha pedido recordar:\n" . implode("\n", array_map(fn($f) => '- [' . $f['id'] . '] ' . $f['text'], $facts)) : '');

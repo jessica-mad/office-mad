@@ -108,7 +108,18 @@ final class Finance extends Specialist {
         if ( ! empty($in['number']) ) { $where[] = 'i.number LIKE %s'; $args[] = '%' . $wpdb->esc_like((string) $in['number']) . '%'; }
         $sql = 'SELECT i.* FROM ' . Schema::table('invoices') . ' i WHERE ' . implode(' AND ', $where) . ' ORDER BY i.issue_date DESC, i.seq DESC, i.id DESC LIMIT ' . self::limit($in['limit'] ?? 0);
         $rows = $wpdb->get_results($args ? $wpdb->prepare($sql, ...$args) : $sql, ARRAY_A);
-        return ['invoices' => array_map(fn($r) => [
+        $note = null;
+        if ( ! $rows && ! empty($in['client']) && ($ids = self::clients_matching($in['client'])) && count($ids) === 1 ) {
+            // The office client exists but its fiscal name is not joined to it yet: look by that name and say so.
+            $c = \MAD_Oficina\Core\Repo\Clients::get($ids[0]);
+            $where = array_map(fn($w) => $w === 'i.client_id IN (' . $ids[0] . ')' ? 'i.client_name LIKE %s' : $w, $where);
+            array_unshift($args, '%' . $wpdb->esc_like((string) $c['name']) . '%');
+            $sql = 'SELECT i.* FROM ' . Schema::table('invoices') . ' i WHERE ' . implode(' AND ', $where) . ' ORDER BY i.issue_date DESC, i.seq DESC, i.id DESC LIMIT ' . self::limit($in['limit'] ?? 0);
+            $rows = $wpdb->get_results($wpdb->prepare($sql, ...$args), ARRAY_A);
+            $note = sprintf('%1$s no tiene datos fiscales unidos en Facturación, así que sus facturas no cuelgan de ese cliente. %2$s Para arreglarlo: Facturación → Clientes → «Unir» el nombre fiscal con %1$s.', self::client_label($ids[0]),
+                $rows ? sprintf('Las he encontrado por el nombre «%s».', $c['name']) : sprintf('Tampoco hay facturas a nombre de «%s».', $c['name']));
+        }
+        return array_filter(['note' => $note]) + ['invoices' => array_map(fn($r) => [
             'id' => (int) $r['id'], 'number' => $r['number'] ?: 'borrador', 'series' => $r['series'], 'date' => $r['issue_date'], 'client' => $r['client_name'],
             'base' => (float) $r['base'], 'vat' => (float) $r['vat'], 'irpf' => (float) $r['irpf'], 'total' => (float) $r['total'], 'currency' => $r['currency'],
             'paid' => (bool) $r['paid'], 'paid_at' => $r['paid_at'] ? substr($r['paid_at'], 0, 10) : null, 'due' => $r['due_date'],

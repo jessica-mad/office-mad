@@ -437,8 +437,29 @@ class ChatTest extends MADOF_TestCase {
         preg_match('/"key":"token","value":"(f:[A-Za-z0-9]+)"/', $this->last_to_jessica(), $m);
         $this->assertNotEmpty($m[1] ?? '', 'with «Deshacer»');
         $this->assertStringContainsString('solo lo puede deshacer Jessica', $this->click('task_undo', ['token' => $m[1]], 'liz@imad.example')->get_data()['text']);
-        $this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example');
+        $card = wp_json_encode($this->click('task_undo', ['token' => $m[1]], 'jessica@imad.example')->get_data());
         $this->assertSame(0, (int) \MAD_Oficina\Billing\Invoices::get($inv)['paid']);
+        $this->assertStringContainsString('Finanzas: 1 cambio deshecho', $card);
+        $h = \MAD_Oficina\Chat\Memory::history('jessica@imad.example');
+        $this->assertStringContainsString('Deshecho, ya no existe', end($h)['text'], 'Nora knows it was undone');
+    }
+
+    public function test_finanzas_says_when_a_client_has_no_fiscal_data_joined(){
+        $this->key();
+        $wp = $this->factory()->user->create(['role' => 'administrator', 'user_email' => 'jessica@imad.example']);
+        get_user_by('id', $wp)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        $GLOBALS['wpdb']->insert(Schema::table('invoices'), ['series' => 'F', 'year' => 2026, 'client_id' => null, 'client_name' => 'Lanas del Norte SL', 'status' => 'sent', 'base' => 100, 'total' => 121,
+            'number' => 'F-2026-030', 'seq' => 30, 'issue_date' => '2026-10-02', 'created_at' => '2026-10-02 00:00:00', 'updated_at' => '2026-10-02 00:00:00']);
+        $this->claude = [
+            ['tool' => 'ask_finanzas', 'input' => ['question' => 'Última factura de LN']],
+            ['tool' => 'find_invoices', 'input' => ['client' => 'LN', 'limit' => 1]],
+            ['text' => 'F-2026-030'],
+            ['text' => 'La F-2026-030.'],
+        ];
+        $this->say('¿cuál es la última factura de Lanas?');
+        $found = $this->tool_result($this->prompts[2]);
+        $this->assertStringContainsString('F-2026-030', $found, 'found by the fiscal name');
+        $this->assertStringContainsString('Unir', $found, 'and says how to join it');
     }
 
     public function test_jessica_hands_tasks_to_liz_and_decides_when_she_is_told(){

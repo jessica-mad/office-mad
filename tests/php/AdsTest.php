@@ -349,6 +349,7 @@ class AdsTest extends MADOF_TestCase {
         $this->assertCount(count($letterA), $r['saved']);
         foreach ( $letterA as $id ) $this->assertSame(['Convertía a 6 € y sobraba presupuesto', 'chat'], [Changes::get($id)['reason'], Changes::get($id)['reason_source']]);
         $this->assertCount(1, $agent->undo);
+        $this->assertSame('Bitácora de campañas', \MAD_Oficina\Billing\FinanceUndo::area($agent->undo[0]), 'the «Deshecho» card names the right area');
         \MAD_Oficina\Billing\FinanceUndo::restore($agent->undo[0]);
         $this->assertNull(Changes::get($letterA[0])['reason'], '«Deshacer» leaves it as it was');
         $this->assertTrue(in_array('campanas', array_map(fn($a) => $a->slug(), (new \MAD_Oficina\Chat\Orchestrator([], ['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'x'], null))->agents()), true));

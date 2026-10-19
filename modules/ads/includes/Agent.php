@@ -30,10 +30,11 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
         return "- Puedes ESCRIBIR en la bitácora: el porqué de cambios que ya están (set_reason) y cambios que Jessica te cuenta que hizo ella (log_change). No tocas campañas: todo es solo lectura hacia Google y Meta.\n"
             . "- Si responde a tu mensaje diario con letras («la A porque…»), usa daily_list para saber qué cambios son cada letra y guarda cada motivo en los suyos. Si de una dice que no lo sabe, no escribas nada en esa.\n"
             . "- Si cuenta un cambio («subí el presupuesto de Rebajas en LCS porque…»): busca primero en la bitácora (find_changes, ese cliente, últimos días). Si ya está, ponle el motivo; si no está, apúntalo con log_change (queda también esperando a que aparezca el cambio real para unirle el motivo).\n"
-            . "- El motivo se guarda con sus palabras, resumido si es largo, sin inventar. Solo marca client_visible si lo pide.\n"
+            . "- El motivo y el «qué cambió» se guardan con SUS palabras, resumidos si son largos. No añadas nada que no dijo: ni detalles deducidos, ni excepciones, ni cifras de la bitácora o de las campañas. Si falta un dato, déjalo fuera o pregúntalo. Solo marca client_visible si lo pide.\n"
             . "- Para «por qué hicimos X»: find_changes y responde con fecha, qué cambió, quién y el motivo apuntado (o «sin motivo apuntado»). El antes/después es una comparación de periodos, no una prueba de causa: dilo así si lo das.\n"
             . "- Si el mensaje dice que adjunta imágenes, van a la bitácora: con log_change pon attach_images=true; si el cambio ya estaba, usa attach_images con sus ids (o la letra). Si no está claro a qué cambio van, pregunta y no adjuntes.\n"
-            . "- Di exactamente qué apuntaste y dónde (cliente, campaña, fecha).\n";
+            . "- Di exactamente qué apuntaste y dónde (cliente, campaña, fecha), en pocas líneas.\n"
+            . ( empty($this->ctx['images']) ? "- Este mensaje no trae imágenes.\n" : sprintf("- Este mensaje trae %d imagen(es) para la bitácora: adjúntalas (attach_images, o attach_images=true en log_change) al cambio que diga la pregunta.\n", count((array) $this->ctx['images'])) );
     }
 
     protected function tools(){

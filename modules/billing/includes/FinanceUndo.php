@@ -39,6 +39,15 @@ final class FinanceUndo {
         return $token;
     }
 
+    /** Which area a token's changes belong to, for the «Deshecho» card: Campañas (change log) or Finanzas. */
+    public static function area($token){
+        $key = preg_replace('/[^A-Za-z0-9]/', '', substr((string) $token, 2));
+        $data = $key !== '' ? get_transient('madof_fin_undo_' . $key) : false;
+        if ( ! is_array($data) ) return __('Finanzas', 'mad-oficina');
+        $tables = array_keys(array_merge($data['_created'] ?? [], array_diff_key($data, ['_created' => 1])));
+        return $tables && ! array_diff($tables, ['ad_changes']) ? __('Bitácora de campañas', 'mad-oficina') : __('Finanzas', 'mad-oficina');
+    }
+
     /** @return int|\WP_Error rows restored */
     public static function restore($token){
         global $wpdb;

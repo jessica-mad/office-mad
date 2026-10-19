@@ -104,6 +104,7 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
         $ago = fn($k) => ! empty($ast[$k]['at']) ? sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $ast[$k]['at'])) : __('nunca', 'mad-oficina');
         if ( $ast ) : ?>
             <p><?php echo esc_html(sprintf(__('Último mensaje que entendí: recibido %1$s · contestado %2$s', 'mad-oficina'), $ago('received'), $ago('answered')) . ( ! empty($ast['answered']['detail']) ? ' (' . $ast['answered']['detail'] . ')' : '') . '.'); ?>
+            <?php if ( ! empty($ast['images']) ) echo '<br>' . esc_html(sprintf(__('Últimas imágenes (%1$s): %2$s.', 'mad-oficina'), $ago('images'), $ast['images']['detail'])); ?>
             <?php if ( ! empty($ast['error']) && (int) $ast['error']['at'] >= (int) ($ast['answered']['at'] ?? 0) ) : ?>
                 <br><span class="madof-warn"><?php echo esc_html(sprintf(__('Último error (%1$s): %2$s', 'mad-oficina'), $ago('error'), $ast['error']['detail'])); ?></span>
             <?php endif; ?></p>

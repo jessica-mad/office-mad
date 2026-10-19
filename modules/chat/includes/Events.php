@@ -270,9 +270,10 @@ final class Events {
                     // Finanzas (what Amparo changed): only Jessica, and only if Finanzas is hers.
                     $uid = $email === $this->manager_email() ? Assistant::manager_user_id($email) : 0;
                     if ( ! $uid || ! class_exists('MAD_Oficina\\Billing\\FinanceUndo') || ! \MAD_Oficina\Core\FinanceAccess::can($uid) ) return $this->text(__('Eso solo lo puede deshacer Jessica.', 'mad-oficina'));
+                    $area = \MAD_Oficina\Billing\FinanceUndo::area($token);
                     $n = \MAD_Oficina\Billing\FinanceUndo::restore($token);
                     if ( is_wp_error($n) ) return $this->text($n->get_error_message());
-                    $r['changed'][] = ['title' => sprintf(__('Finanzas: %d cambios deshechos', 'mad-oficina'), $n)];
+                    $r['changed'][] = ['title' => sprintf(_n('%1$s: %2$d cambio deshecho', '%1$s: %2$d cambios deshechos', $n, 'mad-oficina'), $area, $n)];
                     continue;
                 }
                 $one = TaskList::restore($token, $email, $this->manager_email());
@@ -280,6 +281,8 @@ final class Events {
                 $r['changed'] = array_merge($r['changed'], $one['changed']); $r['denied'] = array_merge($r['denied'], $one['denied']);
             }
             if ( $r['denied'] && ! $r['changed'] ) return $this->text(__('Esta tarea no es tuya.', 'mad-oficina'));
+            // Nora reads the conversation: she must know this no longer exists.
+            Memory::add($email, '(Pulsé «Deshacer» en tu último cambio.)', 'Deshecho, ya no existe: ' . implode('; ', array_map(fn($t) => $t['title'], $r['changed'])) . '.');
             return $this->update(Cards::card('undo-' . substr(md5((string) $params['token']), 0, 8), __('Deshecho', 'mad-oficina'), '', [
                 ['textParagraph' => ['text' => esc_html__('Lo he dejado como estaba:', 'mad-oficina') . '<br>' . implode('<br>', array_map(fn($t) => '• ' . esc_html($t['title']), $r['changed']))]],
             ]));

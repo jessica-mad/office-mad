@@ -102,14 +102,15 @@ final class Assistant {
         // A long voice note (several minutes) is several thousand characters: all of it reaches her.
         $text = mb_substr(trim(wp_strip_all_tags((string) $text)), 0, $heard !== '' ? 12000 : 4000);
         // Images (a screenshot of a campaign…): kept aside for the area that knows where they go.
-        $stashed = [];
+        $stashed = []; $why = '';
         foreach ( array_slice($images, 0, 5) as $img ) {
             $d = $this->api ? $this->api->download($img['resource'] ?? '', 8 * MB_IN_BYTES) : null;
-            if ( ! is_array($d) ) continue;
+            if ( ! is_array($d) ) { $why = is_wp_error($d) ? $d->get_error_message() : 'sin conexión con Chat'; continue; }
             $token = apply_filters('madoficina_chat_image', null, $d['body'], (string) ($img['name'] ?? ''));
-            if ( is_string($token) ) $stashed[] = $token;
+            is_string($token) ? $stashed[] = $token : $why = 'no se pudo guardar';
         }
         if ( $images ) {
+            self::status('images', sprintf('%d recibidas, %d guardadas', count($images), count($stashed)) . ($why !== '' ? ' (' . $why . ')' : ''));
             if ( ! $stashed ) return $this->reply($member, ['text' => __('He recibido la imagen, pero no sé dónde guardarla: por ahora solo adjunto imágenes a la bitácora de campañas (módulo Campañas).', 'mad-oficina')]);
             $text = trim($text . "\n" . sprintf(_n('(Adjunta %d imagen.)', '(Adjunta %d imágenes.)', count($stashed), 'mad-oficina'), count($stashed)));
         }
