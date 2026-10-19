@@ -125,7 +125,14 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
         <?php $vl = get_option(\MAD_Oficina\Chat\Transcriber::LAST); if ( is_array($vl) ) : ?>
             <p class="<?php echo $vl['ok'] ? 'description' : 'madof-warn'; ?>"><?php echo esc_html($vl['ok']
                 ? sprintf(__('Última transcripción bien (%1$s, modelo %2$s), %3$s.', 'mad-oficina'), $vl['audio'], $vl['how'], sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $vl['at'])))
-                : sprintf(__('Última transcripción fallida (%1$s), %2$s. Intentos: %3$s', 'mad-oficina'), $vl['audio'], sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $vl['at'])), implode(' | ', (array) ($vl['tried'] ?? [])))); ?></p>
+                : sprintf(__('Última transcripción fallida (%1$s), %2$s. Intentos: %3$s', 'mad-oficina'), $vl['audio'], sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $vl['at'])), implode(' | ', (array) ($vl['tried'] ?? [])))); ?>
+            <?php if ( ! $vl['ok'] && ! empty($vl['kept']) && (int) $vl['at'] > time() - WEEK_IN_SECONDS ) : ?>
+                <br><a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_voice_failed'), 'madof_voice_failed')); ?>"><?php esc_html_e('Descargar ese audio para revisarlo', 'mad-oficina'); ?></a>
+            <?php endif; ?></p>
+        <?php endif; ?>
+        <?php if ( $shape ) : ?>
+            <details class="madof-more"><summary><?php esc_html_e('Qué trae el último audio de Chat (campos, sin contenido)', 'mad-oficina'); ?></summary>
+                <pre class="madof-pre"><?php echo esc_html(wp_json_encode($shape['message'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)); ?></pre></details>
         <?php endif; ?>
     </section>
 

@@ -94,7 +94,8 @@ final class Transcriber {
         $head = substr((string) $bytes, 0, 16);
         if ( substr($head, 4, 4) === 'ftyp' ) {
             $m = new Mp4Audio($bytes);
-            return 'm4a/mp4 (' . ($m->codec() ?: '¿?') . ($m->fragmented() ? ', fragmentado' : '') . ')';
+            $aac = $m->codec() === 'mp4a' ? $m->aac_profile() : '';
+            return 'm4a/mp4 (' . ($m->codec() ?: '¿?') . ($aac ? ', ' . $aac : '') . ($m->fragmented() ? ', fragmentado' : '') . ')';
         }
         if ( substr($head, 0, 4) === 'OggS' ) return 'ogg (opus)';
         if ( substr($head, 0, 4) === "\x1A\x45\xDF\xA3" ) return 'webm';
@@ -157,9 +158,39 @@ final class Transcriber {
             }
             $tried[] = 'ogg: ' . (int) ($r->get_error_data()['status'] ?? 0) . ' ' . $r->get_error_message();
         }
-        update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
+        update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried, 'kept' => self::keep_failed($file['body'])], false);
         return new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (formato %1$s). Google dice: %2$s. Mientras lo miramos, escríbemelo; el detalle está en Chat → ajustes.', 'mad-oficina'),
             $audio, $tried ? preg_replace('/^[a-z_0-9]+: /', '', end($tried)) : '—'));
+    }
+
+    /** The last audio Google could not read, kept privately so it can be looked at (one at a time, a week). */
+    private static function keep_failed($bytes){
+        $up = wp_upload_dir();
+        $dir = trailingslashit($up['basedir']) . 'mad-oficina/voice';
+        if ( ! is_dir($dir) ) {
+            wp_mkdir_p($dir);
+            @file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
+            @file_put_contents($dir . '/index.php', "<?php // Silence is golden.\n");
+        }
+        foreach ( glob($dir . '/failed-*') ?: [] as $old ) @unlink($old);
+        $name = 'failed-' . wp_generate_password(20, false) . '.m4a';
+        return file_put_contents($dir . '/' . $name, $bytes) ? $name : '';
+    }
+
+    /** admin-post: download that audio (office only). */
+    public static function serve_failed(){
+        if ( ! current_user_can(\MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        check_admin_referer('madof_voice_failed');
+        $last = get_option(self::LAST);
+        $up = wp_upload_dir();
+        $path = trailingslashit($up['basedir']) . 'mad-oficina/voice/' . basename((string) ($last['kept'] ?? ''));
+        if ( empty($last['kept']) || ! is_readable($path) || (int) $last['at'] < time() - WEEK_IN_SECONDS ) wp_die(esc_html__('Ese audio ya no está.', 'mad-oficina'), 404);
+        nocache_headers();
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="audio-que-fallo.m4a"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        exit;
     }
 
     /** Sample rate and channels of the AAC track of an m4a, read from its «mp4a» entry. @return array{rate?:int, channels?:int} */

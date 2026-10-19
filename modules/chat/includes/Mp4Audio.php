@@ -52,6 +52,28 @@ final class Mp4Audio {
 
     public function fragmented(){ return (bool) $this->find('/moof'); }
 
+    /** The AAC flavour (LC, HE-AAC, ELD…) and its sample rate, from the decoder config in «esds». */
+    public function aac_profile(){
+        $i = strpos($this->b, 'esds');
+        if ( $i === false ) return '';
+        $d = substr($this->b, $i + 8, 120); // after version/flags
+        $p = strpos($d, "\x05"); // DecoderSpecificInfo tag
+        while ( $p !== false ) {
+            $q = $p + 1; $len = 0;
+            for ( $k = 0; $k < 4; $k++ ) { $c = ord($d[$q++] ?? "\0"); $len = ($len << 7) | ($c & 0x7F); if ( ! ($c & 0x80) ) break; }
+            if ( $len >= 2 && $len < 64 ) {
+                $bits = (ord($d[$q]) << 8) | ord($d[$q + 1]);
+                $aot = $bits >> 11; $sr = ($bits >> 7) & 0x0F; $ch = ($bits >> 3) & 0x0F;
+                if ( $aot === 31 ) return 'AAC extendido';
+                $names = [1 => 'AAC Main', 2 => 'AAC-LC', 5 => 'HE-AAC', 23 => 'AAC-LD', 29 => 'HE-AACv2', 39 => 'AAC-ELD'];
+                $rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+                return ($names[$aot] ?? 'AAC tipo ' . $aot) . (isset($rates[$sr]) ? ' ' . $rates[$sr] . ' Hz' : '') . ($ch ? ', ' . $ch . ' canal' . ($ch > 1 ? 'es' : '') : '');
+            }
+            $p = strpos($d, "\x05", $p + 1);
+        }
+        return '';
+    }
+
     /** @return string[] the audio frames, in order */
     private function samples(){
         $out = [];

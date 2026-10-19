@@ -76,6 +76,7 @@ return new class($core) implements MAD_Oficina_Module {
 
         add_action('madoficina_client_edit_sections', [$this, 'render_client_section']);
         foreach ( ['chat_settings', 'chat_test', 'client_chat_targets', 'chat_assistant'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        add_action('admin_post_madof_voice_failed', ['MAD_Oficina\\Chat\\Transcriber', 'serve_failed']); // the audio Google could not read, to look at it
     }
 
     public function admin_init(){}
