@@ -39,6 +39,17 @@ final class Transcriber {
         return ['text' => trim((string) ($message['argumentText'] ?? $message['text'] ?? '')), 'transcript' => $transcript, 'audio' => $audio];
     }
 
+    /** Images sent with a message (screenshots…). @return array[] [resource, name] */
+    public static function images_of(array $message){
+        $out = [];
+        foreach ( (array) ($message['attachment'] ?? []) as $a ) {
+            $type = strtolower((string) ($a['contentType'] ?? ''));
+            $resource = (string) ($a['attachmentDataRef']['resourceName'] ?? '');
+            if ( $resource !== '' && strpos($type, 'image/') === 0 ) $out[] = ['resource' => $resource, 'name' => (string) ($a['contentName'] ?? '')];
+        }
+        return array_slice($out, 0, 5);
+    }
+
     /** Keeps the structure (field names and types, no content) of the last voice message, to see what Google sends. */
     private static function note_shape(array $message){
         $shape = function($v) use (&$shape){

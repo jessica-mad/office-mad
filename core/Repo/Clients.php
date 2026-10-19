@@ -102,6 +102,7 @@ final class Clients {
         foreach ( ['invoices', 'billing_profiles', 'billing_items', 'quotes', 'suppliers', 'expenses'] as $table ) {
             $wpdb->update(Schema::table($table), ['client_id' => null], ['client_id' => $id]);
         }
+        do_action('madoficina_before_client_delete', $id); // modules remove their files
         // Ad accounts belong to the client's business: unlinked; the log of changes and reasons goes.
         $wpdb->update(Schema::table('ad_accounts'), ['client_id' => null], ['client_id' => $id]);
         $wpdb->delete(Schema::table('ad_changes'), ['client_id' => $id]);

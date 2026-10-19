@@ -58,6 +58,16 @@ return new class($core) implements MAD_Oficina_Module {
 
         foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes', 'ads_meta_import', 'ads_manual'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         add_action('wp_ajax_madof_ads_reason', [$this, 'ajax_reason']);
+        add_action('wp_ajax_madof_ads_attach', [$this, 'ajax_attach']);
+        add_action('wp_ajax_madof_ads_detach', [$this, 'ajax_detach']);
+        add_action('admin_post_madof_ads_file', ['MAD_Oficina\\Ads\\Attachments', 'serve']);
+        // Images sent to Nora by Chat wait here until Nuria knows which change they belong to.
+        add_filter('madoficina_chat_image', fn($token, $bytes, $name) => is_string($token) ? $token : ( is_wp_error($t = \MAD_Oficina\Ads\Attachments::stash($bytes, $name)) ? null : $t ), 10, 3);
+        add_action('madoficina_tick', ['MAD_Oficina\\Ads\\Attachments', 'clean_stash']);
+        add_action('madoficina_before_client_delete', function($client_id){
+            global $wpdb;
+            \MAD_Oficina\Ads\Attachments::purge(array_map('intval', $wpdb->get_col($wpdb->prepare('SELECT id FROM ' . \MAD_Oficina\Ads\Changes::table() . ' WHERE client_id = %d AND attachments IS NOT NULL', $client_id))));
+        });
     }
 
     public function admin_init(){}
@@ -158,6 +168,34 @@ return new class($core) implements MAD_Oficina_Module {
                 date_i18n('j M', strtotime($r['from'])), date_i18n('j M', strtotime($r['to'])), $r['changes'] ? ' · ' . sprintf(_n('%d cambio a explicar en la bitácora', '%d cambios a explicar en la bitácora', $r['changes'], 'mad-oficina'), $r['changes']) : '');
         }
         $this->back(['tab' => 'meta'], implode(' · ', array_merge($ok, $errors)) ?: __('No he recibido ningún archivo.', 'mad-oficina'), $errors ? 'error' : 'success');
+    }
+
+    private function ajax_guard(){
+        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_send_json_error(['message' => __('No tienes permisos suficientes.', 'mad-oficina')], 403);
+        if ( ! check_ajax_referer('madof_ads_reason', '_ajax_nonce', false) ) wp_send_json_error(['message' => __('La página ha caducado: recárgala.', 'mad-oficina')], 403);
+    }
+
+    /** Images of a change (the first of its group), uploaded from the log without reloading. */
+    public function ajax_attach(){
+        $this->ajax_guard();
+        $id = absint($_POST['change'] ?? 0);
+        $files = $_FILES['images'] ?? null;
+        if ( ! $id || ! $files ) wp_send_json_error(['message' => __('Elige alguna imagen.', 'mad-oficina')], 400);
+        $out = []; $errors = [];
+        foreach ( (array) $files['tmp_name'] as $i => $tmp ) {
+            if ( ! $tmp || ! is_uploaded_file($tmp) ) continue;
+            $r = \MAD_Oficina\Ads\Attachments::add($id, (string) file_get_contents($tmp), (string) ((array) $files['name'])[$i], get_current_user_id());
+            if ( is_wp_error($r) ) $errors[] = $r->get_error_message();
+            else $out[] = ['change' => $id, 'f' => $r['f'], 'name' => $r['name'], 'url' => \MAD_Oficina\Ads\Attachments::url($id, $r['f'])];
+        }
+        if ( ! $out ) wp_send_json_error(['message' => implode(' ', $errors) ?: __('No he podido subirlas.', 'mad-oficina')], 400);
+        wp_send_json_success(['images' => $out, 'message' => $errors ? implode(' ', $errors) : __('Adjuntadas.', 'mad-oficina')]);
+    }
+
+    public function ajax_detach(){
+        $this->ajax_guard();
+        $ok = \MAD_Oficina\Ads\Attachments::remove(absint($_POST['change'] ?? 0), basename((string) wp_unslash($_POST['f'] ?? '')));
+        $ok ? wp_send_json_success(['message' => __('Quitada.', 'mad-oficina')]) : wp_send_json_error(['message' => __('Esa imagen ya no está.', 'mad-oficina')], 404);
     }
 
     /** The why, typed in the log: saved without reloading. */

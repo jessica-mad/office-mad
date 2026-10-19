@@ -100,6 +100,14 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
                 <?php if ( $first['reason_source'] && $first['reason_source'] !== 'manual' ) echo '<small class="madof-muted">' . esc_html(sprintf(__('Motivo tomado de: %s', 'mad-oficina'), ['chat' => __('lo que le dijiste en Chat', 'mad-oficina'), 'meeting' => __('el acta de una reunión', 'mad-oficina')][$first['reason_source']] ?? $first['reason_source'])) . '</small>'; ?>
             </form>
             <?php endif; ?>
+            <div class="madof-ads-images" data-change="<?php echo (int) $first['id']; ?>">
+                <?php foreach ( $g as $r ) foreach ( \MAD_Oficina\Ads\Attachments::of($r['id']) as $a ) : $u = \MAD_Oficina\Ads\Attachments::url($r['id'], $a['f']); ?>
+                    <figure><a href="<?php echo esc_url($u); ?>" target="_blank" rel="noopener"><img src="<?php echo esc_url($u); ?>" alt="<?php echo esc_attr($a['name']); ?>" loading="lazy"></a>
+                        <button type="button" class="madof-ads-detach" data-change="<?php echo (int) $r['id']; ?>" data-f="<?php echo esc_attr($a['f']); ?>" aria-label="<?php esc_attr_e('Quitar imagen', 'mad-oficina'); ?>">×</button></figure>
+                <?php endforeach; ?>
+                <label class="madof-ads-attach"><input type="file" accept="image/*" multiple class="screen-reader-text"> <span><?php esc_html_e('+ Adjuntar imágenes', 'mad-oficina'); ?></span></label>
+                <span class="madof-ads-imgmsg" role="status" aria-live="polite"></span>
+            </div>
         </li>
     <?php endforeach; ?>
     </ol>
@@ -118,6 +126,31 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
           out.textContent = r.success ? r.data.message : ((r.data && r.data.message) || 'Error');
           f.closest('.madof-ads-change').classList.toggle('has-reason', !!f.reason.value.trim());
         }, function () { out.textContent = 'Error'; });
+      });
+      var post = function (fd) { fd.append('_ajax_nonce', nonce); return fetch(ajax, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }); };
+      document.addEventListener('change', function (e) {
+        if (!e.target.closest('.madof-ads-attach')) return;
+        var box = e.target.closest('.madof-ads-images'), msg = box.querySelector('.madof-ads-imgmsg'), fd = new FormData();
+        fd.append('action', 'madof_ads_attach'); fd.append('change', box.dataset.change);
+        [].forEach.call(e.target.files, function (f) { fd.append('images[]', f); });
+        msg.textContent = '…';
+        post(fd).then(function (r) {
+          msg.textContent = r.success ? r.data.message : ((r.data && r.data.message) || 'Error');
+          if (!r.success) return;
+          r.data.images.forEach(function (i) {
+            var fig = document.createElement('figure'), a = document.createElement('a'), img = document.createElement('img'), x = document.createElement('button');
+            a.href = i.url; a.target = '_blank'; a.rel = 'noopener'; img.src = i.url; img.alt = i.name; a.appendChild(img);
+            x.type = 'button'; x.className = 'madof-ads-detach'; x.dataset.change = i.change; x.dataset.f = i.f; x.textContent = '×'; x.setAttribute('aria-label', 'Quitar imagen');
+            fig.appendChild(a); fig.appendChild(x); box.insertBefore(fig, box.querySelector('.madof-ads-attach'));
+          });
+          e.target.value = '';
+        }, function () { msg.textContent = 'Error'; });
+      });
+      document.addEventListener('click', function (e) {
+        var x = e.target.closest('.madof-ads-detach');
+        if (!x || !confirm(<?php echo wp_json_encode(__('¿Quitar esta imagen de la bitácora?', 'mad-oficina')); ?>)) return;
+        var fd = new FormData(); fd.append('action', 'madof_ads_detach'); fd.append('change', x.dataset.change); fd.append('f', x.dataset.f);
+        post(fd).then(function (r) { if (r.success) x.closest('figure').remove(); });
       });
     })();
     </script>

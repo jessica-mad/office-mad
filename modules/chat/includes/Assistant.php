@@ -91,13 +91,27 @@ final class Assistant {
         $this->progress = new Progress($this->api, $this->messenger->dm_space($member));
 
         $heard = '';
-        if ( $voice ) {
+        $images = (array) ($voice['images'] ?? []);
+        unset($voice['images']);
+        if ( ! empty($voice['audio']) || ! empty($voice['transcript']) ) {
             if ( ! $this->api ) return $this->reply($member, ['text' => __('El bot no está configurado.', 'mad-oficina')]);
             $text = Transcriber::text_of($this->api, $voice + ['text' => '', 'transcript' => null, 'audio' => null]);
             if ( is_wp_error($text) ) return $this->reply($member, ['text' => $text->get_error_message()]);
             $heard = $text;
         }
         $text = mb_substr(trim(wp_strip_all_tags((string) $text)), 0, 2000);
+        // Images (a screenshot of a campaign…): kept aside for the area that knows where they go.
+        $stashed = [];
+        foreach ( array_slice($images, 0, 5) as $img ) {
+            $d = $this->api ? $this->api->download($img['resource'] ?? '', 8 * MB_IN_BYTES) : null;
+            if ( ! is_array($d) ) continue;
+            $token = apply_filters('madoficina_chat_image', null, $d['body'], (string) ($img['name'] ?? ''));
+            if ( is_string($token) ) $stashed[] = $token;
+        }
+        if ( $images ) {
+            if ( ! $stashed ) return $this->reply($member, ['text' => __('He recibido la imagen, pero no sé dónde guardarla: por ahora solo adjunto imágenes a la bitácora de campañas (módulo Campañas).', 'mad-oficina')]);
+            $text = trim($text . "\n" . sprintf(_n('(Adjunta %d imagen.)', '(Adjunta %d imágenes.)', count($stashed), 'mad-oficina'), count($stashed)));
+        }
         if ( $text === '' ) return $this->reply($member, ['text' => __('No te he entendido. ¿Me lo repites?', 'mad-oficina')]);
         $prefix = $heard !== '' ? sprintf(__('He oído: «%s»', 'mad-oficina'), mb_substr($heard, 0, 400)) : '';
 
@@ -123,6 +137,7 @@ final class Assistant {
         $ctx = [
             'email' => $email, 'is_manager' => $is_manager, 'member' => $member, 'manager_email' => $this->manager_email,
             'user_id' => $member ? (int) $member['wp_user_id'] : self::manager_user_id($email),
+            'images' => $stashed,
         ];
         $boss = new Orchestrator($this->settings, $ctx, $this->progress);
         $answer = $boss->answer($text);

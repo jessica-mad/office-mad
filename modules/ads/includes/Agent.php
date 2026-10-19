@@ -22,7 +22,7 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
     }
 
     protected function tool_label($tool){
-        return ['find_changes' => 'está mirando la bitácora', 'daily_list' => 'está mirando su lista de hoy', 'set_reason' => 'está apuntando el porqué', 'log_change' => 'está apuntando el cambio en la bitácora',
+        return ['attach_images' => 'está adjuntando las imágenes', 'find_changes' => 'está mirando la bitácora', 'daily_list' => 'está mirando su lista de hoy', 'set_reason' => 'está apuntando el porqué', 'log_change' => 'está apuntando el cambio en la bitácora',
             'campaigns' => 'está mirando las campañas'][$tool] ?? '';
     }
 
@@ -32,6 +32,7 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
             . "- Si cuenta un cambio («subí el presupuesto de Rebajas en LCS porque…»): busca primero en la bitácora (find_changes, ese cliente, últimos días). Si ya está, ponle el motivo; si no está, apúntalo con log_change (queda también esperando a que aparezca el cambio real para unirle el motivo).\n"
             . "- El motivo se guarda con sus palabras, resumido si es largo, sin inventar. Solo marca client_visible si lo pide.\n"
             . "- Para «por qué hicimos X»: find_changes y responde con fecha, qué cambió, quién y el motivo apuntado (o «sin motivo apuntado»). El antes/después es una comparación de periodos, no una prueba de causa: dilo así si lo das.\n"
+            . "- Si el mensaje dice que adjunta imágenes, van a la bitácora: con log_change pon attach_images=true; si el cambio ya estaba, usa attach_images con sus ids (o la letra). Si no está claro a qué cambio van, pregunta y no adjuntes.\n"
             . "- Di exactamente qué apuntaste y dónde (cliente, campaña, fecha).\n";
     }
 
@@ -49,9 +50,12 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
              'handler' => [$this, 'set_reason']],
             ['name' => 'log_change', 'description' => 'Apunta en la bitácora un cambio que hizo Jessica (con su porqué) y deja el motivo esperando al cambio real cuando se lea de Google o Meta.',
              'input_schema' => self::obj(['client' => ['type' => 'string'], 'platform' => ['type' => 'string', 'enum' => ['google', 'meta', 'other']], 'campaign' => ['type' => 'string', 'description' => 'Nombre (o parte) de la campaña'],
-                'what' => ['type' => 'string', 'description' => 'Qué cambió, breve: «presupuesto 20 → 35 €/día»'], 'reason' => ['type' => 'string'], 'date' => ['type' => 'string', 'description' => 'AAAA-MM-DD; hoy si no se dice']],
+                'what' => ['type' => 'string', 'description' => 'Qué cambió, breve: «presupuesto 20 → 35 €/día»'], 'reason' => ['type' => 'string'], 'date' => ['type' => 'string', 'description' => 'AAAA-MM-DD; hoy si no se dice'],
+                'attach_images' => ['type' => 'boolean', 'description' => 'Adjuntar las imágenes que ha mandado con el mensaje']],
                 ['client', 'what', 'reason']),
              'handler' => [$this, 'log_change']],
+            ['name' => 'attach_images', 'description' => 'Adjunta a un cambio de la bitácora las imágenes que Jessica ha mandado con este mensaje (por id del cambio o letra del mensaje diario).',
+             'input_schema' => self::obj(['id' => ['type' => 'integer'], 'letter' => ['type' => 'string']]), 'handler' => [$this, 'attach_images']],
             ['name' => 'campaigns', 'description' => 'Campañas de un cliente con estado, presupuesto y los últimos 30 días (gasto, clics, conversiones, CPA) y tus notas de cómo se creó.',
              'input_schema' => self::obj(['client' => ['type' => 'string']], ['client']), 'handler' => [$this, 'campaigns']],
         ];
@@ -67,7 +71,7 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
     private static function row(array $c){
         return ['id' => $c['id'], 'date' => substr($c['changed_at'], 0, 16), 'client' => $c['client_code'], 'platform' => Accounts::PLATFORMS[$c['platform']] ?? $c['platform'],
             'campaign' => $c['campaign_name'] ?: $c['object_name'], 'change' => $c['summary'], 'who' => $c['actor'] ?: null, 'automatic' => (bool) $c['automatic'],
-            'source' => $c['source'], 'reason' => $c['reason'], 'before_after' => Changes::effect($c) ?: null];
+            'source' => $c['source'], 'reason' => $c['reason'], 'before_after' => Changes::effect($c) ?: null, 'images' => count(Attachments::of($c['id']))];
     }
 
     public function find_changes(array $in){
@@ -118,9 +122,32 @@ final class Agent extends \MAD_Oficina\Chat\Agents\Specialist {
         if ( class_exists('MAD_Oficina\\Billing\\FinanceUndo') ) $this->undo[] = \MAD_Oficina\Billing\FinanceUndo::snapshot([], ['ad_changes' => [$id]]);
         // The real change, when Google or Meta show it, takes the same why.
         Reasons::add($client, (string) ($in['campaign'] ?? ''), (string) $in['reason'], 'chat', (int) ($this->ctx['user_id'] ?? 0));
+        $attached = ! empty($in['attach_images']) ? $this->attach_to($id) : 0;
         $c = Changes::get($id);
-        return ['logged' => ['id' => $id, 'client' => self::client_label($client), 'date' => $date, 'campaign' => $c['object_name'], 'change' => $c['summary'], 'reason' => $c['reason']],
+        return ['images_attached' => $attached, 'logged' => ['id' => $id, 'client' => self::client_label($client), 'date' => $date, 'campaign' => $c['object_name'], 'change' => $c['summary'], 'reason' => $c['reason']],
             'link' => admin_url('admin.php?page=mad-oficina-campanas&tab=log&client=' . $client)];
+    }
+
+    /** The images of this message → a change. @return int|\WP_Error how many */
+    private function attach_to($change_id){
+        $n = 0;
+        foreach ( (array) ($this->ctx['images'] ?? []) as $token ) {
+            $r = Attachments::attach_stashed($change_id, $token, (int) ($this->ctx['user_id'] ?? 0));
+            if ( is_wp_error($r) ) return $n ? $n : $r;
+            $n++;
+        }
+        return $n;
+    }
+
+    public function attach_images(array $in){
+        if ( empty($this->ctx['images']) ) return new \WP_Error('madof_ads', 'Este mensaje no trae imágenes.');
+        $id = (int) ($in['id'] ?? 0);
+        if ( ! $id && ! empty($in['letter']) ) $id = (int) ((Ask::last()['items'][strtoupper(trim((string) $in['letter']))] ?? [])[0] ?? 0);
+        $c = $id ? Changes::get($id) : null;
+        if ( ! $c || ! $c['client_id'] ) return new \WP_Error('madof_ads', 'No encuentro ese cambio en la bitácora.');
+        $n = $this->attach_to($id);
+        if ( is_wp_error($n) ) return $n;
+        return ['attached' => $n, 'change' => $c['summary'], 'date' => substr($c['changed_at'], 0, 10), 'link' => admin_url('admin.php?page=mad-oficina-campanas&tab=log&client=' . $c['client_id'])];
     }
 
     public function campaigns(array $in){

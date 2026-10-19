@@ -214,3 +214,8 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-ads-notes td{padding-top:0}.madof-ads-notes textarea{width:100%}
 .madof-ads-find{display:flex;flex-wrap:wrap;gap:12px 28px;margin:8px 0 16px}.madof-ads-find>div{display:flex;flex-direction:column;gap:4px;max-width:440px}
 .madof-ads-manual{margin:0 0 14px}.madof-ads-manual summary{cursor:pointer;font-weight:600}.madof-ads-manual form{margin-top:10px}
+.madof-ads-images{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+.madof-ads-images figure{position:relative;margin:0}.madof-ads-images img{display:block;width:120px;height:84px;object-fit:cover;border:2px solid var(--k);border-radius:10px;background:#fff}
+.madof-ads-detach{position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;border:2px solid var(--k);background:var(--y);font-weight:700;line-height:1;cursor:pointer}
+.madof-ads-attach{cursor:pointer;font:400 11px/1 var(--madof-pixel);text-transform:uppercase;letter-spacing:.08em;border:2px dashed var(--k);border-radius:10px;padding:10px 12px}
+.madof-ads-attach:focus-within{outline:2px solid var(--y)}

@@ -483,6 +483,7 @@ final class Schema {
   visibility varchar(10) NOT NULL DEFAULT 'internal',
   metrics_before text NULL,
   metrics_after text NULL,
+  attachments text NULL,
   created_at datetime NOT NULL,
   updated_at datetime NOT NULL,
   PRIMARY KEY  (id),

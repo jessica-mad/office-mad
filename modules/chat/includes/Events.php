@@ -72,9 +72,10 @@ final class Events {
                 // (Chat only waits 30 s), by the assistant, as a new message.
                 if ( $is_dm && ($email === $this->manager_email() || $this->member_by_email($email)) ) {
                     $voice = Transcriber::voice_of((array) ($e['message'] ?? []));
+                    $images = Transcriber::images_of((array) ($e['message'] ?? []));
                     $text = (string) ($e['message']['argumentText'] ?? $e['message']['text'] ?? '');
-                    if ( $voice || $this->needs_understanding($email, $text) ) {
-                        Assistant::defer($email, $voice ? '' : $text, $voice);
+                    if ( $voice || $images || $this->needs_understanding($email, $text) ) {
+                        Assistant::defer($email, $voice ? '' : $text, $images ? ($voice ?: []) + ['images' => $images] : $voice);
                         return rest_ensure_response(new \stdClass());
                     }
                 }

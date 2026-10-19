@@ -376,4 +376,45 @@ class AdsTest extends MADOF_TestCase {
         \MAD_Oficina\Billing\FinanceUndo::restore($agent->undo[0]);
         $this->assertNull(Changes::get($r['logged']['id']), '«Deshacer» removes the entry');
     }
+
+    private static function png(){
+        return base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    }
+
+    public function test_images_in_the_log_from_the_web_and_from_chat(){
+        $acc = Accounts::get(Accounts::upsert('google', ['external_id' => '5550001111', 'name' => 'Luz Clara', 'currency' => 'EUR']));
+        Accounts::link($acc['id'], $this->client);
+        $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas', 20)];
+        $this->sync()->account(Accounts::get($acc['id']), '2026-10-15');
+        $id = Changes::add_manual($this->client, 'google', 'rebajas', 'presupuesto 20 → 35', 'Convierte', current_time('Y-m-d'));
+
+        $this->assertWPError(\MAD_Oficina\Ads\Attachments::add($id, '<?php echo 1; ?>', 'x.png'), 'only real images, whatever the name says');
+        $a = \MAD_Oficina\Ads\Attachments::add($id, self::png(), 'captura antes.png');
+        $this->assertSame('image/png', $a['type']);
+        $this->assertFileExists(\MAD_Oficina\Ads\Attachments::dir() . '/' . $a['f']);
+        $this->assertFileExists(\MAD_Oficina\Ads\Attachments::dir() . '/.htaccess', 'the folder is not web-readable');
+        $this->assertCount(1, \MAD_Oficina\Ads\Attachments::of($id));
+
+        // Served only to the office.
+        wp_set_current_user($this->make_client_user($this->client));
+        $_GET = $_REQUEST = ['change' => $id, 'f' => $a['f'], '_wpnonce' => wp_create_nonce('madof_ads_file_' . $id)];
+        try { \MAD_Oficina\Ads\Attachments::serve(); $this->fail('a client never sees it'); } catch ( WPDieException $e ) { $this->assertStringContainsString('permisos', $e->getMessage()); }
+        $_GET = $_REQUEST = [];
+
+        // From Chat: the image waits until Nuria knows where it goes.
+        $token = apply_filters('madoficina_chat_image', null, self::png(), 'ads.png');
+        $this->assertIsString($token);
+        $agent = new \MAD_Oficina\Ads\Agent(['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'jessica@imad.example', 'images' => [$token]]);
+        $r = $agent->attach_images(['id' => $id]);
+        $this->assertSame(1, $r['attached']);
+        $this->assertCount(2, \MAD_Oficina\Ads\Attachments::of($id));
+        $r = $agent->log_change(['client' => 'LCS', 'what' => 'pausé la de marca', 'reason' => 'sin stock', 'attach_images' => true]);
+        $this->assertSame(1, $r['images_attached']);
+        $this->assertWPError((new \MAD_Oficina\Ads\Agent(['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'x']))->attach_images(['id' => $id]), 'no images in the message: nothing to attach');
+
+        $this->assertTrue(\MAD_Oficina\Ads\Attachments::remove($id, $a['f']));
+        $this->assertFileDoesNotExist(\MAD_Oficina\Ads\Attachments::dir() . '/' . $a['f']);
+        $this->assertSame([['resource' => 'spaces/X/messages/Y/attachments/Z', 'name' => 'captura.png']],
+            \MAD_Oficina\Chat\Transcriber::images_of(['attachment' => [['contentType' => 'image/png', 'contentName' => 'captura.png', 'attachmentDataRef' => ['resourceName' => 'spaces/X/messages/Y/attachments/Z']], ['contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'a']]]]));
+    }
 }
