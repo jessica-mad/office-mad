@@ -29,7 +29,7 @@ final class Memory {
     public static function add($email, $user_text, $assistant_text){
         $all = self::load(self::HISTORY);
         $h = self::history($email);
-        $h[] = ['role' => 'user', 'text' => mb_substr((string) $user_text, 0, 2000), 'at' => time()];
+        $h[] = ['role' => 'user', 'text' => mb_substr((string) $user_text, 0, 12000), 'at' => time()];
         $h[] = ['role' => 'assistant', 'text' => mb_substr((string) $assistant_text, 0, 3000), 'at' => time()];
         $all[strtolower($email)] = array_slice($h, -self::TURNS * 2);
         update_option(self::HISTORY, $all, false);

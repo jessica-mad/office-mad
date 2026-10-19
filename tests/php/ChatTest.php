@@ -715,6 +715,18 @@ class ChatTest extends MADOF_TestCase {
         $this->audio_bytes = 'fake-audio-bytes';
     }
 
+    public function test_a_long_voice_note_reaches_nora_whole_and_is_not_echoed_back(){
+        $this->key();
+        $this->claude = [['text' => 'Entendido.']];
+        $long = trim(str_repeat('primero hablamos del presupuesto de rebajas ', 40) . ' y al final lo más importante es llamar a Tomás');
+        $this->speech = [200, ['results' => [['alternatives' => [['transcript' => $long]]]]]];
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertStringEndsWith('llamar a Tomás', end($this->prompts[0]['messages'])['content'], 'the end of the note reaches her');
+        $msg = $this->last_to_jessica();
+        $this->assertStringContainsString('palabras', $msg);
+        $this->assertLessThan(400, mb_strlen($msg), 'the note is not repeated back');
+    }
+
     public function test_strangers_voice_or_words_reach_no_one(){
         $this->key();
         $res = $this->event(['type' => 'MESSAGE', 'user' => ['email' => 'rosa@lanasnorte.example'], 'space' => ['name' => 'spaces/ROSA', 'type' => 'DM'],

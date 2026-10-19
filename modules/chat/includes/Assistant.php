@@ -99,7 +99,8 @@ final class Assistant {
             if ( is_wp_error($text) ) return $this->reply($member, ['text' => $text->get_error_message()]);
             $heard = $text;
         }
-        $text = mb_substr(trim(wp_strip_all_tags((string) $text)), 0, 2000);
+        // A long voice note (several minutes) is several thousand characters: all of it reaches her.
+        $text = mb_substr(trim(wp_strip_all_tags((string) $text)), 0, $heard !== '' ? 12000 : 4000);
         // Images (a screenshot of a campaign…): kept aside for the area that knows where they go.
         $stashed = [];
         foreach ( array_slice($images, 0, 5) as $img ) {
@@ -113,7 +114,11 @@ final class Assistant {
             $text = trim($text . "\n" . sprintf(_n('(Adjunta %d imagen.)', '(Adjunta %d imágenes.)', count($stashed), 'mad-oficina'), count($stashed)));
         }
         if ( $text === '' ) return $this->reply($member, ['text' => __('No te he entendido. ¿Me lo repites?', 'mad-oficina')]);
-        $prefix = $heard !== '' ? sprintf(__('He oído: «%s»', 'mad-oficina'), mb_substr($heard, 0, 400)) : '';
+        // What she heard, so a mishearing shows; a long note is not repeated back, just its start.
+        $words = $heard !== '' ? count(preg_split('/\s+/u', trim($heard))) : 0;
+        $prefix = $heard === '' ? '' : ( $words <= 40
+            ? sprintf(__('He oído: «%s»', 'mad-oficina'), $heard)
+            : sprintf(__('He oído tu audio (%1$d palabras): «%2$s…»', 'mad-oficina'), $words, rtrim(mb_substr($heard, 0, 90))) );
 
         // Numbers («la 2 y la 5 hechas») never need the AI.
         $p = TaskList::parse($text);
