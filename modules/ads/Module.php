@@ -50,9 +50,13 @@ return new class($core) implements MAD_Oficina_Module {
         add_action(self::CRON_HOOK, fn() => $this->sync()->run());
         add_action('madoficina_tick', fn() => $this->sync()->run());
         add_action('madoficina_tick', fn() => \MAD_Oficina\Ads\MetaImport::remind($this->settings())); // no Meta report lately: Nuria asks for it
+        add_action('madoficina_tick', fn() => \MAD_Oficina\Ads\Ask::run($this->settings())); // the daily «¿por qué?»
+        // Nuria as one of the assistant's areas (Nora asks her about campaigns and gives her the whys).
+        add_filter('madoficina_assistant_agents', fn($agents) => array_merge((array) $agents, ['MAD_Oficina\\Ads\\Agent']));
+        add_filter('madoficina_assistant_context', fn($text, $ctx) => ! empty($ctx['is_manager']) ? $text . \MAD_Oficina\Ads\Ask::context() : $text, 10, 2);
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 300, 'hourly', self::CRON_HOOK);
 
-        foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes', 'ads_meta_import'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['ads_settings', 'ads_discover', 'ads_link', 'ads_sync', 'ads_notes', 'ads_meta_import', 'ads_manual'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         add_action('wp_ajax_madof_ads_reason', [$this, 'ajax_reason']);
     }
 
@@ -77,6 +81,7 @@ return new class($core) implements MAD_Oficina_Module {
         $s = $this->settings();
         $s['google_mcc'] = \MAD_Oficina\Ads\GoogleAds::digits($p['google_mcc'] ?? '');
         $s['google_version'] = preg_replace('/[^a-z0-9]/', '', strtolower((string) ($p['google_version'] ?? ''))) ?: \MAD_Oficina\Ads\GoogleAds::DEFAULT_VERSION;
+        $s['ask_hour'] = max(7, min(20, (int) ($p['ask_hour'] ?? 9)));
         $s['meta_version'] = preg_replace('/[^v0-9.]/', '', (string) ($p['meta_version'] ?? '')) ?: \MAD_Oficina\Ads\Meta::DEFAULT_VERSION;
         // Secrets: kept encrypted; an empty field keeps the saved one, «borrar» removes it.
         foreach ( ['google_dev_token' => 'google_dev_token', 'meta_token' => 'meta_token'] as $field => $key ) {
@@ -122,6 +127,17 @@ return new class($core) implements MAD_Oficina_Module {
         if ( ! $c ) $this->back(['tab' => 'campaigns'], __('Esa campaña no existe.', 'mad-oficina'), 'error');
         \MAD_Oficina\Ads\Accounts::save_notes($c['id'], sanitize_textarea_field(wp_unslash($_POST['notes'] ?? '')));
         $this->back(['tab' => 'campaigns', 'client' => $c['client_id']], __('Notas guardadas.', 'mad-oficina'));
+    }
+
+    /** «Apuntar un cambio» in the log. */
+    public function handle_ads_manual(){
+        $this->guard('ads_manual');
+        $p = wp_unslash($_POST);
+        $client = absint($p['client'] ?? 0);
+        $r = \MAD_Oficina\Ads\Changes::add_manual($client, sanitize_key($p['platform'] ?? 'other'), (string) ($p['campaign'] ?? ''), (string) ($p['what'] ?? ''), (string) ($p['reason'] ?? ''), (string) ($p['date'] ?? ''), get_current_user_id(), 'manual');
+        if ( is_wp_error($r) ) $this->back(['tab' => 'log'], $r->get_error_message(), 'error');
+        if ( trim((string) ($p['reason'] ?? '')) !== '' ) \MAD_Oficina\Ads\Reasons::add($client, (string) ($p['campaign'] ?? ''), (string) $p['reason'], 'manual', get_current_user_id());
+        $this->back(['tab' => 'log', 'client' => $client], __('Apuntado en la bitácora. Si el cambio aparece después desde Google o Meta, se le pone este mismo porqué.', 'mad-oficina'));
     }
 
     /** Ads Manager reports (one or several files at once). */

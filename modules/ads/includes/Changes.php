@@ -67,6 +67,43 @@ final class Changes {
         return $n;
     }
 
+    /**
+     * A change she made and tells (Nora or the log form): it goes in the log with its why
+     * (source «manual»), linked to the client's campaign when its name is found.
+     * @return int|\WP_Error id
+     */
+    public static function add_manual($client_id, $platform, $campaign, $what, $reason, $date, $user_id = 0, $source = 'chat'){
+        global $wpdb;
+        $what = trim(sanitize_text_field($what));
+        if ( ! $client_id || $what === '' ) return new \WP_Error('madof_ads', __('Falta el cliente o qué cambió.', 'mad-oficina'));
+        $platform = in_array($platform, ['google', 'meta'], true) ? $platform : 'other';
+        $campaign = trim(sanitize_text_field($campaign));
+        $match = null;
+        if ( $campaign !== '' ) {
+            $words = array_filter(explode(' ', strtolower(remove_accents($campaign))), fn($w) => strlen($w) >= 3);
+            foreach ( Accounts::campaigns_of((int) $client_id) as $c ) {
+                if ( $platform !== 'other' && $c['platform'] !== $platform ) continue;
+                $n = strtolower(remove_accents($c['name']));
+                if ( $words && ! array_filter($words, fn($w) => strpos($n, $w) === false) ) { $match = $c; break; }
+            }
+        }
+        $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $date) ? $date : current_time('Y-m-d');
+        $now = Time::now();
+        $row = [
+            'hash' => sha1('manual|' . $client_id . '|' . wp_generate_password(12, false)), 'platform' => $match['platform'] ?? $platform,
+            'account_id' => (int) ($match['account_id'] ?? 0), 'client_id' => (int) $client_id, 'campaign_id' => $match ? (int) $match['id'] : null,
+            'changed_at' => $date . ' ' . ( $date === current_time('Y-m-d') ? current_time('H:i:s') : '12:00:00' ), 'actor' => $user_id ? (string) get_the_author_meta('display_name', $user_id) : '',
+            'source' => 'manual', 'automatic' => 0, 'object_type' => 'campaign', 'object_name' => mb_substr($match['name'] ?? $campaign, 0, 255),
+            'field' => 'manual', 'summary' => mb_substr(( ($match['name'] ?? $campaign) !== '' ? sprintf(__('Campaña «%s»: ', 'mad-oficina'), $match['name'] ?? $campaign) : '' ) . $what, 0, 500),
+            'created_at' => $now, 'updated_at' => $now,
+        ];
+        if ( $match ) $row['metrics_before'] = wp_json_encode(Accounts::window((int) $match['id'], (int) $match['account_id'], gmdate('Y-m-d', strtotime($date . ' -' . self::BEFORE_DAYS . ' days')), gmdate('Y-m-d', strtotime($date . ' -1 day'))));
+        if ( ! $wpdb->insert(self::table(), $row) ) return new \WP_Error('madof_ads', __('No he podido apuntarlo.', 'mad-oficina'));
+        $id = (int) $wpdb->insert_id;
+        if ( trim((string) $reason) !== '' ) self::set_reason([$id], $reason, $source, $user_id);
+        return $id;
+    }
+
     /** «Presupuesto de "Rebajas": 20 → 35 €/día» */
     public static function describe(array $row, ?array $campaign = null){
         $obj = __(self::OBJECTS[$row['object_type']] ?? ucfirst(str_replace('_', ' ', $row['object_type'] ?: 'cambio')), 'mad-oficina');

@@ -24,7 +24,7 @@ $tabs = [
 ];
 $name = \MAD_Oficina\Core\Agents\Characters::get('analista')['name'] ?? 'Nuria';
 $when = fn($d) => date_i18n('j M Y', strtotime($d));
-$platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">' . esc_html(Accounts::PLATFORMS[$p] ?? $p) . '</span>';
+$platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">' . esc_html(Accounts::PLATFORMS[$p] ?? __('Otra', 'mad-oficina')) . '</span>';
 ?>
 <div class="wrap madof-wrap">
     <?php AdminUi::header(__('Sala de campañas', 'mad-oficina'), __('Campañas', 'mad-oficina'), sprintf(__('%s lee cada mañana (solo lectura) las campañas de Google Ads y Meta de tus clientes: métricas y todos los cambios. Las plataformas dicen qué cambió; aquí queda por qué.', 'mad-oficina'), $name)); ?>
@@ -42,8 +42,21 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
     $rows = Changes::find(array_filter($f) + ($auto ? [] : ['automatic' => false]) + ['linked' => true], 400);
     // One block per client, campaign and day: a decision usually touches several fields at once.
     $groups = [];
-    foreach ( $rows as $r ) $groups[$r['client_id'] . '|' . ($r['campaign_id'] ?: 'acc' . $r['account_id']) . '|' . substr($r['changed_at'], 0, 10)][] = $r;
+    foreach ( $rows as $r ) $groups[$r['client_id'] . '|' . ($r['campaign_id'] ?: 'acc' . $r['account_id'] . ':' . $r['object_name']) . '|' . substr($r['changed_at'], 0, 10)][] = $r;
     ?>
+    <details class="madof-card madof-ads-manual"><summary><?php esc_html_e('Apuntar un cambio que hiciste (o díselo a Nora por Chat)', 'mad-oficina'); ?></summary>
+        <?php echo AdminUi::form_open('ads_manual', 'madof-form'); ?>
+            <div class="madof-cols">
+                <label><?php esc_html_e('Cliente', 'mad-oficina'); ?><select name="client" required><option value=""></option><?php foreach ( $clients as $c ) echo '<option value="' . (int) $c['id'] . '">' . esc_html($c['code'] . ' · ' . $c['name']) . '</option>'; ?></select></label>
+                <label><?php esc_html_e('Plataforma', 'mad-oficina'); ?><select name="platform"><option value="google">Google Ads</option><option value="meta">Meta</option><option value="other"><?php esc_html_e('Otra', 'mad-oficina'); ?></option></select></label>
+                <label><?php esc_html_e('Campaña', 'mad-oficina'); ?><input type="text" name="campaign" placeholder="<?php esc_attr_e('nombre o parte', 'mad-oficina'); ?>"></label>
+                <label><?php esc_html_e('Fecha', 'mad-oficina'); ?><input type="date" name="date" value="<?php echo esc_attr(current_time('Y-m-d')); ?>"></label>
+            </div>
+            <label><?php esc_html_e('Qué cambiaste', 'mad-oficina'); ?><input type="text" name="what" required placeholder="<?php esc_attr_e('p. ej. presupuesto 20 → 35 €/día', 'mad-oficina'); ?>"></label>
+            <label><?php esc_html_e('Por qué', 'mad-oficina'); ?><textarea name="reason" rows="2" required></textarea></label>
+            <button class="madof-btn is-small"><?php esc_html_e('Apuntar', 'mad-oficina'); ?></button>
+        </form>
+    </details>
     <form method="get" class="madof-bank-filter">
         <input type="hidden" name="page" value="mad-oficina-campanas"><input type="hidden" name="tab" value="log">
         <select name="client" aria-label="<?php esc_attr_e('Cliente', 'mad-oficina'); ?>"><option value=""><?php esc_html_e('Todos los clientes', 'mad-oficina'); ?></option><?php foreach ( $clients as $c ) echo '<option value="' . (int) $c['id'] . '" ' . selected($f['client_id'], (int) $c['id'], false) . '>' . esc_html($c['code'] . ' · ' . $c['name']) . '</option>'; ?></select>
@@ -68,7 +81,7 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
             <header>
                 <span class="madof-kicker"><?php echo esc_html($when($first['changed_at']) . ' · ' . $first['client_code']); ?></span>
                 <?php echo $platform($first['platform']); ?>
-                <strong><?php echo esc_html($first['campaign_name'] ?: __('Cuenta', 'mad-oficina')); ?></strong>
+                <strong><?php echo esc_html($first['campaign_name'] ?: ($first['object_name'] ?: __('Cuenta', 'mad-oficina'))); ?></strong>
                 <?php if ( $first['automatic'] ) echo '<span class="madof-pill">' . esc_html__('automático', 'mad-oficina') . '</span>'; ?>
             </header>
             <ul>
@@ -239,6 +252,12 @@ $platform = fn($p) => '<span class="madof-pill madof-ads-' . esc_attr($p) . '">'
                 <li><?php esc_html_e('Pulsa «Buscar cuentas» en la pestaña Cuentas. Si alguna cuenta de socio da error de permisos, dímelo: puede que Meta pida acceso avanzado para esa cuenta y lo vemos.', 'mad-oficina'); ?></li>
             </ol>
         </details>
+    </section>
+    <section class="madof-card">
+        <span class="madof-kicker"><?php echo esc_html($name); ?></span>
+        <label><?php esc_html_e('Hora del mensaje diario con los cambios sin su porqué', 'mad-oficina'); ?>
+            <select name="ask_hour"><?php for ( $h = 7; $h <= 20; $h++ ) echo '<option value="' . $h . '" ' . selected((int) ($settings['ask_hour'] ?? 9), $h, false) . '>' . sprintf('%02d:00', $h) . '</option>'; ?></select></label>
+        <small><?php esc_html_e('Solo escribe si hay cambios sin motivo. Contéstale por Chat con letras («la A porque…»).', 'mad-oficina'); ?></small>
     </section>
     <p class="description"><?php esc_html_e('Los tokens se guardan cifrados. Todo es solo lectura: nadie de la oficina cambia tus campañas.', 'mad-oficina'); ?></p>
     <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>

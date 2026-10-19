@@ -308,4 +308,72 @@ class AdsTest extends MADOF_TestCase {
         $this->g['accounts'] = [];
         $this->assertStringContainsString('no tiene cuentas de cliente', $this->sync()->discover('google')['errors'][0], 'an empty MCC is said, not silent');
     }
+
+    private function chat_fake(array &$sent){
+        openssl_pkey_export(openssl_pkey_new(['private_key_bits' => 2048]), $key);
+        update_option(MAD_Oficina_Core::option_key('chat'), ['manager_email' => 'jessica@imad.example', 'manager_dm' => 'spaces/JESSDM',
+            'service_account' => Crypto::encrypt(wp_json_encode(['type' => 'service_account', 'client_email' => 'bot@proj.iam.gserviceaccount.com', 'private_key' => $key, 'token_uri' => 'https://oauth2.googleapis.com/token']))]);
+        $f = function($pre, $args, $url) use (&$sent){
+            if ( $url === 'https://oauth2.googleapis.com/token' ) return ['response' => ['code' => 200], 'body' => wp_json_encode(['access_token' => 't', 'expires_in' => 3600])];
+            if ( strpos($url, 'https://chat.googleapis.com/') === 0 ) { $sent[] = json_decode($args['body'], true)['text'] ?? ''; return ['response' => ['code' => 200], 'body' => '{"name":"spaces/JESSDM/messages/1"}']; }
+            return $pre;
+        };
+        add_filter('pre_http_request', $f, 5, 3);
+        return $f;
+    }
+
+    public function test_nuria_asks_the_why_once_with_letters_and_nora_can_answer_it(){
+        $acc = Accounts::get(Accounts::upsert('google', ['external_id' => '5550001111', 'name' => 'Luz Clara', 'currency' => 'EUR']));
+        Accounts::link($acc['id'], $this->client);
+        $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas', 20), $this->gcampaign('102', 'Marca', 10)];
+        $this->sync()->account(Accounts::get($acc['id']), '2026-10-15');
+        $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas', 35, 'PAUSED'), $this->gcampaign('102', 'Marca', 12)];
+        $this->sync()->account(Accounts::get($acc['id']), '2026-10-16');
+        delete_option(\MAD_Oficina\Ads\Ask::DAY);
+        $sent = []; $f = $this->chat_fake($sent);
+        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-16 08:00:00 Europe/Madrid')), 'not before 9:00');
+        $this->assertTrue(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-16 09:30:00 Europe/Madrid')));
+        $this->assertCount(1, $sent);
+        $this->assertMatchesRegularExpression('/A\. (Marca|Rebajas) \(Google Ads, 16\/10\)/', $sent[0]);
+        $this->assertStringContainsString('B. ', $sent[0]);
+        $this->assertStringContainsString('LCS · Luz Clara', $sent[0]);
+        $this->assertStringContainsString('la A porque', \MAD_Oficina\Ads\Ask::context(), 'Nora knows what «la A» is');
+        delete_option(\MAD_Oficina\Ads\Ask::DAY);
+        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-17 09:30:00 Europe/Madrid')), 'each change is asked once');
+        remove_filter('pre_http_request', $f, 5);
+
+        // «la A porque…»: Nuria saves it in every change of A, with «Deshacer».
+        $agent = new \MAD_Oficina\Ads\Agent(['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'jessica@imad.example']);
+        $letterA = \MAD_Oficina\Ads\Ask::last()['items']['A'];
+        $r = $agent->set_reason(['letters' => ['a'], 'reason' => 'Convertía a 6 € y sobraba presupuesto']);
+        $this->assertCount(count($letterA), $r['saved']);
+        foreach ( $letterA as $id ) $this->assertSame(['Convertía a 6 € y sobraba presupuesto', 'chat'], [Changes::get($id)['reason'], Changes::get($id)['reason_source']]);
+        $this->assertCount(1, $agent->undo);
+        \MAD_Oficina\Billing\FinanceUndo::restore($agent->undo[0]);
+        $this->assertNull(Changes::get($letterA[0])['reason'], '«Deshacer» leaves it as it was');
+        $this->assertTrue(in_array('campanas', array_map(fn($a) => $a->slug(), (new \MAD_Oficina\Chat\Orchestrator([], ['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'x'], null))->agents()), true));
+    }
+
+    public function test_a_change_she_tells_nora_goes_in_the_log_and_waits_for_the_real_one(){
+        $acc = Accounts::get(Accounts::upsert('google', ['external_id' => '5550001111', 'name' => 'Luz Clara', 'currency' => 'EUR']));
+        Accounts::link($acc['id'], $this->client);
+        $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas otoño', 20)];
+        $this->sync()->account(Accounts::get($acc['id']), '2026-10-15');
+        $agent = new \MAD_Oficina\Ads\Agent(['is_manager' => true, 'user_id' => 0, 'member' => null, 'email' => 'jessica@imad.example']);
+        $r = $agent->log_change(['client' => 'LCS', 'platform' => 'google', 'campaign' => 'rebajas', 'what' => 'presupuesto 20 → 35 €/día', 'reason' => 'Convierte bien', 'date' => current_time('Y-m-d')]);
+        $this->assertSame('Rebajas otoño', $r['logged']['campaign'], 'joined to the campaign by its name');
+        $manual = Changes::get($r['logged']['id']);
+        $this->assertSame(['manual', 'Convierte bien'], [$manual['source'], $manual['reason']]);
+        $this->assertStringContainsString('presupuesto 20 → 35 €/día', $manual['summary']);
+        $found = $agent->find_changes(['client' => 'LCS', 'campaign' => 'rebajas']);
+        $this->assertSame($r['logged']['id'], $found['changes'][0]['id']);
+
+        $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas otoño', 35)];
+        $this->sync()->account(Accounts::get($acc['id']), current_time('Y-m-d'));
+        $this->assertCount(1, Changes::find(['client_id' => $this->client]), 'the real change joins the one she told: no duplicate');
+        $this->assertSame(['20.00', '35'], [Changes::get($r['logged']['id'])['old_value'], Changes::get($r['logged']['id'])['new_value']], 'with the real values');
+
+        \MAD_Oficina\Billing\FinanceUndo::restore($agent->undo[0]);
+        $this->assertNull(Changes::get($r['logged']['id']), '«Deshacer» removes the entry');
+    }
 }

@@ -144,8 +144,9 @@ final class Orchestrator {
             . "\n- Tareas (qué hay pendiente, de dónde salió una tarea, qué se acordó sobre ella): SOLO a Proyectos, que ya consulta las actas por su cuenta. No preguntes también a Actas.\n"
             . "- Si la pregunta toca dos temas (p. ej. «qué acordamos con MOM y qué tareas salieron»), pregunta a las dos áreas, cada una por lo suyo.\n"
             . "- Si un área te dice que eso no es lo suyo, pregunta a la que encaje según este mapa; no insistas a la misma.\n"
-            . "- Todavía NO lo sabe nadie: tu calendario y huecos, tus correos, archivos sueltos de Drive, campañas de Ads, datos de contacto de clientes. Si te lo piden, dilo claro y sin dar vueltas.\n"
+            . "- Todavía NO lo sabe nadie: tu calendario y huecos, tus correos, archivos sueltos de Drive, " . ( in_array('campanas', array_map(fn($a) => $a->slug(), $this->agents()), true) ? '' : 'campañas de Ads, ' ) . "datos de contacto de clientes. Si te lo piden, dilo claro y sin dar vueltas.\n"
             . $this->clients_directory()
+            . (string) apply_filters('madoficina_assistant_context', '', $this->ctx)
             . ($facts ? "\n\nLo que te ha pedido recordar:\n" . implode("\n", array_map(fn($f) => '- [' . $f['id'] . '] ' . $f['text'], $facts)) : '');
 
         $messages = [];
