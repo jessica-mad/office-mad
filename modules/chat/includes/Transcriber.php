@@ -73,9 +73,13 @@ final class Transcriber {
 
     /** Google's ways of recognising, tried in order until one takes the audio; the one that worked goes first next time. */
     const ATTEMPTS = [
-        'long'    => ['location' => 'global', 'model' => 'long'],
-        'short'   => ['location' => 'global', 'model' => 'short'],
-        'chirp_2' => ['location' => 'europe-west4', 'model' => 'chirp_2'],
+        // Chat's voice notes are AAC in an m4a box, which automatic detection reads as empty: said explicitly.
+        'long_m4a'    => ['location' => 'global', 'model' => 'long', 'encoding' => 'M4A_AAC', 'for' => 'm4a'],
+        'chirp_2_m4a' => ['location' => 'europe-west4', 'model' => 'chirp_2', 'encoding' => 'M4A_AAC', 'for' => 'm4a'],
+        'long_mp4'    => ['location' => 'global', 'model' => 'long', 'encoding' => 'MP4_AAC', 'for' => 'm4a'],
+        'long'        => ['location' => 'global', 'model' => 'long'],
+        'short'       => ['location' => 'global', 'model' => 'short'],
+        'chirp_2'     => ['location' => 'europe-west4', 'model' => 'chirp_2'],
     ];
     const WORKED = 'madoficina_voice_worked';
     const LAST = 'madoficina_voice_last';
@@ -110,10 +114,12 @@ final class Transcriber {
         if ( isset(self::ATTEMPTS[$worked]) ) $order = array_values(array_unique(array_merge([$worked], $order)));
         $order = (array) apply_filters('madoficina_voice_attempts', $order);
         $tried = [];
+        $is_m4a = str_starts_with($audio, 'm4a');
+        $params = $is_m4a ? self::mp4_audio($file['body']) : [];
         foreach ( $order as $key ) {
             $a = self::ATTEMPTS[$key] ?? null;
-            if ( ! $a ) continue;
-            $r = self::recognize($token, $project, $a, $file['body']);
+            if ( ! $a || ( ($a['for'] ?? '') === 'm4a' && ! $is_m4a ) ) continue;
+            $r = self::recognize($token, $project, $a + $params, $file['body']);
             if ( ! is_wp_error($r) ) {
                 update_option(self::WORKED, $key, false);
                 update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => $key, 'audio' => $about], false);
@@ -130,7 +136,7 @@ final class Transcriber {
                 update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
                 return new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de %d segundos: mándamelo más corto o en dos partes.', 'mad-oficina'), self::MAX_SECONDS));
             }
-            if ( $code !== 400 && $code !== 404 ) break; // not about the audio or the model: no point in trying others
+            if ( in_array($code, [401, 403, 429], true) || $code >= 500 ) break; // not about the audio or the model: no point in trying others
         }
         // Last resort: the server converts the audio to ogg/opus (Google always takes it), if it has ffmpeg.
         if ( $tried && ! str_starts_with($audio, 'ogg') && ( $ogg = self::to_ogg($file['body']) ) ) {
@@ -144,6 +150,19 @@ final class Transcriber {
         update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
         return new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (formato %1$s). Google dice: %2$s. Mientras lo miramos, escríbemelo; el detalle está en Chat → ajustes.', 'mad-oficina'),
             $audio, $tried ? preg_replace('/^[a-z_0-9]+: /', '', end($tried)) : '—'));
+    }
+
+    /** Sample rate and channels of the AAC track of an m4a, read from its «mp4a» entry. @return array{rate?:int, channels?:int} */
+    public static function mp4_audio($bytes){
+        $p = strpos((string) $bytes, 'mp4a');
+        if ( $p === false || strlen($bytes) < $p + 32 ) return [];
+        $entry = substr($bytes, $p + 4, 28); // 6 reserved, 2 data ref, 8 reserved, 2 channels, 2 sample size, 4 pre-defined, 4 rate (16.16)
+        $channels = unpack('n', substr($entry, 16, 2))[1];
+        $rate = unpack('N', substr($entry, 24, 4))[1] >> 16;
+        $out = [];
+        if ( $rate >= 8000 && $rate <= 96000 ) $out['rate'] = $rate;
+        if ( $channels >= 1 && $channels <= 8 ) $out['channels'] = $channels;
+        return $out;
     }
 
     /** @return string|null the audio as ogg/opus, when the server has ffmpeg */
@@ -170,8 +189,9 @@ final class Transcriber {
             'timeout' => 45,
             'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json; charset=utf-8'],
             'body'    => wp_json_encode([
-                'config'  => [
-                    'autoDecodingConfig' => new \stdClass(), // m4a/aac, ogg/opus, mp3, wav…
+                'config'  => ( empty($a['encoding'])
+                    ? ['autoDecodingConfig' => new \stdClass()] // ogg/opus, mp3, wav, flac…
+                    : ['explicitDecodingConfig' => array_filter(['encoding' => $a['encoding'], 'sampleRateHertz' => $a['rate'] ?? null, 'audioChannelCount' => $a['channels'] ?? null])] ) + [
                     'languageCodes'      => (array) apply_filters('madoficina_voice_languages', ['es-ES']),
                     'model'              => $a['model'],
                     'features'           => ['enableAutomaticPunctuation' => true],

@@ -29,6 +29,8 @@ class ChatTest extends MADOF_TestCase {
     private $speech_calls = 0;
     private $speech_by_model = [];
     private $speech_models = [];
+    private $speech_configs = [];
+    private $audio_bytes = 'fake-audio-bytes';
 
     public static function wpSetUpBeforeClass($factory){
         self::$google_key = openssl_pkey_new(['private_key_bits' => 2048]);
@@ -77,12 +79,13 @@ class ChatTest extends MADOF_TestCase {
         }
         if ( strpos($url, 'https://chat.googleapis.com/v1/media/') === 0 ) {
             if ( strpos($url, 'TRANSCRIPT') !== false ) return ['response' => ['code' => 200], 'headers' => ['content-type' => 'text/plain'], 'body' => 'La de los anuncios ya está hecha'];
-            return ['response' => ['code' => 200], 'headers' => ['content-type' => 'audio/mp4'], 'body' => 'fake-audio-bytes'];
+            return ['response' => ['code' => 200], 'headers' => ['content-type' => 'application/octet-stream'], 'body' => $this->audio_bytes];
         }
         if ( preg_match('#^https://(?:([a-z0-9-]+)-)?speech\.googleapis\.com/v2/projects/mad-oficina-test/locations/([a-z0-9-]+)/recognizers/_:recognize#', $url, $m) ) {
             $this->speech_calls++;
             $body = json_decode($args['body'], true);
-            $this->assertSame(base64_encode('fake-audio-bytes'), $body['content']);
+            $this->assertSame(base64_encode($this->audio_bytes), $body['content']);
+            $this->speech_configs[] = $body['config'];
             $this->assertSame($m[1] ?: 'global', $m[2], 'regional models go to their regional endpoint');
             $this->speech_models[] = $body['config']['model'];
             [$code, $out] = $this->speech_by_model[$body['config']['model']] ?? $this->speech ?? [200, ['results' => [['alternatives' => [['transcript' => 'ya he subido los anuncios']]]]]];
@@ -646,8 +649,22 @@ class ChatTest extends MADOF_TestCase {
         $last = get_option(\MAD_Oficina\Chat\Transcriber::LAST);
         $this->assertFalse($last['ok']);
         $this->assertCount(3, $last['tried']);
-        $this->assertStringContainsString('audio/mp4', $last['audio']);
+        $this->assertStringContainsString('application/octet-stream', $last['audio'], 'what Chat said it was, and what it really is');
         remove_all_filters('madoficina_ffmpeg');
+    }
+
+    public function test_chats_m4a_voice_notes_are_sent_as_aac_with_their_rate(){
+        $this->key();
+        $this->claude = [['text' => 'Vale.']];
+        // An invented m4a: «ftyp» box, then an «mp4a» sample entry (1 channel, 48 kHz).
+        $this->audio_bytes = "\0\0\0\x18ftypM4A \0\0\0\0M4A isom" . str_repeat("\0", 20) . 'mp4a' . str_repeat("\0", 6) . "\0\x01" . str_repeat("\0", 8) . "\0\x01\0\x10\0\0\0\0" . pack('N', 48000 << 16) . 'aac-frames';
+        $this->speech_by_model = [];
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertSame(['encoding' => 'M4A_AAC', 'sampleRateHertz' => 48000, 'audioChannelCount' => 1], $this->speech_configs[0]['explicitDecodingConfig']);
+        $this->assertArrayNotHasKey('autoDecodingConfig', $this->speech_configs[0]);
+        $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
+        $this->assertSame('long_m4a', get_option(\MAD_Oficina\Chat\Transcriber::WORKED));
+        $this->audio_bytes = 'fake-audio-bytes';
     }
 
     public function test_strangers_voice_or_words_reach_no_one(){
