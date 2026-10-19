@@ -9,12 +9,13 @@ if ( ! defined('ABSPATH') ) exit;
  *
  * Needs, once, in the bot's Google Cloud project: the «Cloud Speech-to-Text API»
  * enabled and the service account with the «Cloud Speech Client» role.
- * Synchronous recognition takes up to 1 minute of audio.
+ * Google takes one minute per request: longer m4a notes (up to 10) go in equal pieces.
  */
 final class Transcriber {
 
     const MAX_BYTES = 10 * 1024 * 1024;
-    const MAX_SECONDS = 60;
+    const MAX_SECONDS = 600; // up to 10 minutes, in pieces
+    const PIECE_SECONDS = 55; // Google's synchronous limit is one minute
     const AUDIO_NAME = '/\.(m4a|aac|mp3|mp4|ogg|oga|opus|wav|amr|3gp|webm|flac)$/i';
 
     const SHAPE_OPTION = 'madoficina_chat_voice_shape';
@@ -124,49 +125,72 @@ final class Transcriber {
             $audio = rtrim($audio, ')') . ', índice movido al principio)';
         }
         $about = sprintf('%s · %s · %d KB', $audio, $file['type'] ?: '—', (int) ceil(strlen($file['body']) / 1024));
+        $is_m4a = str_starts_with($audio, 'm4a');
+        $ogg = $is_m4a && str_contains($audio, '(Opus') ? (new Mp4Audio($file['body']))->opus_to_ogg() : null;
+        $params = $is_m4a ? self::mp4_audio($file['body']) : [];
+        $tried = [];
+        $fail = function($error, $keep = false) use (&$tried, $about, $file){
+            update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried] + ($keep ? ['kept' => self::keep_failed($file['body'])] : []), false);
+            return $error;
+        };
+
+        // Google takes one minute per request: a longer note goes in equal pieces, read one after the other.
+        $pieces = [$file['body']];
+        if ( $is_m4a && ! $ogg ) {
+            $m = new Mp4Audio($file['body']);
+            if ( $m->duration() > self::MAX_SECONDS ) return $fail(new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de %d minutos: mándamelo en partes más cortas.', 'mad-oficina'), self::MAX_SECONDS / 60)));
+            if ( $m->duration() > self::PIECE_SECONDS ) {
+                $pieces = $m->split(self::PIECE_SECONDS);
+                $about .= ' · ' . sprintf(_n('%d parte', '%d partes', count($pieces), 'mad-oficina'), count($pieces));
+            }
+        }
+        $texts = []; $how = '';
+        foreach ( $pieces as $i => $piece ) {
+            $r = self::one($token, $project, $piece, $is_m4a, $ogg, $params, $tried, count($pieces) > 1 ? 'parte ' . ($i + 1) . ' · ' : '');
+            if ( is_wp_error($r) ) {
+                if ( $r->get_error_code() === 'madof_stt_empty' && count($pieces) > 1 ) continue; // a silent stretch
+                if ( $r->get_error_code() === 'madof_stt_long' ) return $fail($r);
+                if ( $r->get_error_code() === 'madof_stt_forbidden' ) return $fail(new \WP_Error('madof_stt_off', sprintf(__('Para entender audios, en Google Cloud (proyecto %1$s) activa «Cloud Speech-to-Text API» y da a la cuenta de servicio %2$s el rol «Cloud Speech Client». Mientras, escríbemelo.', 'mad-oficina'), $project, $account->email())));
+                // Last resort: the server converts the audio to ogg/opus (Google always takes it), if it has ffmpeg.
+                if ( count($pieces) === 1 && $tried && ! str_starts_with($audio, 'ogg') && ( $conv = self::to_ogg($piece) ) ) {
+                    $r = self::recognize($token, $project, self::ATTEMPTS['long'], $conv);
+                    if ( ! is_wp_error($r) ) { update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => 'long (convertido a ogg)', 'audio' => $about], false); return $r; }
+                    $tried[] = 'ogg: ' . (int) ($r->get_error_data()['status'] ?? 0) . ' ' . $r->get_error_message();
+                }
+                return $fail(new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (formato %1$s). Google dice: %2$s. Mientras lo miramos, escríbemelo; el detalle está en Chat → ajustes.', 'mad-oficina'),
+                    $audio, $tried ? preg_replace('/^(parte \d+ · )?[a-z_0-9]+: /', '', end($tried)) : '—')), true);
+            }
+            $texts[] = $r;
+            $how = (string) get_option(self::WORKED, '');
+        }
+        if ( ! $texts ) return $fail(new \WP_Error('madof_stt_empty', __('No he oído nada en el audio. ¿Me lo repites?', 'mad-oficina')), true);
+        update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => $how, 'audio' => $about], false);
+        return implode(' ', $texts);
+    }
+
+    /** One piece through Google's ways, the one that worked last time first. @return string|\WP_Error */
+    private static function one($token, $project, $body, $is_m4a, $ogg, array $params, array &$tried, $label = ''){
         $order = array_keys(self::ATTEMPTS);
         $worked = (string) get_option(self::WORKED, '');
         if ( isset(self::ATTEMPTS[$worked]) ) $order = array_values(array_unique(array_merge([$worked], $order)));
         $order = (array) apply_filters('madoficina_voice_attempts', $order);
-        $tried = [];
-        $is_m4a = str_starts_with($audio, 'm4a');
-        $ogg = $is_m4a && str_contains($audio, '(Opus') ? (new Mp4Audio($file['body']))->opus_to_ogg() : null;
-        $params = $is_m4a ? self::mp4_audio($file['body']) : [];
+        $last = null; $only_silence = true;
         foreach ( $order as $key ) {
             $a = self::ATTEMPTS[$key] ?? null;
             $for = $a['for'] ?? '';
             if ( ! $a || ( $for === 'm4a' && ( ! $is_m4a || $ogg ) ) || ( $for === 'opus' && ! $ogg ) ) continue;
-            $r = self::recognize($token, $project, $a + ($for === 'm4a' ? $params : []), $for === 'opus' ? $ogg : $file['body']);
-            if ( ! is_wp_error($r) ) {
-                update_option(self::WORKED, $key, false);
-                update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => $key, 'audio' => $about], false);
-                return $r;
-            }
+            $r = self::recognize($token, $project, $a + ($for === 'm4a' ? $params : []), $for === 'opus' ? $ogg : $body);
+            if ( ! is_wp_error($r) ) { update_option(self::WORKED, $key, false); return $r; }
             $code = (int) ($r->get_error_data()['status'] ?? 0);
-            $msg = $r->get_error_message();
-            $tried[] = $key . ': ' . $code . ' ' . $msg;
-            if ( $code === 403 ) {
-                update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
-                return new \WP_Error('madof_stt_off', sprintf(__('Para entender audios, en Google Cloud (proyecto %1$s) activa «Cloud Speech-to-Text API» y da a la cuenta de servicio %2$s el rol «Cloud Speech Client». Mientras, escríbemelo.', 'mad-oficina'), $project, $account->email()));
-            }
-            if ( $code === 400 && stripos($msg, 'duration') !== false ) {
-                update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
-                return new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de %d segundos: mándamelo más corto o en dos partes.', 'mad-oficina'), self::MAX_SECONDS));
-            }
-            if ( in_array($code, [401, 403, 429], true) || $code >= 500 ) break; // not about the audio or the model: no point in trying others
+            $tried[] = $label . $key . ': ' . $code . ' ' . $r->get_error_message();
+            $last = $r;
+            if ( $code !== 200 ) $only_silence = false; // 200 with no words = it was read and nobody spoke
+            if ( $code === 403 ) return new \WP_Error('madof_stt_forbidden', $r->get_error_message());
+            if ( $code === 400 && stripos($r->get_error_message(), 'duration') !== false ) return new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de un minuto y en este formato no lo puedo partir: mándamelo más corto o en dos partes.', 'mad-oficina')));
+            if ( in_array($code, [401, 429], true) || $code >= 500 ) break; // not about the audio or the model: no point in trying others
         }
-        // Last resort: the server converts the audio to ogg/opus (Google always takes it), if it has ffmpeg.
-        if ( $tried && ! str_starts_with($audio, 'ogg') && ( $ogg = self::to_ogg($file['body']) ) ) {
-            $r = self::recognize($token, $project, self::ATTEMPTS['long'], $ogg);
-            if ( ! is_wp_error($r) ) {
-                update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => 'long (convertido a ogg)', 'audio' => $about], false);
-                return $r;
-            }
-            $tried[] = 'ogg: ' . (int) ($r->get_error_data()['status'] ?? 0) . ' ' . $r->get_error_message();
-        }
-        update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried, 'kept' => self::keep_failed($file['body'])], false);
-        return new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (formato %1$s). Google dice: %2$s. Mientras lo miramos, escríbemelo; el detalle está en Chat → ajustes.', 'mad-oficina'),
-            $audio, $tried ? preg_replace('/^[a-z_0-9]+: /', '', end($tried)) : '—'));
+        if ( $last && $only_silence ) return new \WP_Error('madof_stt_empty', $last->get_error_message());
+        return $last ?: new \WP_Error('madof_stt_http', '—');
     }
 
     /** The last audio Google could not read, kept privately so it can be looked at (one at a time, a week). */

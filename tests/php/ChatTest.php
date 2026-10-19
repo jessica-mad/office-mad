@@ -86,7 +86,7 @@ class ChatTest extends MADOF_TestCase {
             $this->speech_calls++;
             $body = json_decode($args['body'], true);
             $sent_audio = base64_decode($body['content']);
-            if ( substr($sent_audio, 0, 4) !== 'OggS' ) $this->assertSame(strlen($this->audio_bytes), strlen($sent_audio), 'same bytes (maybe reordered)');
+            if ( substr($sent_audio, 0, 4) !== 'OggS' && strlen($sent_audio) > strlen($this->audio_bytes) / 2 ) $this->assertSame(strlen($this->audio_bytes), strlen($sent_audio), 'same bytes (maybe reordered)');
             $this->sent_audio[] = $sent_audio;
             $this->speech_configs[] = $body['config'];
             $this->assertSame($m[1] ?: 'global', $m[2], 'regional models go to their regional endpoint');
@@ -696,6 +696,22 @@ class ChatTest extends MADOF_TestCase {
         $this->assertNull((new \MAD_Oficina\Chat\Mp4Audio($sent))->faststart(), 'nothing left to move');
         $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
         $this->assertStringContainsString('índice movido', get_option(\MAD_Oficina\Chat\Transcriber::LAST)['audio']);
+        $this->audio_bytes = 'fake-audio-bytes';
+    }
+
+    public function test_a_voice_note_longer_than_a_minute_goes_in_equal_pieces(){
+        $this->key();
+        $this->claude = [['text' => 'Vale.']];
+        $this->audio_bytes = file_get_contents(dirname(__DIR__) . '/fixtures/voz-larga-sintetica.m4a'); // 2 min 10 s synthetic tone
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mpeg', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertCount(3, $this->sent_audio, 'three pieces of about 43 s, one request each');
+        foreach ( $this->sent_audio as $piece ) {
+            $d = (new \MAD_Oficina\Chat\Mp4Audio($piece))->duration();
+            $this->assertGreaterThan(40, $d);
+            $this->assertLessThanOrEqual(55, $d, 'never over Google\'s minute');
+        }
+        $this->assertSame('ya he subido los anuncios ya he subido los anuncios ya he subido los anuncios', end($this->prompts[0]['messages'])['content'], 'the pieces joined in order');
+        $this->assertStringContainsString('3 partes', get_option(\MAD_Oficina\Chat\Transcriber::LAST)['audio']);
         $this->audio_bytes = 'fake-audio-bytes';
     }
 

@@ -173,6 +173,93 @@ final class Mp4Audio {
         return $out;
     }
 
+    /** Media timescale and length, from «mdhd». @return array{scale:int, units:int}|null */
+    private function media_time(){
+        $mdhd = $this->find('/mdia/mdhd');
+        if ( ! $mdhd ) return null;
+        $m = $this->body($mdhd);
+        return ord($m[0]) === 1
+            ? ['scale' => unpack('N', substr($m, 20, 4))[1], 'units' => (int) unpack('J', substr($m, 24, 8))[1]]
+            : ['scale' => unpack('N', substr($m, 12, 4))[1], 'units' => unpack('N', substr($m, 16, 4))[1]];
+    }
+
+    /** Seconds of audio (0 if unknown). */
+    public function duration(){
+        $t = $this->media_time();
+        return $t && $t['scale'] ? $t['units'] / $t['scale'] : 0.0;
+    }
+
+    /** Duration of each sample in media units, from «stts». @return int[] */
+    private function deltas(){
+        $stts = $this->find('/stbl/stts');
+        if ( ! $stts ) return [];
+        $t = $this->body($stts); $n = unpack('N', substr($t, 4, 4))[1]; $out = [];
+        for ( $i = 0; $i < $n; $i++ ) { $e = unpack('Ncount/Ndelta', substr($t, 8 + 8 * $i, 8)); for ( $k = 0; $k < $e['count']; $k++ ) $out[] = $e['delta']; }
+        return $out;
+    }
+
+    private static function box($type, $payload){ return pack('N', 8 + strlen($payload)) . $type . $payload; }
+
+    /** A box with its duration field rewritten (mvhd, tkhd, mdhd; versions 0 and 1). */
+    private function with_duration($suffix, $units){
+        $box = $this->find($suffix);
+        $b = $this->body($box); $v1 = ord($b[0]) === 1;
+        $at = ['mvhd' => $v1 ? 24 : 16, 'tkhd' => $v1 ? 28 : 20, 'mdhd' => $v1 ? 24 : 16][substr($suffix, -4)];
+        $b = substr_replace($b, $v1 ? pack('J', $units) : pack('N', $units), $at, $v1 ? 8 : 4);
+        return self::box(substr($suffix, -4), $b);
+    }
+
+    /**
+     * The audio cut into pieces of at most $seconds, each one a complete m4a of its own
+     * (same frames, nothing re-encoded), for recognisers that take one minute at a time.
+     * @return string[] (just the original if it is short, or it can't be cut)
+     */
+    public function split($seconds){
+        $t = $this->media_time();
+        if ( ! $t || ! $t['scale'] || $this->fragmented() || $this->duration() <= $seconds ) return [$this->b];
+        $frames = $this->samples(); $deltas = $this->deltas();
+        if ( ! $frames || count($deltas) !== count($frames) ) return [$this->b];
+        $mvhd = $this->find('/moov/mvhd'); $mv = $this->body($mvhd);
+        $movie_scale = ord($mv[0]) === 1 ? unpack('N', substr($mv, 20, 4))[1] : unpack('N', substr($mv, 12, 4))[1];
+        $keep = fn($suffix) => ($x = $this->find($suffix)) ? substr($this->b, $x['start'], $x['size']) : '';
+        $ftyp = $keep('/ftyp');
+        // Equal pieces (3 × 59 s rather than 50 + 50 + 50 + 27), never longer than asked.
+        $total = array_sum($deltas);
+        $limit = (int) min($seconds * $t['scale'], ceil($total / ceil($total / ($seconds * $t['scale']))) + max($deltas)); // + one frame: no crumbs left over
+        $pieces = []; $start = 0; $n = count($frames);
+        while ( $start < $n ) {
+            $units = 0; $end = $start;
+            while ( $end < $n && $units + $deltas[$end] <= $limit ) $units += $deltas[$end++];
+            if ( $end === $start ) $end++;
+            $data = implode('', array_slice($frames, $start, $end - $start));
+            $count = $end - $start;
+            $stts = ''; $runs = 0; $prev = null; $run = 0;
+            foreach ( array_slice($deltas, $start, $count) as $d ) {
+                if ( $d === $prev ) { $run++; continue; }
+                if ( $prev !== null ) { $stts .= pack('NN', $run, $prev); $runs++; }
+                $prev = $d; $run = 1;
+            }
+            $stts .= pack('NN', $run, $prev); $runs++;
+            $sizes = implode('', array_map(fn($f) => pack('N', strlen($f)), array_slice($frames, $start, $count)));
+            $build = function($chunk_offset) use ($keep, $stts, $runs, $count, $sizes, $units, $t, $movie_scale){
+                $stbl = self::box('stbl', $keep('/stbl/stsd')
+                    . self::box('stts', "\0\0\0\0" . pack('N', $runs) . $stts)
+                    . self::box('stsc', "\0\0\0\0" . pack('NNNN', 1, 1, $count, 1))
+                    . self::box('stsz', "\0\0\0\0" . pack('NN', 0, $count) . $sizes)
+                    . self::box('stco', "\0\0\0\0" . pack('NN', 1, $chunk_offset)));
+                $minf = self::box('minf', $keep('/minf/smhd') . $keep('/minf/dinf') . $stbl);
+                $mdia = self::box('mdia', $this->with_duration('/mdia/mdhd', $units) . $keep('/mdia/hdlr') . $minf);
+                $trak = self::box('trak', $this->with_duration('/trak/tkhd', (int) round($units / $t['scale'] * $movie_scale)) . $mdia);
+                return self::box('moov', $this->with_duration('/moov/mvhd', (int) round($units / $t['scale'] * $movie_scale)) . $trak);
+            };
+            $moov = $build(0);
+            $moov = $build(strlen($ftyp) + strlen($moov) + 8); // the sound starts right after ftyp, moov and mdat's header
+            $pieces[] = $ftyp . $moov . self::box('mdat', $data);
+            $start = $end;
+        }
+        return $pieces;
+    }
+
     /** @return string|null the same Opus audio as an Ogg Opus file */
     public function opus_to_ogg(){
         if ( $this->codec() !== 'Opus' ) return null;
