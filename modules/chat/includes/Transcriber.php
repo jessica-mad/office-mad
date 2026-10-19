@@ -71,6 +71,28 @@ final class Transcriber {
         return $voice['audio'] ? self::transcribe($api, $voice['audio']) : new \WP_Error('madof_stt_empty', __('No he oído nada en el audio. ¿Me lo repites?', 'mad-oficina'));
     }
 
+    /** Google's ways of recognising, tried in order until one takes the audio; the one that worked goes first next time. */
+    const ATTEMPTS = [
+        'long'    => ['location' => 'global', 'model' => 'long'],
+        'short'   => ['location' => 'global', 'model' => 'short'],
+        'chirp_2' => ['location' => 'europe-west4', 'model' => 'chirp_2'],
+    ];
+    const WORKED = 'madoficina_voice_worked';
+    const LAST = 'madoficina_voice_last';
+
+    /** What the audio really is, by its first bytes (the content type Chat gives may say little). */
+    public static function container($bytes){
+        $head = substr((string) $bytes, 0, 16);
+        if ( substr($head, 4, 4) === 'ftyp' ) return 'm4a/mp4 (AAC)';
+        if ( substr($head, 0, 4) === 'OggS' ) return 'ogg (opus)';
+        if ( substr($head, 0, 4) === "\x1A\x45\xDF\xA3" ) return 'webm';
+        if ( substr($head, 0, 4) === 'RIFF' ) return 'wav';
+        if ( substr($head, 0, 3) === 'ID3' || (ord($head[0] ?? "\0") === 0xFF && (ord($head[1] ?? "\0") & 0xE0) === 0xE0) ) return 'mp3';
+        if ( substr($head, 0, 5) === '#!AMR' ) return 'amr';
+        if ( substr($head, 0, 4) === 'fLaC' ) return 'flac';
+        return 'desconocido (' . bin2hex(substr($head, 0, 8)) . ')';
+    }
+
     /** @return string|\WP_Error */
     public static function transcribe(ChatApi $api, $resource){
         $file = $api->download($resource, self::MAX_BYTES);
@@ -81,7 +103,69 @@ final class Transcriber {
         $token = $account->access_token(ServiceAccount::SCOPE_CLOUD);
         if ( is_wp_error($token) ) return $token;
 
-        $url = 'https://speech.googleapis.com/v2/projects/' . rawurlencode($project) . '/locations/global/recognizers/_:recognize';
+        $audio = self::container($file['body']);
+        $about = sprintf('%s · %s · %d KB', $audio, $file['type'] ?: '—', (int) ceil(strlen($file['body']) / 1024));
+        $order = array_keys(self::ATTEMPTS);
+        $worked = (string) get_option(self::WORKED, '');
+        if ( isset(self::ATTEMPTS[$worked]) ) $order = array_values(array_unique(array_merge([$worked], $order)));
+        $order = (array) apply_filters('madoficina_voice_attempts', $order);
+        $tried = [];
+        foreach ( $order as $key ) {
+            $a = self::ATTEMPTS[$key] ?? null;
+            if ( ! $a ) continue;
+            $r = self::recognize($token, $project, $a, $file['body']);
+            if ( ! is_wp_error($r) ) {
+                update_option(self::WORKED, $key, false);
+                update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => $key, 'audio' => $about], false);
+                return $r;
+            }
+            $code = (int) ($r->get_error_data()['status'] ?? 0);
+            $msg = $r->get_error_message();
+            $tried[] = $key . ': ' . $code . ' ' . $msg;
+            if ( $code === 403 ) {
+                update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
+                return new \WP_Error('madof_stt_off', sprintf(__('Para entender audios, en Google Cloud (proyecto %1$s) activa «Cloud Speech-to-Text API» y da a la cuenta de servicio %2$s el rol «Cloud Speech Client». Mientras, escríbemelo.', 'mad-oficina'), $project, $account->email()));
+            }
+            if ( $code === 400 && stripos($msg, 'duration') !== false ) {
+                update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
+                return new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de %d segundos: mándamelo más corto o en dos partes.', 'mad-oficina'), self::MAX_SECONDS));
+            }
+            if ( $code !== 400 && $code !== 404 ) break; // not about the audio or the model: no point in trying others
+        }
+        // Last resort: the server converts the audio to ogg/opus (Google always takes it), if it has ffmpeg.
+        if ( $tried && ! str_starts_with($audio, 'ogg') && ( $ogg = self::to_ogg($file['body']) ) ) {
+            $r = self::recognize($token, $project, self::ATTEMPTS['long'], $ogg);
+            if ( ! is_wp_error($r) ) {
+                update_option(self::LAST, ['at' => time(), 'ok' => true, 'how' => 'long (convertido a ogg)', 'audio' => $about], false);
+                return $r;
+            }
+            $tried[] = 'ogg: ' . (int) ($r->get_error_data()['status'] ?? 0) . ' ' . $r->get_error_message();
+        }
+        update_option(self::LAST, ['at' => time(), 'ok' => false, 'audio' => $about, 'tried' => $tried], false);
+        return new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (formato %1$s). Google dice: %2$s. Mientras lo miramos, escríbemelo; el detalle está en Chat → ajustes.', 'mad-oficina'),
+            $audio, $tried ? preg_replace('/^[a-z_0-9]+: /', '', end($tried)) : '—'));
+    }
+
+    /** @return string|null the audio as ogg/opus, when the server has ffmpeg */
+    public static function to_ogg($bytes){
+        $bin = (string) apply_filters('madoficina_ffmpeg', '');
+        if ( $bin === '' && function_exists('exec') && ! in_array('exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true) ) {
+            @exec('command -v ffmpeg 2>/dev/null', $out);
+            $bin = trim((string) ($out[0] ?? ''));
+        }
+        if ( $bin === '' || ! is_executable($bin) ) return null;
+        $in = wp_tempnam('madof-voice'); $out_file = $in . '.ogg';
+        file_put_contents($in, $bytes);
+        @exec(escapeshellarg($bin) . ' -y -loglevel error -i ' . escapeshellarg($in) . ' -ac 1 -ar 16000 -c:a libopus ' . escapeshellarg($out_file) . ' 2>/dev/null', $o, $code);
+        $ogg = $code === 0 && is_readable($out_file) ? (string) file_get_contents($out_file) : '';
+        @unlink($in); @unlink($out_file);
+        return $ogg !== '' ? $ogg : null;
+    }
+
+    /** One recognition request. @return string|\WP_Error the text */
+    private static function recognize($token, $project, array $a, $bytes){
+        $host = $a['location'] === 'global' ? 'speech.googleapis.com' : $a['location'] . '-speech.googleapis.com';
+        $url = 'https://' . $host . '/v2/projects/' . rawurlencode($project) . '/locations/' . $a['location'] . '/recognizers/_:recognize';
         $res = wp_remote_post($url, [
             'timeout' => 45,
             'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json; charset=utf-8'],
@@ -89,31 +173,22 @@ final class Transcriber {
                 'config'  => [
                     'autoDecodingConfig' => new \stdClass(), // m4a/aac, ogg/opus, mp3, wav…
                     'languageCodes'      => (array) apply_filters('madoficina_voice_languages', ['es-ES']),
-                    'model'              => (string) apply_filters('madoficina_voice_model', 'long'),
+                    'model'              => $a['model'],
                     'features'           => ['enableAutomaticPunctuation' => true],
                 ],
-                'content' => base64_encode($file['body']),
+                'content' => base64_encode($bytes),
             ]),
         ]);
         if ( is_wp_error($res) ) return $res;
         $code = wp_remote_retrieve_response_code($res);
         $data = json_decode(wp_remote_retrieve_body($res), true) ?: [];
-        if ( $code >= 300 ) {
-            $msg = (string) ($data['error']['message'] ?? '');
-            if ( $code === 403 ) {
-                return new \WP_Error('madof_stt_off', sprintf(__('Para entender audios, en Google Cloud (proyecto %1$s) activa «Cloud Speech-to-Text API» y da a la cuenta de servicio %2$s el rol «Cloud Speech Client». Mientras, escríbemelo.', 'mad-oficina'), $project, $account->email()));
-            }
-            if ( $code === 400 && stripos($msg, 'duration') !== false ) {
-                return new \WP_Error('madof_stt_long', sprintf(__('El audio dura más de %d segundos: mándamelo más corto o en dos partes.', 'mad-oficina'), self::MAX_SECONDS));
-            }
-            return new \WP_Error('madof_stt_http', sprintf(__('No he podido transcribir el audio (%1$d: %2$s).', 'mad-oficina'), $code, $msg));
-        }
+        if ( $code >= 300 ) return new \WP_Error('madof_stt_http', mb_substr((string) ($data['error']['message'] ?? wp_remote_retrieve_response_message($res)), 0, 220), ['status' => $code]);
         $parts = [];
         foreach ( (array) ($data['results'] ?? []) as $r ) {
             $t = trim((string) ($r['alternatives'][0]['transcript'] ?? ''));
             if ( $t !== '' ) $parts[] = $t;
         }
         $text = trim(implode(' ', $parts));
-        return $text !== '' ? $text : new \WP_Error('madof_stt_empty', __('No he oído nada en el audio. ¿Me lo repites?', 'mad-oficina'));
+        return $text !== '' ? $text : new \WP_Error('madof_stt_empty', __('No he oído nada en el audio. ¿Me lo repites?', 'mad-oficina'), ['status' => 200]);
     }
 }

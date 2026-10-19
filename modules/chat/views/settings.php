@@ -122,6 +122,11 @@ $errors = $wpdb->get_results("SELECT event, data, created_at FROM " . \MAD_Ofici
         <?php $shape = get_option(\MAD_Oficina\Chat\Transcriber::SHAPE_OPTION); if ( $shape ) : ?>
             <p class="description"><?php echo esc_html(sprintf(__('Último audio recibido %s.', 'mad-oficina'), sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $shape['at'])))); ?></p>
         <?php endif; ?>
+        <?php $vl = get_option(\MAD_Oficina\Chat\Transcriber::LAST); if ( is_array($vl) ) : ?>
+            <p class="<?php echo $vl['ok'] ? 'description' : 'madof-warn'; ?>"><?php echo esc_html($vl['ok']
+                ? sprintf(__('Última transcripción bien (%1$s, modelo %2$s), %3$s.', 'mad-oficina'), $vl['audio'], $vl['how'], sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $vl['at'])))
+                : sprintf(__('Última transcripción fallida (%1$s), %2$s. Intentos: %3$s', 'mad-oficina'), $vl['audio'], sprintf(__('hace %s', 'mad-oficina'), human_time_diff((int) $vl['at'])), implode(' | ', (array) ($vl['tried'] ?? [])))); ?></p>
+        <?php endif; ?>
     </section>
 
     <details class="madof-card madof-details" <?php echo $sa ? '' : 'open'; ?>>

@@ -27,6 +27,8 @@ class ChatTest extends MADOF_TestCase {
     private $prompts = [];  // what Claude was sent
     private $speech = null; // [code, body] for Speech-to-Text
     private $speech_calls = 0;
+    private $speech_by_model = [];
+    private $speech_models = [];
 
     public static function wpSetUpBeforeClass($factory){
         self::$google_key = openssl_pkey_new(['private_key_bits' => 2048]);
@@ -50,6 +52,8 @@ class ChatTest extends MADOF_TestCase {
         delete_transient('madof_chat_token_' . md5('bot@proj.iam.gserviceaccount.com|' . \MAD_Oficina\Chat\ServiceAccount::SCOPE_CLOUD));
         delete_option(TaskList::OPTION);
         delete_option(\MAD_Oficina\Chat\Assistant::STATUS);
+        delete_option(\MAD_Oficina\Chat\Transcriber::WORKED);
+        delete_option(\MAD_Oficina\Chat\Transcriber::LAST);
         delete_option(\MAD_Oficina\Chat\Memory::FACTS);
         delete_option(\MAD_Oficina\Chat\Memory::HISTORY);
         add_filter('madoficina_chat_assistant_mode', fn() => 'inline');
@@ -75,11 +79,13 @@ class ChatTest extends MADOF_TestCase {
             if ( strpos($url, 'TRANSCRIPT') !== false ) return ['response' => ['code' => 200], 'headers' => ['content-type' => 'text/plain'], 'body' => 'La de los anuncios ya está hecha'];
             return ['response' => ['code' => 200], 'headers' => ['content-type' => 'audio/mp4'], 'body' => 'fake-audio-bytes'];
         }
-        if ( strpos($url, 'https://speech.googleapis.com/v2/projects/mad-oficina-test/locations/global/recognizers/_:recognize') === 0 ) {
+        if ( preg_match('#^https://(?:([a-z0-9-]+)-)?speech\.googleapis\.com/v2/projects/mad-oficina-test/locations/([a-z0-9-]+)/recognizers/_:recognize#', $url, $m) ) {
             $this->speech_calls++;
             $body = json_decode($args['body'], true);
             $this->assertSame(base64_encode('fake-audio-bytes'), $body['content']);
-            [$code, $out] = $this->speech ?? [200, ['results' => [['alternatives' => [['transcript' => 'ya he subido los anuncios']]]]]];
+            $this->assertSame($m[1] ?: 'global', $m[2], 'regional models go to their regional endpoint');
+            $this->speech_models[] = $body['config']['model'];
+            [$code, $out] = $this->speech_by_model[$body['config']['model']] ?? $this->speech ?? [200, ['results' => [['alternatives' => [['transcript' => 'ya he subido los anuncios']]]]]];
             return ['response' => ['code' => $code], 'body' => wp_json_encode($out)];
         }
         if ( $url === 'https://api.anthropic.com/v1/messages' ) {
@@ -615,6 +621,33 @@ class ChatTest extends MADOF_TestCase {
         $this->assertStringContainsString('Cloud Speech-to-Text API', $msg);
         $this->assertStringContainsString('mad-oficina-test', $msg);
         $this->assertSame([], $this->prompts);
+    }
+
+    public function test_when_google_refuses_the_audio_other_models_are_tried_and_the_one_that_works_is_remembered(){
+        $this->key();
+        $this->claude = [['text' => 'Hecho.'], ['text' => 'Vale.']];
+        add_filter('madoficina_ffmpeg', fn() => '/nonexistent/ffmpeg');
+        $bad = [400, ['error' => ['code' => 400, 'message' => 'Audio encoding not supported for this model.', 'status' => 'INVALID_ARGUMENT']]];
+        $this->speech_by_model = ['long' => $bad, 'short' => $bad];
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertSame(['long', 'short', 'chirp_2'], $this->speech_models);
+        $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
+        $this->assertSame('chirp_2', get_option(\MAD_Oficina\Chat\Transcriber::WORKED));
+        $this->speech_models = [];
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $this->assertSame(['chirp_2'], $this->speech_models, 'next time it goes straight to the one that worked');
+
+        // None takes it: she reads what Google says, and the detail stays in the settings.
+        $this->speech_by_model = ['long' => $bad, 'short' => $bad, 'chirp_2' => $bad];
+        delete_option(\MAD_Oficina\Chat\Transcriber::WORKED);
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mp4', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $msg = $this->last_to_jessica();
+        $this->assertStringContainsString('Audio encoding not supported', $msg);
+        $last = get_option(\MAD_Oficina\Chat\Transcriber::LAST);
+        $this->assertFalse($last['ok']);
+        $this->assertCount(3, $last['tried']);
+        $this->assertStringContainsString('audio/mp4', $last['audio']);
+        remove_all_filters('madoficina_ffmpeg');
     }
 
     public function test_strangers_voice_or_words_reach_no_one(){
