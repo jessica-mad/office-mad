@@ -86,7 +86,7 @@ class ChatTest extends MADOF_TestCase {
             $this->speech_calls++;
             $body = json_decode($args['body'], true);
             $sent_audio = base64_decode($body['content']);
-            if ( substr($sent_audio, 0, 4) !== 'OggS' ) $this->assertSame($this->audio_bytes, $sent_audio);
+            if ( substr($sent_audio, 0, 4) !== 'OggS' ) $this->assertSame(strlen($this->audio_bytes), strlen($sent_audio), 'same bytes (maybe reordered)');
             $this->sent_audio[] = $sent_audio;
             $this->speech_configs[] = $body['config'];
             $this->assertSame($m[1] ?: 'global', $m[2], 'regional models go to their regional endpoint');
@@ -652,6 +652,7 @@ class ChatTest extends MADOF_TestCase {
         $last = get_option(\MAD_Oficina\Chat\Transcriber::LAST);
         $this->assertFalse($last['ok']);
         $this->assertCount(3, $last['tried']);
+        $this->assertFileExists(wp_upload_dir()['basedir'] . '/mad-oficina/voice/' . $last['kept'], 'the audio is kept to look at it');
         $this->assertStringContainsString('application/octet-stream', $last['audio'], 'what Chat said it was, and what it really is');
         remove_all_filters('madoficina_ffmpeg');
     }
@@ -681,6 +682,20 @@ class ChatTest extends MADOF_TestCase {
         $this->assertArrayHasKey('autoDecodingConfig', $this->speech_configs[0]);
         $this->assertSame('long_ogg', get_option(\MAD_Oficina\Chat\Transcriber::WORKED));
         $this->assertStringContainsString('Opus, fragmentado', \MAD_Oficina\Chat\Transcriber::container($this->audio_bytes));
+        $this->audio_bytes = 'fake-audio-bytes';
+    }
+
+    public function test_phone_m4a_with_the_index_at_the_end_is_sent_index_first(){
+        $this->key();
+        $this->claude = [['text' => 'Vale.']];
+        $this->audio_bytes = file_get_contents(dirname(__DIR__) . '/fixtures/voz-aac-indice-al-final-sintetica.m4a'); // 4 s synthetic tone, «moov» after «mdat»
+        $this->assertGreaterThan(strpos($this->audio_bytes, 'mdat'), strpos($this->audio_bytes, 'moov'));
+        $this->voice([['contentName' => 'voice.m4a', 'contentType' => 'audio/mpeg', 'attachmentDataRef' => ['resourceName' => 'AUDIO-REF']]]);
+        $sent = $this->sent_audio[0];
+        $this->assertLessThan(strpos($sent, 'mdat'), strpos($sent, 'moov'), 'Google gets the index first');
+        $this->assertNull((new \MAD_Oficina\Chat\Mp4Audio($sent))->faststart(), 'nothing left to move');
+        $this->assertSame('ya he subido los anuncios', end($this->prompts[0]['messages'])['content']);
+        $this->assertStringContainsString('índice movido', get_option(\MAD_Oficina\Chat\Transcriber::LAST)['audio']);
         $this->audio_bytes = 'fake-audio-bytes';
     }
 

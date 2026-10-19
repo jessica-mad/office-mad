@@ -117,6 +117,12 @@ final class Transcriber {
         if ( is_wp_error($token) ) return $token;
 
         $audio = self::container($file['body']);
+        // Phones save the index after the sound; Google reads in chunks and finds «no audio» once
+        // the note is longer than a few seconds. Index first, same sound.
+        if ( str_starts_with($audio, 'm4a') && ( $fast = (new Mp4Audio($file['body']))->faststart() ) ) {
+            $file['body'] = $fast;
+            $audio = rtrim($audio, ')') . ', índice movido al principio)';
+        }
         $about = sprintf('%s · %s · %d KB', $audio, $file['type'] ?: '—', (int) ceil(strlen($file['body']) / 1024));
         $order = array_keys(self::ATTEMPTS);
         $worked = (string) get_option(self::WORKED, '');

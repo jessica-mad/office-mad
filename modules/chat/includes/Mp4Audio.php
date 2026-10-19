@@ -52,6 +52,51 @@ final class Mp4Audio {
 
     public function fragmented(){ return (bool) $this->find('/moof'); }
 
+    /** Whether the index («moov») comes after the sound («mdat»): fine for a player, not for a reader in chunks. */
+    public function index_at_end(){
+        $top = array_values(array_filter($this->boxes, fn($x) => substr_count($x['path'], '/') === 1));
+        $types = array_map(fn($x) => substr($x['path'], 1), $top);
+        $moov = array_search('moov', $types, true); $mdat = array_search('mdat', $types, true);
+        return $moov !== false && $mdat !== false && $moov > $mdat;
+    }
+
+    /**
+     * The same file with the index first («faststart»): boxes reordered and the chunk
+     * offsets in stco/co64 moved by as much as their data moved. Not a byte of sound changes.
+     * @return string|null null if it already was (or it is not an mp4)
+     */
+    public function faststart(){
+        if ( ! $this->index_at_end() ) return null;
+        $top = array_values(array_filter($this->boxes, fn($x) => substr_count($x['path'], '/') === 1));
+        $moov = array_values(array_filter($top, fn($x) => $x['path'] === '/moov'))[0];
+        $firstData = min(array_map(fn($x) => $x['start'], array_filter($top, fn($x) => $x['path'] === '/mdat')));
+        $before = array_values(array_filter($top, fn($x) => $x['start'] < $firstData && $x['path'] !== '/moov'));
+        $after = array_values(array_filter($top, fn($x) => $x['start'] >= $firstData && $x['path'] !== '/moov'));
+        $order = array_merge($before, [$moov], $after);
+        $new = []; $pos = 0;
+        foreach ( $order as $x ) { $new[$x['start']] = $pos; $pos += $x['size']; }
+        $shift = function($off) use ($top, $new){
+            foreach ( $top as $x ) if ( $off >= $x['start'] && $off < $x['start'] + $x['size'] ) return $off - $x['start'] + $new[$x['start']];
+            return $off;
+        };
+        $mv = substr($this->b, $moov['start'], $moov['size']);
+        foreach ( $this->boxes as $box ) {
+            $wide = str_ends_with($box['path'], '/stbl/co64');
+            if ( ! $wide && ! str_ends_with($box['path'], '/stbl/stco') ) continue;
+            if ( ! str_starts_with($box['path'], '/moov/') ) continue;
+            $rel = $box['start'] - $moov['start'] + $box['hs'];
+            $n = unpack('N', substr($mv, $rel + 4, 4))[1];
+            for ( $i = 0; $i < $n; $i++ ) {
+                $at = $rel + 8 + ($wide ? 8 : 4) * $i;
+                $old = $wide ? (int) unpack('J', substr($mv, $at, 8))[1] : unpack('N', substr($mv, $at, 4))[1];
+                $mv = substr_replace($mv, $wide ? pack('J', $shift($old)) : pack('N', $shift($old)), $at, $wide ? 8 : 4);
+            }
+        }
+        $out = '';
+        foreach ( $order as $x ) $out .= $x['path'] === '/moov' ? $mv : substr($this->b, $x['start'], $x['size']);
+        return $out;
+    }
+
     /** The AAC flavour (LC, HE-AAC, ELD…) and its sample rate, from the decoder config in «esds». */
     public function aac_profile(){
         $i = strpos($this->b, 'esds');
