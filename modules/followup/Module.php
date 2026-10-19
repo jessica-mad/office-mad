@@ -65,6 +65,8 @@ return new class($core) implements MAD_Oficina_Module {
         }, 20);
 
         add_action('admin_post_madof_followup_settings', [$this, 'handle_settings']);
+        add_action('admin_post_madof_task_status', [$this, 'handle_task_status']);
+        add_action('admin_menu', fn() => add_submenu_page(MAD_Oficina_Core::MENU_SLUG_ROOT, __('Tareas', 'mad-oficina'), __('Tareas', 'mad-oficina'), MAD_Oficina_Core::CAPABILITY, 'mad-oficina-tareas', [$this, 'render_tasks_page']));
         add_action('admin_post_madof_followup_run', [$this, 'handle_run']);
         add_action('admin_post_madof_idea_resolve', [$this, 'handle_idea_resolve']);
     }
@@ -125,6 +127,45 @@ return new class($core) implements MAD_Oficina_Module {
         $r = \MAD_Oficina\Followup\Coordinator::resolve_idea(absint($_POST['idea_id'] ?? 0), sanitize_key($_POST['decision'] ?? ''));
         if ( is_wp_error($r) ) $this->back($r->get_error_message(), 'error');
         $this->back($r['idea']['title'] . ': ' . $r['message']);
+    }
+
+    /** «Hecha» / «Reabrir» from the task list. */
+    public function handle_task_status(){
+        $this->guard('task_status');
+        global $wpdb;
+        $id = absint($_POST['task'] ?? 0);
+        $done = ($_POST['status'] ?? '') === 'done';
+        $now = \MAD_Oficina\Core\Time::now();
+        $wpdb->update(\MAD_Oficina\Core\Schema::table('action_items'), ['status' => $done ? 'done' : 'open', 'completed_at' => $done ? $now : null, 'updated_at' => $now], ['id' => $id]);
+        \MAD_Oficina\Core\AdminUi::flash(sprintf($done ? __('Tarea #%d hecha.', 'mad-oficina') : __('Tarea #%d reabierta.', 'mad-oficina'), $id));
+        parse_str((string) wp_unslash($_POST['back'] ?? ''), $q);
+        $q = array_intersect_key($q, array_flip(['client', 'owner', 'status', 'q']));
+        wp_safe_redirect(add_query_arg(['page' => 'mad-oficina-tareas'] + $q, admin_url('admin.php')) . '#tarea-' . $id);
+        exit;
+    }
+
+    public function render_tasks_page(){
+        if ( ! current_user_can(MAD_Oficina_Core::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        global $wpdb;
+        $f = [
+            'q' => sanitize_text_field(wp_unslash($_GET['q'] ?? '')), 'client' => absint($_GET['client'] ?? 0),
+            'owner' => in_array($_GET['owner'] ?? '', ['jessica', 'mad', 'liz', 'cliente'], true) ? $_GET['owner'] : '',
+            'status' => in_array($_GET['status'] ?? '', ['open', 'done', 'cancelled', 'all'], true) ? $_GET['status'] : 'open',
+        ];
+        $w = ['1=1']; $args = [];
+        if ( preg_match('/^#?(\d+)$/', $f['q'], $m) ) { $w[] = 'id = %d'; $args[] = (int) $m[1]; $f['status'] = 'all'; }
+        elseif ( $f['q'] !== '' ) { $like = '%' . $wpdb->esc_like($f['q']) . '%'; $w[] = '(title LIKE %s OR description LIKE %s)'; $args[] = $like; $args[] = $like; }
+        if ( $f['client'] ) { $w[] = 'client_id = %d'; $args[] = $f['client']; }
+        if ( $f['owner'] === 'liz' ) $w[] = "(owner = 'liz' OR team_member_id IS NOT NULL)";
+        elseif ( $f['owner'] ) { $w[] = 'owner = %s'; $args[] = $f['owner']; }
+        if ( $f['status'] === 'open' ) $w[] = "status IN ('open','in_progress')";
+        elseif ( $f['status'] !== 'all' ) { $w[] = 'status = %s'; $args[] = $f['status']; }
+        $t = \MAD_Oficina\Core\Schema::table('action_items');
+        $where = implode(' AND ', $w);
+        $total = (int) ($args ? $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$t} WHERE {$where}", ...$args)) : $wpdb->get_var("SELECT COUNT(*) FROM {$t} WHERE {$where}"));
+        $sql = "SELECT * FROM {$t} WHERE {$where} ORDER BY (status IN ('open','in_progress')) DESC, (due_date IS NULL), due_date, id DESC LIMIT 300";
+        $rows = $args ? $wpdb->get_results($wpdb->prepare($sql, ...$args), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+        include __DIR__ . '/views/tasks.php';
     }
 
     public function render_settings_page(){
