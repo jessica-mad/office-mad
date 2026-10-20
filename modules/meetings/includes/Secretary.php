@@ -132,6 +132,7 @@ Cómo extraer:
 - Usa las secciones de Gemini (Resumen, Decisiones, Próximos pasos) como punto de partida, pero contrástalas con la transcripción: corrige responsables o detalles mal atribuidos y añade tareas claras que falten. No dupliques.
 - Tareas: SOLO compromisos explícitos de alguien ("te lo mando", "lo preparo para el viernes", "os paso las fotos"). Lo que es "podríamos", "habría que pensar" o una charla sin cerrar NO es tarea: va a ideas o a temas pendientes. Concretas, en infinitivo ("Enviar las fotos de producto"). Si la reunión dice "el viernes", "mañana" o "la semana que viene", conviértelo en fecha AAAA-MM-DD a partir de la fecha de la reunión. Si no hay fecha, null.
 - evidence: la frase de la transcripción (o de las notas) que justifica cada tarea, literal y corta (máx. 200 caracteres). sure = false si el compromiso no está claro o lo has deducido tú.
+- Tareas ya cerradas (<tareas_cerradas>, hechas o anuladas): NO las vuelvas a crear aunque se mencionen; solo si en esta reunión se acuerda explícitamente volver a hacerlas.
 - Tareas que YA existen (te las paso en <tareas_abiertas>): no las vuelvas a crear. Si en esta reunión se habla de una de ellas, ponla en task_updates: "done" si se dice que ya está hecha, "cancel" si se descarta o ya no hace falta, "change" si cambia (otro enfoque, otra fecha, otro alcance: pon el nuevo título y/o la nueva fecha), "repeat" si se vuelve a hablar de ella y sigue sin hacer (se le sube la prioridad). note = qué cambió, en una frase; evidence = la frase que lo dice. Usa solo task_id de esa lista.
 - client_visible = false para lo que no debe ver el cliente: precios internos, márgenes, opiniones sobre el cliente o sobre terceros, problemas internos de MAD.
 - Decisiones: los acuerdos, redactados para que el cliente los entienda.
@@ -155,9 +156,11 @@ TXT;
         if ( ! $client ) return '';
         global $wpdb;
         $rows = $wpdb->get_results($wpdb->prepare('SELECT id, title, description, owner, due_date FROM ' . Schema::table('action_items') . " WHERE client_id = %d AND status IN ('open','in_progress') ORDER BY id DESC LIMIT 60", $client['id']), ARRAY_A);
-        if ( ! $rows ) return "\n<tareas_abiertas>ninguna</tareas_abiertas>\n";
+        $closed = $wpdb->get_results($wpdb->prepare('SELECT id, title, status FROM ' . Schema::table('action_items') . " WHERE client_id = %d AND status IN ('done','cancelled') AND updated_at >= %s ORDER BY id DESC LIMIT 60", $client['id'], gmdate('Y-m-d H:i:s', time() - 180 * DAY_IN_SECONDS)), ARRAY_A);
+        $closed_block = $closed ? "\n<tareas_cerradas>\n" . implode("\n", array_map(fn($t) => '- [' . $t['id'] . '] ' . $t['title'] . ' · ' . ($t['status'] === 'done' ? 'hecha' : 'anulada'), $closed)) . "\n</tareas_cerradas>\n" : '';
+        if ( ! $rows ) return "\n<tareas_abiertas>ninguna</tareas_abiertas>\n" . $closed_block;
         $lines = array_map(fn($t) => '- [' . $t['id'] . '] ' . $t['title'] . ' · ' . $t['owner'] . ($t['due_date'] ? ' · ' . $t['due_date'] : '') . ($t['description'] ? ' · ' . mb_substr(preg_replace('/\s+/', ' ', $t['description']), 0, 160) : ''), $rows);
-        return "\n<tareas_abiertas>\n" . implode("\n", $lines) . "\n</tareas_abiertas>\n";
+        return "\n<tareas_abiertas>\n" . implode("\n", $lines) . "\n</tareas_abiertas>\n" . $closed_block;
     }
 
     /** A team meeting talks about every client: the team's open tasks, with the client's code. */
@@ -283,6 +286,8 @@ TXT;
             if ( ! $on($t) || trim($t['title'] ?? '') === '' ) continue;
             $owner = in_array($t['owner'] ?? '', self::OWNERS, true) ? $t['owner'] : 'mad';
             $tcid = $row_client($t);
+            // Already there and open (a minute processed twice, the same WhatsApp imported again): not again.
+            if ( \MAD_Oficina\Core\TaskChanges::existing($tcid, $t['title'], ['open', 'in_progress']) ) { $counts['skipped'] = ($counts['skipped'] ?? 0) + 1; continue; }
             $wpdb->insert(Schema::table('action_items'), [
                 'client_id'      => $tcid,
                 'meeting_id'     => $meeting['id'],
@@ -367,7 +372,8 @@ TXT;
         ]);
         return [
             'message' => sprintf(__('Acta aprobada: %1$d tareas, %2$d ideas y %3$d temas pendientes.', 'mad-oficina'), $counts['tasks'], $counts['ideas'], $counts['topics'])
-                . (! empty($counts['updated']) ? ' ' . sprintf(_n('%d tarea que ya existía, actualizada.', '%d tareas que ya existían, actualizadas.', $counts['updated'], 'mad-oficina'), $counts['updated']) : ''),
+                . (! empty($counts['updated']) ? ' ' . sprintf(_n('%d tarea que ya existía, actualizada.', '%d tareas que ya existían, actualizadas.', $counts['updated'], 'mad-oficina'), $counts['updated']) : '')
+                . (! empty($counts['skipped']) ? ' ' . sprintf(_n('%d no se ha creado porque ya estaba abierta.', '%d no se han creado porque ya estaban abiertas.', $counts['skipped'], 'mad-oficina'), $counts['skipped']) : ''),
             'counts'  => $counts,
         ];
     }
@@ -447,12 +453,13 @@ TXT;
                 <th scope="col"><?php esc_html_e('Tarea', 'mad-oficina'); ?></th><th scope="col"><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th scope="col"><?php esc_html_e('Quién', 'mad-oficina'); ?></th>
                 <th scope="col"><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th scope="col"><?php esc_html_e('Prioridad', 'mad-oficina'); ?></th>
                 <th scope="col"><?php esc_html_e('Visible para', 'mad-oficina'); ?></th></tr></thead><tbody>
-            <?php foreach ( (array) ($x['tasks'] ?? []) as $i => $t ) : $n = "input[tasks][{$i}]"; ?>
+            <?php foreach ( (array) ($x['tasks'] ?? []) as $i => $t ) : $n = "input[tasks][{$i}]"; $dup = self::existing_for($t, $meeting); ?>
                 <tr>
-                    <td><input type="checkbox" name="<?php echo esc_attr($n); ?>[on]" value="1" <?php checked(($t['sure'] ?? true) !== false); ?> aria-label="<?php esc_attr_e('Incluir', 'mad-oficina'); ?>"></td>
+                    <td><input type="checkbox" name="<?php echo esc_attr($n); ?>[on]" value="1" <?php checked(($t['sure'] ?? true) !== false && ! $dup); ?> aria-label="<?php esc_attr_e('Incluir', 'mad-oficina'); ?>"></td>
                     <td><input type="text" name="<?php echo esc_attr($n); ?>[title]" value="<?php echo esc_attr($t['title']); ?>">
                         <input type="hidden" name="<?php echo esc_attr($n); ?>[evidence]" value="<?php echo esc_attr($t['evidence'] ?? ''); ?>">
                         <?php if ( ! empty($t['evidence']) ) : ?><small class="madof-evidence">«<?php echo esc_html($t['evidence']); ?>»<?php if ( ($t['sure'] ?? true) === false ) echo ' · ' . esc_html__('dudosa: sin marcar', 'mad-oficina'); ?></small><?php endif; ?>
+                        <?php if ( $dup ) : ?><small class="madof-warn"><?php echo esc_html(sprintf(__('Ya existe: #%1$d «%2$s» (%3$s). Sin marcar para no duplicarla.', 'mad-oficina'), $dup['id'], $dup['title'], ['done' => __('hecha', 'mad-oficina'), 'cancelled' => __('anulada', 'mad-oficina')][$dup['status']] ?? __('abierta', 'mad-oficina'))); ?></small><?php endif; ?>
                         <details class="madof-more"><summary><?php echo ($t['description'] ?? '') !== '' ? esc_html__('Detalle', 'mad-oficina') : esc_html__('Añadir detalle', 'mad-oficina'); ?></summary>
                         <textarea name="<?php echo esc_attr($n); ?>[description]" rows="4"><?php echo esc_textarea($t['description'] ?? ''); ?></textarea></details>
                         <?php if ( ! empty($t['owner_name']) ) : ?><small><?php echo esc_html($t['owner_name']); ?></small><?php endif; ?></td>
@@ -538,7 +545,7 @@ TXT;
         $x = $meeting['extraction'];
         $tasks = [];
         foreach ( (array) ($x['tasks'] ?? []) as $t ) {
-            $tasks[] = ['on' => ($t['sure'] ?? true) === false ? 0 : 1, 'evidence' => $t['evidence'] ?? '', 'title' => $t['title'], 'description' => $t['description'] ?? '', 'owner' => $t['owner'], 'due_date' => $t['due_date'] ?? '', 'priority' => $t['priority'] ?? 'normal',
+            $tasks[] = ['on' => ($t['sure'] ?? true) === false || self::existing_for($t, $meeting) ? 0 : 1, 'evidence' => $t['evidence'] ?? '', 'title' => $t['title'], 'description' => $t['description'] ?? '', 'owner' => $t['owner'], 'due_date' => $t['due_date'] ?? '', 'priority' => $t['priority'] ?? 'normal',
                 'visibility' => ! empty($t['client_visible']) ? 'client' : ($t['owner'] === 'liz' ? 'team' : 'internal'), 'client' => self::row_client_default($t, $meeting)];
         }
         return [
@@ -556,6 +563,12 @@ TXT;
             'notify_team'      => 1,
             'send_summary'     => $meeting['source'] === 'whatsapp' ? 0 : 1,
         ];
+    }
+
+    /** The task this draft row would repeat (same client, same title, open or closed), if any. */
+    public static function existing_for(array $row, array $meeting){
+        $cid = self::row_client_default($row, $meeting) ?: (int) $meeting['client_id'];
+        return \MAD_Oficina\Core\TaskChanges::existing($cid ?: null, (string) ($row['title'] ?? ''));
     }
 
     /** Without a client nobody outside MAD can see it: «client» becomes team (Liz's) or internal. */

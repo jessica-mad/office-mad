@@ -721,6 +721,27 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame(wp_date('Y-m-d') . ' 09:00', \MAD_Oficina\Chat\Reminders::describe(\MAD_Oficina\Chat\Reminders::pending('jessica@imad.example')[0])['when']);
     }
 
+    public function test_nora_does_not_duplicate_tasks_nor_touch_closed_ones_silently(){
+        $this->key();
+        $open = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Enviar el presupuesto de la web', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $cancelled = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Revisar fichas de producto', 'owner' => 'jessica', 'status' => 'cancelled', 'visibility' => 'internal']);
+        $done = $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Llamar a Camila', 'owner' => 'jessica', 'status' => 'done', 'visibility' => 'internal']);
+        $this->claude = [
+            ['tool' => 'ask_proyectos', 'input' => ['question' => 'Apunta para LN enviar el presupuesto de la web; pon las fichas y lo de Camila para el viernes']],
+            ['tool' => 'create_task', 'input' => ['title' => 'Enviar presupuesto de la web', 'client' => 'LN']],
+            ['tool' => 'update_tasks', 'input' => ['due' => [['id' => $cancelled, 'date' => '2026-10-23'], ['id' => $done, 'date' => '2026-10-23']]]],
+            ['text' => 'Ya existía; fichas reabiertas; Camila está hecha.'],
+            ['text' => 'La del presupuesto ya la tenías. Las fichas vuelven para el viernes. Lo de Camila está hecho: ¿lo reabro?'],
+        ];
+        $this->say('apunta para LN enviar el presupuesto de la web y pon las fichas y lo de Camila para el viernes');
+        $this->assertStringContainsString('already_open', $this->tool_result($this->prompts[2]));
+        $this->assertSame(1, (int) $GLOBALS['wpdb']->get_var("SELECT COUNT(*) FROM " . Schema::table('action_items') . " WHERE title LIKE '%presupuesto de la web%'"), 'not a second one');
+        $this->assertSame('open', $this->status($cancelled), 'a new date brings an annulled task back');
+        $this->assertSame('2026-10-23', $GLOBALS['wpdb']->get_var('SELECT due_date FROM ' . Schema::table('action_items') . ' WHERE id = ' . $cancelled));
+        $this->assertSame('done', $this->status($done), 'a done one is not touched…');
+        $this->assertStringContainsString('done_not_changed', $this->tool_result($this->prompts[3]), '…and she is asked');
+    }
+
     public function test_voice_messages_are_transcribed_and_understood(){
         $this->key();
         $this->claude = [['text' => 'Genial, me lo apunto.']];

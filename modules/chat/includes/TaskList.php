@@ -143,7 +143,7 @@ final class TaskList {
         $out = ['changed' => [], 'already' => [], 'denied' => []];
         foreach ( $tasks as $t ) {
             if ( ! self::allowed($t, $email, $manager_email) ) { $out['denied'][] = $t; continue; }
-            if ( $t['status'] !== 'done' ) { $out['already'][] = $t; continue; }
+            if ( ! in_array($t['status'], ['done', 'cancelled'], true) ) { $out['already'][] = $t; continue; }
             $status = in_array($prev[(int) $t['id']] ?? '', self::STATUSES_OPEN, true) ? $prev[(int) $t['id']] : 'open';
             $wpdb->update(Schema::table('action_items'), ['status' => $status, 'completed_at' => null, 'updated_at' => Time::now()], ['id' => $t['id']]);
             $out['changed'][] = $t;

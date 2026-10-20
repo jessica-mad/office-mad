@@ -15,6 +15,37 @@ final class TaskChanges {
     const ACTIONS = ['done', 'cancel', 'change', 'repeat'];
     const PRIORITY_UP = ['low' => 'normal', 'normal' => 'high', 'high' => 'high'];
 
+    /** «Enviar el presupuesto de la web.» → «enviar presupuesto web» (accents, case, punctuation, small words). */
+    public static function norm_title($title){
+        $w = preg_split('/[^a-z0-9]+/', strtolower(remove_accents((string) $title)), -1, PREG_SPLIT_NO_EMPTY);
+        return implode(' ', array_filter($w, fn($x) => strlen($x) > 2 && ! in_array($x, ['los', 'las', 'del', 'para', 'con', 'una', 'que', 'por'], true)));
+    }
+
+    public static function same_title($a, $b){
+        $a = self::norm_title($a); $b = self::norm_title($b);
+        if ( $a === '' || $b === '' ) return false;
+        if ( $a === $b ) return true;
+        $short = min(strlen($a), strlen($b));
+        if ( $short >= 15 && (strpos($a, $b) !== false || strpos($b, $a) !== false) ) return true;
+        similar_text($a, $b, $pct);
+        return $pct >= 88;
+    }
+
+    /**
+     * A task of this client (null = internal) with the same title, in any of these states:
+     * so a new minute, a WhatsApp import or Nora never creates again what is already there
+     * (or was done or cancelled). Most recent first. @return array|null
+     */
+    public static function existing($client_id, $title, array $statuses = ['open', 'in_progress', 'done', 'cancelled']){
+        global $wpdb;
+        $in = implode(',', array_map(fn($s) => "'" . esc_sql($s) . "'", $statuses));
+        $where = $client_id ? $wpdb->prepare('client_id = %d', (int) $client_id) : 'client_id IS NULL';
+        foreach ( $wpdb->get_results('SELECT id, title, status, due_date, completed_at, updated_at FROM ' . Schema::table('action_items') . " WHERE {$where} AND status IN ({$in}) ORDER BY id DESC LIMIT 300", ARRAY_A) as $t ) {
+            if ( self::same_title($t['title'], $title) ) return $t;
+        }
+        return null;
+    }
+
     /** Keeps how the tasks were, for «Deshacer» (same format the Chat undo restores). @return string token */
     public static function snapshot(array $rows){
         $token = wp_generate_password(16, false);

@@ -100,7 +100,7 @@ final class Reconciler {
             'output_config' => ['effort' => 'medium', 'format' => ['type' => 'json_schema', 'schema' => self::schema()]],
             'system' => "Eres {$valle}, coordinadora de proyectos de MAD. Revisas las tareas abiertas de un cliente para que el registro sea fiel a lo hablado. Hoy es " . current_time('Y-m-d') . ".\n"
                 . "Te paso sus tareas abiertas (con la reunión de la que salieron y la frase que las justifica) y las actas recientes (de Olvido, la secretaria). Propón solo estos cambios:\n"
-                . "- merge: varias tareas que son el MISMO compromiso (aunque estén redactadas distinto o salgan de reuniones distintas). keep_id = la más completa (con fecha, detalle o visible para el cliente; si empatan, la más antigua); task_ids = las demás. Si dos se parecen pero son trabajos distintos, NO es merge.\n"
+                . "- merge: varias tareas que son el MISMO compromiso, el mismo entregable para el mismo cliente (aunque estén redactadas distinto). Dos tareas del mismo tema pero con pasos o entregables distintos (preparar / enviar / revisar, versión A / versión B) NO son merge. Las fusiones y anulaciones siempre las confirma Jessica. keep_id = la más completa (con fecha, detalle o visible para el cliente; si empatan, la más antigua); task_ids = las demás. Si dos se parecen pero son trabajos distintos, NO es merge.\n"
                 . "- done: un acta posterior dice que ya está hecha. cancel: un acta posterior la descarta o ya no tiene sentido. change: un acta posterior cambia su alcance o su fecha (title y/o due_date nuevos).\n"
                 . "- repeat: se ha vuelto a hablar de ella en un acta posterior y sigue sin hacer (sube su prioridad).\n"
                 . "Para done/cancel/change/repeat: task_ids = [la tarea], keep_id = 0. reason: una frase. evidence: la frase o el acta (con fecha) que lo justifica.\n"
@@ -117,7 +117,8 @@ final class Reconciler {
         foreach ( (array) ($data['actions'] ?? []) as $a ) {
             $changes = self::to_changes($a, $ids, $titles);
             if ( ! $changes ) continue;
-            if ( ! empty($a['sure']) ) $sure = array_merge($sure, $changes);
+            // Closing a task without her (a «duplicate», «no longer needed») is hers to decide: always asked.
+            if ( ! empty($a['sure']) && ! in_array($a['type'] ?? '', ['merge', 'cancel'], true) ) $sure = array_merge($sure, $changes);
             else $doubtful[] = ['reason' => sanitize_text_field($a['reason'] ?? ''), 'evidence' => sanitize_text_field($a['evidence'] ?? ''), 'changes' => $changes];
         }
 

@@ -130,31 +130,52 @@ class TaskCleanupTest extends MADOF_TestCase {
         $this->assertSame('Te las mando el lunes', $GLOBALS['wpdb']->get_var('SELECT evidence FROM ' . Schema::table('action_items')));
     }
 
-    public function test_valle_merges_duplicates_alone_and_asks_about_doubtful_ones(){
+    public function test_valle_never_closes_a_task_alone_she_asks(){
         $a = $this->task(['title' => 'Enviar fotos del catálogo', 'due_date' => '2026-10-20', 'visibility' => 'client']);
         $b = $this->task(['title' => 'Mandar las fotos del catálogo']);
         $c = $this->task(['title' => 'Revisar la web']);
+        $d = $this->task(['title' => 'Subir el banner']);
         $foreign = $this->task(['title' => 'De otro', 'client_id' => $this->other]);
         $this->claude[] = ['actions' => [
             ['type' => 'merge', 'keep_id' => $a, 'task_ids' => [$b, $foreign], 'title' => '', 'due_date' => null, 'reason' => 'Es la misma tarea', 'evidence' => 'Salió el 3/10 y el 17/10', 'sure' => true],
             ['type' => 'done', 'keep_id' => 0, 'task_ids' => [$c], 'title' => '', 'due_date' => null, 'reason' => 'Parece hecha', 'evidence' => 'acta 17/10', 'sure' => false],
+            ['type' => 'repeat', 'keep_id' => 0, 'task_ids' => [$d], 'title' => '', 'due_date' => null, 'reason' => 'Sale otra vez', 'evidence' => 'acta 17/10', 'sure' => true],
         ]];
         Reconciler::enqueue($this->client);
         $this->assertSame(1, (new Reconciler())->run_queue());
 
-        $this->assertSame(['open', 'cancelled', 'open', 'open'], [$this->row($a)['status'], $this->row($b)['status'], $this->row($c)['status'], $this->row($foreign)['status']], 'only this client, only the sure one');
-        $this->assertSame('high', $this->row($a)['priority'], 'what keeps coming back goes up');
-        $chat = wp_json_encode(end($this->sent)['body'], JSON_UNESCAPED_UNICODE);
-        $this->assertStringContainsString('ha ordenado las tareas de DT', $chat);
-        $this->assertStringContainsString('task_undo', $chat);
-        $this->assertStringContainsString('</tareas>', $this->prompts[0]['messages'][0]['content']);
+        $this->assertSame(['open', 'open', 'open', 'open'], [$this->row($a)['status'], $this->row($b)['status'], $this->row($c)['status'], $this->row($foreign)['status']], 'a «duplicate», even a sure one, is not cancelled without her');
+        $this->assertSame('high', $this->row($d)['priority'], 'what only raises the priority is applied');
+        $this->assertStringContainsString('ha ordenado las tareas de DT', wp_json_encode(end($this->sent)['body'], JSON_UNESCAPED_UNICODE));
 
-        $review = Approvals::pending(10);
-        $review = array_values(array_filter($review, fn($x) => $x['action_type'] === Reconciler::ACTION));
-        $this->assertCount(1, $review, 'the doubtful one waits for Jessica');
+        $review = array_values(array_filter(Approvals::pending(10), fn($x) => $x['action_type'] === Reconciler::ACTION));
+        $this->assertCount(1, $review, 'the merge and the doubtful one wait for Jessica');
         $html = apply_filters('madoficina_approval_form_' . Reconciler::ACTION, '', $review[0]);
-        $this->assertStringContainsString('Parece hecha', $html);
+        $this->assertStringContainsString('Es la misma tarea', $html);
         Approvals::resolve($review[0]['id'], 'approve', [], 1, 'chat');
-        $this->assertSame('done', $this->row($c)['status']);
+        $this->assertSame(['open', 'cancelled', 'done', 'open'], [$this->row($a)['status'], $this->row($b)['status'], $this->row($c)['status'], $this->row($foreign)['status']], 'when she says yes; never another client\'s');
+    }
+
+    public function test_a_minute_never_recreates_a_task_that_exists(){
+        $done = $this->task(['title' => 'Preparar la propuesta para Camila', 'status' => 'done']);
+        $open = $this->task(['title' => 'Enviar el presupuesto de la web']);
+        $id = Meetings::upsert(['source' => 'whatsapp', 'title' => 'WhatsApp con Camila', 'starts_at' => '2026-10-17 18:00', 'transcript' => 'x', 'client_id' => $this->client]);
+        $this->claude[] = ['summary_client' => '', 'summary_internal' => '', 'decisions' => [], 'pending_topics' => [], 'ideas' => [], 'next_meeting' => ['status' => 'none', 'date' => null, 'notes' => ''], 'internal_notes' => [], 'task_updates' => [], 'tasks' => [
+            ['title' => 'Preparar propuesta para Camila', 'description' => '', 'owner' => 'jessica', 'owner_name' => '', 'due_date' => null, 'priority' => 'normal', 'client_visible' => false, 'evidence' => 'la propuesta de Camila', 'sure' => true],
+            ['title' => 'Enviar el presupuesto de la web', 'description' => '', 'owner' => 'jessica', 'owner_name' => '', 'due_date' => null, 'priority' => 'normal', 'client_visible' => false, 'evidence' => 'el presupuesto', 'sure' => true],
+            ['title' => 'Grabar el vídeo nuevo', 'description' => '', 'owner' => 'liz', 'owner_name' => '', 'due_date' => null, 'priority' => 'normal', 'client_visible' => false, 'evidence' => 'el vídeo', 'sure' => true],
+        ]];
+        (new MAD_Oficina\Meetings\Secretary([]))->process($id);
+        $approval = Approvals::for_object('meeting', $id)[0]['id'];
+        $this->assertStringContainsString("<tareas_cerradas>\n- [{$done}] Preparar la propuesta para Camila · hecha", end($this->prompts)['messages'][0]['content'], 'the secretary knows what was done');
+        $html = apply_filters('madoficina_approval_form_meeting_draft', '', Approvals::get($approval));
+        $this->assertStringContainsString('Ya existe: #' . $done, $html);
+        $input = apply_filters('madoficina_approval_default_input_meeting_draft', [], Approvals::get($approval));
+        $this->assertSame([0, 0, 1], array_column($input['tasks'], 'on'), 'what exists comes unticked');
+        $input['tasks'][1]['on'] = 1; // even if ticked by mistake, an open one is not created twice
+        $r = Approvals::resolve($approval, 'approve', $input, 1, 'chat');
+        $this->assertStringContainsString('ya estaba abierta', $r['message']);
+        $this->assertSame('done', $this->row($done)['status'], 'the done task stays done');
+        $this->assertSame(1, (int) $GLOBALS['wpdb']->get_var($GLOBALS['wpdb']->prepare('SELECT COUNT(*) FROM ' . Schema::table('action_items') . ' WHERE title = %s', 'Enviar el presupuesto de la web')));
     }
 }

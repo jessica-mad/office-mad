@@ -126,6 +126,14 @@ final class Projects extends Specialist {
         $due = [];
         foreach ( (array) ($in['due'] ?? []) as $d ) if ( ($date = self::date_arg($d['date'] ?? '')) && abs(strtotime($date) - time()) < 2 * YEAR_IN_SECONDS ) $due[(int) ($d['id'] ?? 0)] = $date;
         $rows = TaskList::rows(array_merge($done, $reopen, $cancel, array_keys($due)));
+        // A new date on a task that is closed: an annulled one comes back (she wants it alive);
+        // a done one is left alone and she is asked.
+        $closed_done = [];
+        foreach ( array_keys($due) as $id ) {
+            $st = $rows[$id]['status'] ?? '';
+            if ( $st === 'cancelled' && ! in_array($id, $reopen, true) ) $reopen[] = $id;
+            if ( $st === 'done' && ! in_array($id, $reopen, true) ) { $closed_done[] = ['id' => $id, 'title' => $rows[$id]['title']]; unset($due[$id]); }
+        }
         if ( ! $rows && empty($in['revise']) && empty($in['still_pending']) && empty($in['assign']) ) return new \WP_Error('madof_tasks', 'Ninguna de esas tareas existe.');
         $token = TaskList::snapshot(array_values($rows));
         $pick = fn($ids) => array_values(array_intersect_key($rows, array_flip($ids)));
@@ -141,7 +149,7 @@ final class Projects extends Specialist {
             'reopened' => array_map($t, $b['changed']), 'cancelled' => array_map($t, $x['changed']), 'new_dates' => array_map(fn($x) => $t($x['task']) + ['due' => $x['date']], $c['changed']),
             'not_allowed' => array_map($t, array_merge($a['denied'], $b['denied'], $c['denied'], $x['denied'])),
             'missing_ids' => array_values(array_diff(array_merge($done, $reopen, $cancel, array_keys($due)), array_keys($rows))),
-        ] + $this->revise($in) + $this->assign($in);
+        ] + array_filter(['done_not_changed' => $closed_done ? ['tasks' => $closed_done, 'note' => 'Están hechas: no les he cambiado la fecha. Pregúntale si quiere reabrirlas (reopen).'] : null]) + $this->revise($in) + $this->assign($in);
     }
 
     /** @var array<int,int[]> team member id => tasks just given to them (Jessica can send them with one click) */
@@ -173,7 +181,9 @@ final class Projects extends Specialist {
             $who = self::assignee($a['to'] ?? '');
             if ( ! $t || ! $who ) { $unknown[] = ['id' => (int) ($a['id'] ?? 0), 'to' => (string) ($a['to'] ?? '')]; continue; }
             [$owner, $member] = $who;
+            if ( $t['status'] === 'done' ) { $unknown[] = ['id' => (int) $t['id'], 'to' => (string) ($a['to'] ?? ''), 'why' => 'está hecha: pregúntale si la reabre']; continue; }
             $fields = ['owner' => $owner, 'team_member_id' => $member ? (int) $member['id'] : null, 'updated_at' => Time::now()];
+            if ( $t['status'] === 'cancelled' ) { $fields['status'] = 'open'; $fields['completed_at'] = null; } // giving it to someone brings it back
             if ( $member && $t['visibility'] === 'internal' ) $fields['visibility'] = 'team'; // so she sees it
             $wpdb->update(Schema::table('action_items'), $fields, ['id' => $t['id']]);
             if ( $member ) $this->notify[(int) $member['id']][] = (int) $t['id'];
@@ -249,6 +259,11 @@ final class Projects extends Specialist {
         [$owner, $m] = self::assignee($in['owner'] ?? 'jessica') ?: ['jessica', null];
         $member = $m ? (int) $m['id'] : null;
         if ( $this->member_id() ) { $owner = 'liz'; $member = $this->member_id(); }
+        // Already open (the same message delivered twice, or she says it again): not a second one.
+        if ( $same = \MAD_Oficina\Core\TaskChanges::existing($client, $title, ['open', 'in_progress']) ) {
+            return ['already_open' => ['id' => (int) $same['id'], 'title' => $same['title'], 'due' => $same['due_date']], 'note' => 'Ya existe abierta: no la he creado otra vez. Si hay que cambiarle algo, usa update_tasks con ese id.'];
+        }
+        $closed = \MAD_Oficina\Core\TaskChanges::existing($client, $title, ['done', 'cancelled']);
         $wpdb->insert(Schema::table('action_items'), [
             'client_id' => $client, 'title' => $title, 'description' => sanitize_textarea_field((string) ($in['description'] ?? '')) ?: null,
             'owner' => $owner, 'team_member_id' => $member, 'due_date' => self::date_arg($in['due_date'] ?? ''),
@@ -257,7 +272,7 @@ final class Projects extends Specialist {
         $id = (int) $wpdb->insert_id;
         if ( $member && ! $this->member_id() ) $this->notify[$member][] = $id;
         $this->undo[] = TaskList::snapshot([], [$id]);
-        return ['created' => ['id' => $id, 'title' => $title, 'client' => self::client_label($client), 'owner' => $m['name'] ?? $owner, 'due' => self::date_arg($in['due_date'] ?? ''), 'client_sees_it' => false, 'team_sees_it' => (bool) $member]];
+        return array_filter(['note' => $closed ? sprintf('Ojo: había una igual %s (#%d). He creado una nueva porque lo ha pedido.', $closed['status'] === 'done' ? 'hecha' : 'anulada', $closed['id']) : null]) + ['created' => ['id' => $id, 'title' => $title, 'client' => self::client_label($client), 'owner' => $m['name'] ?? $owner, 'due' => self::date_arg($in['due_date'] ?? ''), 'client_sees_it' => false, 'team_sees_it' => (bool) $member]];
     }
 
     /** Read-only look at the minutes (no other agent involved): where a task came from, or a client's latest meetings. */
