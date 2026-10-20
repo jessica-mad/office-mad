@@ -255,6 +255,22 @@ final class Schema {
   KEY agent_created (agent,created_at),
   KEY client_id (client_id)",
 
+            // «Recuérdame … a las 17:00» (Chat): an alarm for Jessica or the team, maybe hanging from a task.
+            'reminders' => "
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  email varchar(190) NOT NULL,
+  team_member_id bigint(20) unsigned NULL,
+  text varchar(255) NOT NULL,
+  task_id bigint(20) unsigned NULL,
+  remind_at datetime NOT NULL,
+  status varchar(10) NOT NULL DEFAULT 'pending',
+  sent_at datetime NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY due (status,remind_at),
+  KEY email (email)",
+
             'messages' => "
   id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   client_id bigint(20) unsigned NULL,

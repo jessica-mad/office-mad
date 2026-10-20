@@ -506,7 +506,7 @@ class ChatTest extends MADOF_TestCase {
             ['text' => '¡Vídeo hecho!'],
         ];
         $this->say('he terminado el vídeo y marca también lo del margen', 'liz@imad.example');
-        $this->assertSame(['ask_proyectos', 'remember', 'forget'], $this->tool_names($this->prompts[0]), 'no Finanzas, no Actas for the team');
+        $this->assertSame(['ask_proyectos', 'remember', 'set_reminder', 'list_reminders', 'cancel_reminder', 'forget'], $this->tool_names($this->prompts[0]), 'no Finanzas, no Actas for the team');
         $this->assertStringNotContainsString('Margen', $this->tool_result($this->prompts[2]), "Jessica's tasks are not even listed");
         $this->assertSame(['done', 'open'], [$this->status($hers), $this->status($jess)]);
         $this->assertStringContainsString('not_allowed', $this->tool_result($this->prompts[3]));
@@ -643,6 +643,61 @@ class ChatTest extends MADOF_TestCase {
         $this->assertNotNull(\MAD_Oficina\Suppliers\Suppliers::match('B99999999', '', ''), 'the new supplier is created with what was read');
         $this->assertStringContainsString('registrada', $this->tool_result($this->prompts[3]));
         $this->assertStringContainsString('Nube SL', $this->last_to_jessica());
+    }
+
+    public function test_a_reminder_hangs_from_the_task_she_describes_and_arrives_on_time(){
+        $this->key();
+        $olo = Clients::save(['name' => 'Olofane Estética', 'code' => 'OLO']);
+        $prices = $this->insert('action_items', ['client_id' => $olo, 'title' => 'Actualizar tarifas de profesionales en la web', 'description' => 'Cambiar los precios de la sección profesionales', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Cambiar precios del catálogo', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $when = wp_date('Y-m-d', time() + DAY_IN_SECONDS) . ' 17:00';
+        $this->claude = [
+            ['tool' => 'set_reminder', 'input' => ['text' => 'Cambiar los precios de los profesionales', 'when' => $when, 'task_hint' => 'cambiar los precios de los profesionales de Olofane']],
+            ['text' => 'Te aviso mañana a las 17:00: cambiar precios profesionales · OLO.'],
+        ];
+        $this->say('recuérdame mañana a las 5 de la tarde que tengo que cambiar los precios de los profesionales de Olofane');
+        $saved = json_decode($this->tool_result($this->prompts[1]), true);
+        $this->assertSame($prices, $saved['reminder']['task']['id'], 'found by its sense, not its number');
+        $this->assertStringContainsString('set_reminder', wp_json_encode($this->tool_names($this->prompts[0])));
+
+        // Not yet due: nothing is sent.
+        $chat = $this->module();
+        do_action(\MAD_Oficina\Chat\Reminders::HOOK);
+        $this->assertStringNotContainsString('Recordatorio', $this->last_to_jessica());
+        // Due: one card, once.
+        $GLOBALS['wpdb']->update(\MAD_Oficina\Chat\Reminders::table(), ['remind_at' => gmdate('Y-m-d H:i:s', time() - 60)], ['id' => $saved['reminder']['id']]);
+        do_action(\MAD_Oficina\Chat\Reminders::HOOK);
+        do_action(\MAD_Oficina\Chat\Reminders::HOOK);
+        $cards = array_filter($this->to_jessica(), fn($m) => str_contains(wp_json_encode($m['body'], JSON_UNESCAPED_UNICODE), 'Recordatorio'));
+        $this->assertCount(1, $cards);
+        $this->assertStringContainsString('Actualizar tarifas de profesionales', $this->last_to_jessica());
+
+        $this->assertStringContainsString('no es tuyo', wp_json_encode($this->click('reminder_done', ['id' => $saved['reminder']['id']], 'liz@imad.example')->get_data(), JSON_UNESCAPED_UNICODE));
+        $this->click('reminder_snooze', ['id' => $saved['reminder']['id'], 'by' => 'hour'], 'jessica@imad.example');
+        $this->assertSame('pending', \MAD_Oficina\Chat\Reminders::get($saved['reminder']['id'])['status'], '+1 hora: waits again');
+        $this->click('reminder_done', ['id' => $saved['reminder']['id']], 'jessica@imad.example');
+        $this->assertSame('done', $this->status($prices), '«Hecho» closes the task');
+    }
+
+    public function test_a_vague_reminder_asks_which_task_and_a_loose_one_can_become_a_task(){
+        $this->key();
+        $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Cambiar precios del catálogo de lanas', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $this->insert('action_items', ['client_id' => $this->client, 'title' => 'Cambiar precios de la tienda de lanas', 'owner' => 'jessica', 'status' => 'open', 'visibility' => 'internal']);
+        $when = wp_date('Y-m-d', time() + DAY_IN_SECONDS) . ' 09:00';
+        $this->claude = [
+            ['tool' => 'set_reminder', 'input' => ['text' => 'precios de Lanas', 'when' => $when, 'task_hint' => 'precios de Lanas del Norte']],
+            ['tool' => 'set_reminder', 'input' => ['text' => 'Llamar a Tomás', 'when' => $when]],
+            ['tool' => 'set_reminder', 'input' => ['text' => 'Llamar', 'when' => '2020-01-01 10:00']],
+            ['text' => '¿Cuál de las dos de precios de Lanas? Lo de Tomás, apuntado.'],
+        ];
+        $this->say('recuérdame mañana a las 9 lo de los precios de Lanas y llamar a Tomás');
+        $this->assertStringContainsString('candidates', $this->tool_result($this->prompts[1]), 'two tasks fit: she asks');
+        $this->assertStringContainsString('ya ha pasado', $this->tool_result($this->prompts[3]));
+        $pending = \MAD_Oficina\Chat\Reminders::pending('jessica@imad.example');
+        $this->assertSame(['Llamar a Tomás'], array_column($pending, 'text'));
+        $this->click('reminder_task', ['id' => $pending[0]['id']], 'jessica@imad.example');
+        $task = (int) \MAD_Oficina\Chat\Reminders::get($pending[0]['id'])['task_id'];
+        $this->assertSame('open', $this->status($task), '«Convertir en tarea»');
     }
 
     public function test_voice_messages_are_transcribed_and_understood(){

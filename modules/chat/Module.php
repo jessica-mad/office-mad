@@ -74,6 +74,13 @@ return new class($core) implements MAD_Oficina_Module {
         // What Jessica or Liz tell the bot about their tasks (words or voice).
         add_action(\MAD_Oficina\Chat\Assistant::HOOK, fn($email, $text, $voice = []) => (new \MAD_Oficina\Chat\Assistant($this->messenger(), $this->api(), $this->settings()))->run($email, $text, (array) $voice), 10, 3);
 
+        // «Recuérdame … a las 17:00»: checked every 5 minutes (and on the cartero's tick).
+        add_filter('cron_schedules', function($s){ $s['madof_5min'] ??= ['interval' => 5 * MINUTE_IN_SECONDS, 'display' => 'MAD Oficina · 5 min']; return $s; });
+        if ( ! wp_next_scheduled(\MAD_Oficina\Chat\Reminders::HOOK) ) wp_schedule_event(time() + 60, 'madof_5min', \MAD_Oficina\Chat\Reminders::HOOK);
+        add_action(\MAD_Oficina\Chat\Reminders::HOOK, fn() => \MAD_Oficina\Chat\Reminders::send_due($this->messenger(), $this->portal_url()));
+        add_action('madoficina_tick', fn() => \MAD_Oficina\Chat\Reminders::send_due($this->messenger(), $this->portal_url()));
+        add_filter('madoficina_chat_action', ['MAD_Oficina\\Chat\\Reminders', 'chat_action'], 10, 5);
+
         add_action('madoficina_client_edit_sections', [$this, 'render_client_section']);
         foreach ( ['chat_settings', 'chat_test', 'client_chat_targets', 'chat_assistant'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         add_action('admin_post_madof_voice_failed', ['MAD_Oficina\\Chat\\Transcriber', 'serve_failed']); // the audio Google could not read, to look at it
