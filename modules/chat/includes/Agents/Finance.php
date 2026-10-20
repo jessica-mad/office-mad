@@ -26,13 +26,14 @@ final class Finance extends Specialist {
 
     protected function tool_label($tool){
         return ['find_invoices' => 'está buscando en las facturas', 'invoice_detail' => 'está abriendo la factura', 'find_quotes' => 'está mirando los presupuestos',
-            'find_expenses' => 'está revisando los gastos', 'bank_movements' => 'está mirando el banco', 'totals' => 'está sumando', 'set_invoice_paid' => 'está apuntando el cobro', 'bank_link' => 'está cuadrando el banco', 'bank_settle' => 'está cuadrando el banco', 'bank_unlink' => 'está deshaciendo el vínculo', 'update_expense' => 'está corrigiendo el gasto', 'register_supplier_invoice' => 'está registrando la factura'][$tool] ?? '';
+            'find_expenses' => 'está revisando los gastos', 'bank_movements' => 'está mirando el banco', 'totals' => 'está sumando', 'set_invoice_paid' => 'está apuntando el cobro', 'bank_link' => 'está cuadrando el banco', 'bank_settle' => 'está cuadrando el banco', 'bank_unlink' => 'está deshaciendo el vínculo', 'update_expense' => 'está corrigiendo el gasto', 'register_supplier_invoice' => 'está registrando la factura', 'register_attached_invoices' => 'está leyendo las facturas que has mandado'][$tool] ?? '';
     }
 
     protected function instructions(){
         return "- Puedes CAMBIAR datos de Finanzas solo si la pregunta lo pide claramente: marcar una factura cobrada o no, vincular o desvincular movimientos del banco, marcar movimientos como sin factura o traspaso (y recordarlo), cambiar la categoría o el cliente repercutible de un gasto, registrar una factura de proveedor que espera en la bandeja. Busca primero (para tener los ids) y di exactamente qué cambiaste. Si hay duda entre varias, no cambies nada y da las opciones.\n"
             . "- No emites ni envías facturas, no borras nada y no envías nada a nadie. Si te piden enviar algo a un cliente, di que se prepara desde Facturación y se aprueba en la bandeja.\n"
             . "- Los totales son datos de la oficina, no una liquidación de impuestos: no calcules liquidaciones como definitivas.\n"
+            . ( empty($this->ctx['files']) ? '' : sprintf("- Este mensaje trae %d archivo(s) de Jessica. Si te pide registrarlos (facturas o tickets de proveedores), usa register_attached_invoices: se leen como los que sube a Gastos y, como los manda ella, quedan aprobados. Di de cada uno proveedor, fecha, total y si quedó registrado o qué falta.\n", count((array) $this->ctx['files'])) )
             . "- Para «la última factura» ordena por fecha de emisión; da número, fecha, total, si está cobrada y el enlace al PDF.\n";
     }
 
@@ -74,6 +75,8 @@ final class Finance extends Specialist {
              'input_schema' => self::obj([]), 'handler' => [$this, 'pending_supplier_invoices']],
             ['name' => 'register_supplier_invoice', 'description' => 'Registra como gasto una factura de proveedor que espera en la bandeja (la da por buena; si el proveedor es nuevo, lo da de alta con lo leído).',
              'input_schema' => self::obj(['expense_id' => ['type' => 'integer']], ['expense_id']), 'handler' => [$this, 'register_supplier_invoice']],
+            ['name' => 'register_attached_invoices', 'description' => 'Registra como gastos las facturas o tickets de proveedores que Jessica ha mandado con este mensaje (PDF o foto): los lee como la subida manual de Gastos y los aprueba (si el proveedor es nuevo, lo da de alta con lo leído).',
+             'input_schema' => self::obj([]), 'handler' => [$this, 'register_attached_invoices']],
             ['name' => 'totals', 'description' => 'Sumas de un periodo: facturado (base, IVA, IRPF, total; cobrado y pendiente), por cliente si se pide, y gastos por categoría.',
              'input_schema' => self::obj(['from' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'to' => ['type' => 'string', 'description' => 'AAAA-MM-DD'], 'client' => ['type' => 'string']], ['from', 'to']),
              'handler' => [$this, 'totals']],
@@ -245,6 +248,43 @@ final class Finance extends Specialist {
         $this->keep(['expenses' => [$e['id']]]);
         $wpdb->update(Schema::table('expenses'), $fields + ['updated_at' => \MAD_Oficina\Core\Time::now()], ['id' => $e['id']]);
         return ['done' => 'Gasto actualizado', 'category' => $fields['category'] ?? $e['category'], 'for_client' => array_key_exists('client_id', $fields) ? self::client_label($fields['client_id']) : self::client_label($e['client_id'])];
+    }
+
+    /** The invoices Jessica sent in Chat: read like a manual upload in Gastos and approved, since she sent them. */
+    public function register_attached_invoices(array $in){
+        $files = (array) ($this->ctx['files'] ?? []);
+        if ( ! $files ) return new \WP_Error('madof_files', 'Este mensaje no trae archivos.');
+        $suppliers = \MAD_Oficina_Core::instance()->get_module('suppliers');
+        if ( ! $suppliers ) return new \WP_Error('madof_files', 'El módulo de Gastos está apagado.');
+        $intake = $suppliers->intake();
+        $labels = ['registered' => 'registrada', 'review' => 'por revisar', 'queued' => 'en cola para leer', 'not_mine' => 'no está a tu nombre', 'ignored' => 'descartada (no parece una factura)', 'payment' => 'justificante de pago', 'tax' => 'impuesto'];
+        $out = [];
+        foreach ( $files as $f ) {
+            if ( function_exists('set_time_limit') ) @set_time_limit(150);
+            $r = $intake->receive((string) $f['bytes'], ['source' => 'upload', 'filename' => $f['name'], 'subject' => 'Enviada por Chat']);
+            if ( is_wp_error($r) ) { $out[] = ['file' => $f['name'], 'error' => $r->get_error_message()]; continue; }
+            if ( $r['reason'] === 'seen' ) { $out[] = ['file' => $f['name'], 'already' => 'Ya estaba en Gastos.'] + $this->expense_row($r['expense_id'], $labels); continue; }
+            // She sent it herself: its pending question («¿proveedor nuevo?», «¿es tuya?») is approved as read.
+            if ( \MAD_Oficina\Suppliers\Intake::pending_approval($r['expense_id']) ) {
+                $prev = get_current_user_id();
+                wp_set_current_user((int) ($this->ctx['user_id'] ?? 0)); // approved as Jessica, as in the inbox
+                $a = $intake->bulk_approve([$r['expense_id']]);
+                wp_set_current_user($prev);
+                if ( $a['errors'] ) $out[] = ['file' => $f['name'], 'approve_error' => implode(' · ', $a['errors'])] + $this->expense_row($r['expense_id'], $labels);
+                else $out[] = ['file' => $f['name']] + $this->expense_row($r['expense_id'], $labels);
+                continue;
+            }
+            $out[] = ['file' => $f['name']] + $this->expense_row($r['expense_id'], $labels);
+        }
+        return ['invoices' => $out];
+    }
+
+    private function expense_row($id, array $labels){
+        $e = \MAD_Oficina\Suppliers\Expenses::get((int) $id);
+        if ( ! $e ) return ['status' => 'no consta'];
+        return ['expense_id' => (int) $e['id'], 'status' => $labels[$e['status']] ?? $e['status'], 'supplier' => $e['supplier_name'], 'date' => $e['issue_date'], 'number' => $e['number'],
+            'total' => $e['total'] !== null ? (float) $e['total'] : null, 'currency' => $e['currency'], 'category' => $e['category'], 'notes' => $e['notes'] ?: null,
+            'link' => admin_url('admin.php?page=mad-oficina-gastos&expense=' . (int) $e['id'])];
     }
 
     private static function supplier_approvals(){

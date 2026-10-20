@@ -42,11 +42,16 @@ final class Transcriber {
 
     /** Images sent with a message (screenshots…). @return array[] [resource, name] */
     public static function images_of(array $message){
+        return array_values(array_map(fn($f) => ['resource' => $f['resource'], 'name' => $f['name']], array_filter(self::files_of($message), fn($f) => strpos($f['type'], 'image/') === 0)));
+    }
+
+    /** Images and PDFs sent with a message (a screenshot, a supplier's invoice). @return array[] resource, name, type */
+    public static function files_of(array $message){
         $out = [];
         foreach ( (array) ($message['attachment'] ?? []) as $a ) {
             $type = strtolower((string) ($a['contentType'] ?? ''));
             $resource = (string) ($a['attachmentDataRef']['resourceName'] ?? '');
-            if ( $resource !== '' && strpos($type, 'image/') === 0 ) $out[] = ['resource' => $resource, 'name' => (string) ($a['contentName'] ?? '')];
+            if ( $resource !== '' && (strpos($type, 'image/') === 0 || $type === 'application/pdf') ) $out[] = ['resource' => $resource, 'name' => (string) ($a['contentName'] ?? ''), 'type' => $type];
         }
         return array_slice($out, 0, 5);
     }

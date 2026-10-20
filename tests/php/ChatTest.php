@@ -618,6 +618,33 @@ class ChatTest extends MADOF_TestCase {
             'message' => ['text' => '', 'attachment' => $attachments]])->get_data();
     }
 
+    public function test_an_invoice_sent_to_nora_is_registered_by_amparo_as_approved(){
+        $this->key();
+        $wp = $this->factory()->user->create(['role' => 'administrator', 'user_email' => 'jessica@imad.example']);
+        get_user_by('id', $wp)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        $this->audio_bytes = '%PDF-1.4 factura de prueba ' . wp_generate_password(8, false);
+        $read = ['is_invoice' => true, 'doc_type' => 'invoice', 'supplier_name' => 'Nube SL', 'supplier_tax_id' => 'B99999999', 'recipient_name' => '', 'recipient_tax_id' => '', 'recipient_email' => '',
+            'number' => 'N-77', 'issue_date' => '2026-10-03', 'currency' => 'EUR', 'base' => 10.0, 'vat' => 2.1, 'irpf' => 0, 'total' => 12.1, 'concept' => 'Hosting octubre', 'category' => 'hosting', 'periodicity' => 'monthly', 'confidence' => 'high'];
+        $this->claude = [
+            ['tool' => 'ask_finanzas', 'input' => ['question' => 'Registra la factura adjunta']],
+            ['tool' => 'register_attached_invoices', 'input' => []],
+            ['text' => wp_json_encode($read)], // the Gastos reader
+            ['text' => 'Registrada: Nube SL, 03/10/2026, 12,10 €.'],
+            ['text' => 'Hecho: la de Nube SL (12,10 €) ya está en Gastos.'],
+        ];
+        $this->event(['type' => 'MESSAGE', 'user' => ['email' => 'jessica@imad.example'], 'space' => ['name' => 'spaces/JESSDM', 'type' => 'DM'],
+            'message' => ['text' => 'pásale esta a Amparo', 'argumentText' => 'pásale esta a Amparo', 'attachment' => [['contentName' => 'nube.pdf', 'contentType' => 'application/pdf', 'attachmentDataRef' => ['resourceName' => 'PDF-REF']]]]]);
+
+        $this->assertStringContainsString('ask_finanzas', $this->prompts[0]['system'], 'Nora knows the files go to Finanzas');
+        $this->assertStringContainsString('nube.pdf · pdf', $this->prompts[0]['messages'][count($this->prompts[0]['messages']) - 1]['content']);
+        $e = \MAD_Oficina\Suppliers\Expenses::all(['status' => 'registered']);
+        $this->assertCount(1, $e, 'she sent it: approved, not left «por revisar»');
+        $this->assertSame(['Nube SL', 'upload'], [$e[0]['supplier_name'], $e[0]['source']]);
+        $this->assertNotNull(\MAD_Oficina\Suppliers\Suppliers::match('B99999999', '', ''), 'the new supplier is created with what was read');
+        $this->assertStringContainsString('registrada', $this->tool_result($this->prompts[3]));
+        $this->assertStringContainsString('Nube SL', $this->last_to_jessica());
+    }
+
     public function test_voice_messages_are_transcribed_and_understood(){
         $this->key();
         $this->claude = [['text' => 'Genial, me lo apunto.']];

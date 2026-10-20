@@ -101,18 +101,24 @@ final class Assistant {
         }
         // A long voice note (several minutes) is several thousand characters: all of it reaches her.
         $text = mb_substr(trim(wp_strip_all_tags((string) $text)), 0, $heard !== '' ? 12000 : 4000);
-        // Images (a screenshot of a campaign…): kept aside for the area that knows where they go.
-        $stashed = []; $why = '';
+        // Files (a screenshot of a campaign, a supplier's invoice): kept aside for the area that knows where they go.
+        // Images can go to the campaigns log (stashed there); images and PDFs can be invoices for Finanzas.
+        $stashed = []; $files = []; $why = '';
         foreach ( array_slice($images, 0, 5) as $img ) {
-            $d = $this->api ? $this->api->download($img['resource'] ?? '', 8 * MB_IN_BYTES) : null;
+            $d = $this->api ? $this->api->download($img['resource'] ?? '', 15 * MB_IN_BYTES) : null;
             if ( ! is_array($d) ) { $why = is_wp_error($d) ? $d->get_error_message() : 'sin conexión con Chat'; continue; }
-            $token = apply_filters('madoficina_chat_image', null, $d['body'], (string) ($img['name'] ?? ''));
-            is_string($token) ? $stashed[] = $token : $why = 'no se pudo guardar';
+            $name = sanitize_file_name((string) ($img['name'] ?? '')) ?: 'archivo';
+            $is_image = strpos((string) ($img['type'] ?? 'image/'), 'image/') === 0;
+            $files[] = ['name' => $name, 'type' => $is_image ? 'imagen' : 'pdf', 'bytes' => $d['body']];
+            if ( $is_image ) {
+                $token = apply_filters('madoficina_chat_image', null, $d['body'], $name);
+                is_string($token) ? $stashed[] = $token : null;
+            }
         }
         if ( $images ) {
-            self::status('images', sprintf('%d recibidas, %d guardadas', count($images), count($stashed)) . ($why !== '' ? ' (' . $why . ')' : ''));
-            if ( ! $stashed ) return $this->reply($member, ['text' => __('He recibido la imagen, pero no sé dónde guardarla: por ahora solo adjunto imágenes a la bitácora de campañas (módulo Campañas).', 'mad-oficina')]);
-            $text = trim($text . "\n" . sprintf(_n('(Adjunta %d imagen.)', '(Adjunta %d imágenes.)', count($stashed), 'mad-oficina'), count($stashed)));
+            self::status('images', sprintf('%d recibidos, %d descargados', count($images), count($files)) . ($why !== '' ? ' (' . $why . ')' : ''));
+            if ( ! $files ) return $this->reply($member, ['text' => sprintf(__('He recibido el archivo, pero no he podido descargarlo de Chat (%s).', 'mad-oficina'), $why ?: '?')]);
+            $text = trim($text . "\n" . sprintf(_n('(Adjunta %1$d archivo: %2$s.)', '(Adjunta %1$d archivos: %2$s.)', count($files), 'mad-oficina'), count($files), implode(', ', array_map(fn($f) => $f['name'] . ' · ' . $f['type'], $files))));
         }
         if ( $text === '' ) return $this->reply($member, ['text' => __('No te he entendido. ¿Me lo repites?', 'mad-oficina')]);
         // What she heard, so a mishearing shows; a long note is not repeated back, just its start.
@@ -144,6 +150,7 @@ final class Assistant {
             'email' => $email, 'is_manager' => $is_manager, 'member' => $member, 'manager_email' => $this->manager_email,
             'user_id' => $member ? (int) $member['wp_user_id'] : self::manager_user_id($email),
             'images' => $stashed,
+            'files' => $files,
         ];
         $boss = new Orchestrator($this->settings, $ctx, $this->progress);
         $answer = $boss->answer($text);

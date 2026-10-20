@@ -82,15 +82,17 @@ final class Orchestrator {
             . implode("\n", array_map(fn($c) => '- ' . ($c['code'] ?: '—') . ' · ' . $c['name'] . ($c['people'] ? ' · ' . mb_substr($c['people'], 0, 120) : ''), $rows)) . "\n";
     }
 
-    /** Images sent with this message: she can't see them, but Campañas can attach them to the change log. */
+    /** Files sent with this message: she can't open them, but the areas can (Finanzas: invoices; Campañas: screenshots for the log). */
     private function images_note(){
-        $n = count((array) ($this->ctx['images'] ?? []));
-        if ( ! $n ) return '';
-        $campanas = in_array('campanas', array_map(fn($a) => $a->slug(), $this->agents()), true);
-        return "\n" . sprintf('Este mensaje trae %d imagen(es). Tú no las ves, y no hace falta: ', $n)
-            . ( $campanas
-                ? 'si son de campañas o de la bitácora, pregúntale a Campañas (ask_campanas) diciendo a qué cambio van y que adjunte las imágenes de este mensaje; ella las recibe. Si no está claro a qué cambio van, pregúntaselo a Jessica. No digas que no te llegan.'
-                : 'por ahora solo se guardan en la bitácora de campañas, y esa área no está activa: dilo en una frase.' ) . "\n";
+        $files = (array) ($this->ctx['files'] ?? []);
+        if ( ! $files ) return '';
+        $slugs = array_map(fn($a) => $a->slug(), $this->agents());
+        $lines = [];
+        if ( in_array('finanzas', $slugs, true) ) $lines[] = 'si son facturas o tickets de proveedores (o no dice nada y son PDF), pídele a Finanzas (ask_finanzas) que registre los archivos adjuntos como gastos; los manda Jessica, así que quedan aprobados';
+        if ( in_array('campanas', $slugs, true) && ! empty($this->ctx['images']) ) $lines[] = 'si son capturas de campañas o de la bitácora, pídele a Campañas (ask_campanas) que adjunte las imágenes al cambio que diga';
+        $n = count($files);
+        return "\n" . sprintf('Este mensaje trae %d archivo(s). Tú no los abres, pero las áreas los reciben: ', $n)
+            . ( $lines ? implode('; ', $lines) . '. Si no está claro qué son o a qué van, pregúntaselo a Jessica. No digas que no te llegan.' : 'ninguna de tus áreas puede guardarlos ahora: dilo en una frase.' ) . "\n";
     }
 
     private function say($text){ if ( $this->progress ) $this->progress->say($text); }
