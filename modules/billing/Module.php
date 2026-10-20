@@ -382,7 +382,12 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('billing_new_details');
         $id = absint($_POST['invoice_id'] ?? 0);
         $r = $this->issuing()->replace_for_new_details($id);
-        if ( is_wp_error($r) ) $this->back(['invoice' => $id], $r->get_error_message(), 'error');
+        if ( is_wp_error($r) ) {
+            // Also kept next to the button, so it can't go unnoticed.
+            set_transient('madof_new_details_error_' . $id, $r->get_error_message(), 10 * MINUTE_IN_SECONDS);
+            $this->back(['invoice' => $id], sprintf(__('No he podido rehacer la factura: %s', 'mad-oficina'), $r->get_error_message()), 'error');
+        }
+        delete_transient('madof_new_details_error_' . $id);
         $this->back(['edit' => $r['new']], ! empty($r['existing'])
             ? __('Ya estaban preparados: esta es la factura nueva. Arriba tienes el enlace a la rectificativa.', 'mad-oficina')
             : __('Preparados dos borradores, sin número hasta que los emitas: esta factura nueva con los datos nuevos y la rectificativa que anula la original (enlace arriba). La factura original no cambia nunca: queda anulada cuando emitas la rectificativa.', 'mad-oficina'));

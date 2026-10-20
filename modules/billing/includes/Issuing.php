@@ -156,15 +156,18 @@ final class Issuing {
      */
     public function replace_for_new_details($id){
         $inv = Invoices::get($id);
-        if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se corrigen así facturas emitidas de la serie F.', 'mad-oficina'));
+        if ( ! $inv ) return new \WP_Error('madof_inv', __('Esa factura no existe.', 'mad-oficina'));
+        if ( ! $inv['number'] ) return new \WP_Error('madof_inv_rect', __('Esta factura todavía es un borrador: cámbiale los datos editándola, no hace falta rectificarla.', 'mad-oficina'));
+        if ( $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', sprintf(__('Solo se rehacen así facturas de la serie F; esta es de la serie %s.', 'mad-oficina'), $inv['series']));
         // Pressed again: the two drafts already prepared, not two more.
         $done = self::replacement_of($id);
         if ( $done && $done['rectify'] && $done['new'] && (int) $done['original']['id'] === (int) $id ) return ['rectify' => (int) $done['rectify']['id'], 'new' => (int) $done['new']['id'], 'existing' => true];
-        $profile = Profiles::get((int) $inv['profile_id']);
-        if ( ! $profile ) return new \WP_Error('madof_inv_profile', __('Esta factura no tiene datos fiscales del cliente unidos.', 'mad-oficina'));
-        $same = true;
-        foreach ( ['client_name' => 'legal_name', 'client_tax_id' => 'tax_id', 'client_address' => 'address', 'client_city' => 'city'] as $k => $pk ) if ( trim((string) $inv[$k]) !== trim((string) $profile[$pk]) ) $same = false;
-        if ( $same ) return new \WP_Error('madof_inv_same', __('La ficha fiscal del cliente tiene los mismos datos que la factura: actualízala primero en Facturación → Clientes.', 'mad-oficina'));
+        [$original, $profile] = self::profiles_for_new_details($inv);
+        if ( ! $profile ) return new \WP_Error('madof_inv_profile', sprintf(__('No encuentro los datos fiscales de «%1$s» (NIF %2$s) en Clientes de facturación. Créalos o únelos allí y vuelve a pulsar el botón.', 'mad-oficina'), $inv['client_name'], $inv['client_tax_id'] ?: '—'));
+        if ( ! self::details_differ($inv, $profile) ) return new \WP_Error('madof_inv_same', sprintf(__('La ficha fiscal «%s» tiene los mismos datos que la factura (nombre, NIF, dirección y localidad). Actualízala primero en Facturación → Clientes de facturación, o crea la nueva razón social unida al mismo cliente.', 'mad-oficina'), $profile['legal_name']));
+        $lines = self::lines_of($inv);
+        if ( ! $lines ) return new \WP_Error('madof_inv_lines', __('Esta factura no tiene conceptos ni base imponible guardados, así que no sé qué rectificar. Revisa la fila original de la hoja antigua (abajo) y prepara la rectificativa a mano.', 'mad-oficina'));
+        [$vat, $irpf] = self::rates_of($inv);
 
         // Today, or later if an invoice of the series already carries a later date (they go in order).
         // Never before the invoice it replaces either.
@@ -172,12 +175,11 @@ final class Issuing {
             $last = $this->last_issued($series, (int) current_time('Y'));
             return max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
         };
-        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']), $date_for('R'));
+        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']), $date_for('R'), ($original ?: $profile)['id']);
         if ( is_wp_error($r) ) return $r;
-        $lines = array_map(fn($l) => ['description' => $l['description'], 'quantity' => (float) $l['quantity'], 'unit_price' => (float) $l['unit_price']], $inv['lines']);
         $new = $this->save_draft([
-            'profile_id' => $inv['profile_id'], 'issue_date' => $date_for('F'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'],
-            'notes' => trim(sprintf(__('Sustituye a la factura %s, anulada por cambio de los datos fiscales.', 'mad-oficina'), $inv['number']) . "\n" . (string) $inv['notes']),
+            'profile_id' => $profile['id'], 'issue_date' => $date_for('F'), 'vat_rate' => $vat, 'irpf_rate' => $irpf,
+            'notes' => trim(sprintf(__('Sustituye a la factura %s, anulada por cambio de los datos fiscales.', 'mad-oficina'), $inv['number']) . ($inv['source'] === 'import' ? '' : "\n" . (string) $inv['notes'])),
         ], $lines);
         if ( is_wp_error($new) ) { self::delete_draft($r); return $new; }
         $map = get_option(self::REPLACED, []);
@@ -185,6 +187,59 @@ final class Issuing {
         $map[(int) $id] = ['rectify' => (int) $r, 'new' => (int) $new];
         update_option(self::REPLACED, $map, false);
         return ['rectify' => (int) $r, 'new' => (int) $new];
+    }
+
+    /**
+     * [the fiscal profile the invoice was issued to, the one with the client's current details].
+     * An invoice imported from the old sheet may not be joined to a profile: found by its NIF
+     * (or legal name). If the client changed company, its current details may be another
+     * active profile of the same office client.
+     * @return array{0:?array, 1:?array}
+     */
+    public static function profiles_for_new_details(array $inv){
+        $original = $inv['profile_id'] ? Profiles::get((int) $inv['profile_id']) : null;
+        if ( ! $original ) $original = Profiles::find((string) $inv['client_tax_id'], (string) $inv['client_name']);
+        $client_id = $inv['client_id'] ?: ($original['client_id'] ?? null);
+        $current = $original;
+        if ( $client_id && ( ! $original || ! self::details_differ($inv, $original) ) ) {
+            foreach ( Profiles::for_client((int) $client_id) as $p ) if ( $p['status'] === 'active' && self::details_differ($inv, $p) ) { $current = $p; break; }
+        }
+        return [$original, $current];
+    }
+
+    public static function details_differ(array $inv, array $profile){
+        $norm = fn($v) => mb_strtolower(trim(preg_replace('/\s+/', ' ', (string) $v)));
+        foreach ( ['client_name' => 'legal_name', 'client_address' => 'address', 'client_city' => 'city'] as $k => $pk ) if ( $norm($inv[$k]) !== $norm($profile[$pk]) ) return true;
+        return Profiles::norm_tax_id($inv['client_tax_id']) !== Profiles::norm_tax_id($profile['tax_id']);
+    }
+
+    /**
+     * An invoice's concepts. One imported from the old sheet may have none saved: then its
+     * concepts and amounts from the sheet's row, or a single line with its base.
+     * @return array[] description, quantity, unit_price
+     */
+    public static function lines_of(array $inv){
+        if ( ! empty($inv['lines']) ) return array_map(fn($l) => ['description' => $l['description'], 'quantity' => (float) $l['quantity'], 'unit_price' => (float) $l['unit_price']], $inv['lines']);
+        $legacy = is_array($inv['legacy'] ?? null) ? $inv['legacy'] : [];
+        $base = (float) $inv['base'];
+        $out = [];
+        foreach ( [1, 2] as $k ) {
+            $d = trim((string) ($legacy['concepto_' . $k] ?? ''));
+            $v = Money::parse((string) ($legacy['valor_' . $k] ?? ''));
+            if ( $d !== '' && $v ) $out[] = ['description' => $d, 'quantity' => 1.0, 'unit_price' => (float) $v];
+        }
+        if ( $out && abs(array_sum(array_column($out, 'unit_price')) - $base) < 0.01 ) return $out;
+        if ( ! $base ) return [];
+        $concepts = array_filter([trim((string) ($legacy['concepto_1'] ?? $legacy['concepto'] ?? '')), trim((string) ($legacy['concepto_2'] ?? ''))]);
+        return [['description' => $concepts ? implode(' · ', $concepts) : sprintf(__('Servicios de la factura %s', 'mad-oficina'), $inv['number']), 'quantity' => 1.0, 'unit_price' => $base]];
+    }
+
+    /** VAT and IRPF %, from the invoice (or from its amounts when an import left them at 0). @return float[] */
+    public static function rates_of(array $inv){
+        $base = (float) $inv['base'];
+        $vat = (float) $inv['vat_rate'] ?: ($base ? round((float) $inv['vat'] / $base * 100, 2) : 0.0);
+        $irpf = (float) $inv['irpf_rate'] ?: ($base ? round((float) $inv['irpf'] / $base * 100, 2) : 0.0);
+        return [$vat, $irpf];
     }
 
     /** Which invoices a «Rehacer con los datos nuevos» links: original id => rectify, new. */
@@ -206,13 +261,16 @@ final class Issuing {
     }
 
     /** A rectifying draft (series R) that cancels the original: same lines, negative. */
-    public function rectify($id, $notes = '', $date = null){
+    public function rectify($id, $notes = '', $date = null, $profile_id = 0){
         $inv = Invoices::get($id);
         if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se rectifican facturas emitidas de la serie F.', 'mad-oficina'));
-        $lines = array_map(fn($l) => ['description' => sprintf(__('Rectifica %1$s: %2$s', 'mad-oficina'), $inv['number'], $l['description']), 'quantity' => (float) $l['quantity'], 'unit_price' => -1 * (float) $l['unit_price']], $inv['lines']);
+        $lines = array_map(fn($l) => ['description' => sprintf(__('Rectifica %1$s: %2$s', 'mad-oficina'), $inv['number'], $l['description']), 'quantity' => $l['quantity'], 'unit_price' => -1 * $l['unit_price']], self::lines_of($inv));
+        if ( ! $lines ) return new \WP_Error('madof_inv_lines', __('Esta factura no tiene conceptos ni base imponible guardados: no sé qué rectificar.', 'mad-oficina'));
+        if ( ! $profile_id ) $profile_id = (int) $inv['profile_id'] ?: (int) (self::profiles_for_new_details($inv)[0]['id'] ?? 0);
+        [$vat, $irpf] = self::rates_of($inv);
         return $this->save_draft([
-            'profile_id' => $inv['profile_id'], 'series' => 'R', 'rectifies_id' => $inv['id'],
-            'issue_date' => $date ?: current_time('Y-m-d'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'], 'notes' => $notes,
+            'profile_id' => $profile_id, 'series' => 'R', 'rectifies_id' => $inv['id'],
+            'issue_date' => $date ?: current_time('Y-m-d'), 'vat_rate' => $vat, 'irpf_rate' => $irpf, 'notes' => $notes,
         ], $lines);
     }
 

@@ -171,6 +171,41 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame('B11111111', Invoices::get($r['rectify'])['client_tax_id']);
     }
 
+    private function legacy_invoice(array $over = []){
+        return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
+            'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,
+            'status' => 'sent', 'source' => 'import', 'legacy' => wp_json_encode(['concepto_1' => 'Gestión redes febrero', 'valor_1' => '', 'base' => '300'])], []);
+    }
+
+    public function test_an_invoice_imported_without_lines_is_redone_with_its_sheet_concept_and_rates(){
+        $id = $this->legacy_invoice();
+        $this->assertWPError($this->issuing()->replace_for_new_details($id), 'same details: explained, not silent');
+        Profiles::save(['legal_name' => 'Taller Azul Nuevo SL', 'tax_id' => 'B22222222', 'email' => 'pagos@taz.example', 'client_id' => $this->client], $this->profile);
+        $r = $this->issuing()->replace_for_new_details($id);
+        $this->assertIsArray($r, is_wp_error($r) ? $r->get_error_message() : '');
+        $rect = Invoices::get($r['rectify']); $new = Invoices::get($r['new']);
+        $this->assertSame(['Rectifica 26-019: Gestión redes febrero'], array_column($rect['lines'], 'description'), 'the concept from the old sheet');
+        $this->assertSame([-318.0, 'B11111111'], [$rect['total'], $rect['client_tax_id']], 'base, 21 % VAT and 15 % IRPF from its amounts');
+        $this->assertSame([318.0, 'B22222222', 21.0, 15.0], [$new['total'], $new['client_tax_id'], $new['vat_rate'], $new['irpf_rate']]);
+    }
+
+    public function test_an_unjoined_import_finds_its_profile_by_tax_id_and_a_new_company_is_the_current_profile(){
+        $id = $this->legacy_invoice(['profile_id' => null, 'number' => '26-020', 'seq' => 20]);
+        // The client changed company: the old legal name stays inactive, the new one is active.
+        \MAD_Oficina\Billing\Profiles::set_status($this->profile, 'inactive');
+        $new_profile = Profiles::save(['legal_name' => 'Azul Estudio SL', 'tax_id' => 'B33333333', 'client_id' => $this->client]);
+        [$orig, $cur] = Issuing::profiles_for_new_details(Invoices::get($id));
+        $this->assertSame([$this->profile, $new_profile], [(int) $orig['id'], (int) $cur['id']]);
+        $r = $this->issuing()->replace_for_new_details($id);
+        $this->assertSame('B33333333', Invoices::get($r['new'])['client_tax_id']);
+        $this->assertSame($this->profile, (int) Invoices::get($r['rectify'])['profile_id'], 'the rectifying one hangs from the profile it was issued to');
+
+        $orphan = $this->legacy_invoice(['profile_id' => null, 'number' => '26-021', 'seq' => 21, 'client_name' => 'Nadie SL', 'client_tax_id' => 'X0000000T']);
+        $e = $this->issuing()->replace_for_new_details($orphan);
+        $this->assertWPError($e);
+        $this->assertStringContainsString('No encuentro los datos fiscales', $e->get_error_message());
+    }
+
     public function test_only_drafts_can_be_deleted(){
         $id = $this->draft();
         $approval = $this->issuing()->request($id);
