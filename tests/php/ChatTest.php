@@ -700,6 +700,24 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame('open', $this->status($task), '«Convertir en tarea»');
     }
 
+    public function test_after_midnight_tomorrow_is_the_coming_morning(){
+        $this->key();
+        // Make it 02:xx local time.
+        $o = 2 - (int) gmdate('G'); if ( $o < -12 ) $o += 24; if ( $o > 14 ) $o -= 24;
+        update_option('timezone_string', ''); update_option('gmt_offset', $o);
+        $this->assertSame('09:00', \MAD_Oficina\Chat\Reminders::night_tomorrow(wp_date('Y-m-d', time() + DAY_IN_SECONDS) . ' 09:00'));
+        $this->assertNull(\MAD_Oficina\Chat\Reminders::night_tomorrow(wp_date('Y-m-d') . ' 09:00'));
+        $this->claude = [
+            ['tool' => 'set_reminder', 'input' => ['text' => 'Enviar el informe', 'when' => wp_date('Y-m-d', time() + DAY_IN_SECONDS) . ' 09:00']],
+            ['tool' => 'set_reminder', 'input' => ['text' => 'Enviar el informe', 'when' => wp_date('Y-m-d') . ' 09:00']],
+            ['text' => 'Te aviso hoy a las 9:00.'],
+        ];
+        $this->say('recuérdame mañana a las 9 enviar el informe');
+        $this->assertStringContainsString('madrugada', $this->prompts[0]['system']);
+        $this->assertStringContainsString('HOY', $this->tool_result($this->prompts[1]), 'at 2 a.m. «mañana» is this morning');
+        $this->assertSame(wp_date('Y-m-d') . ' 09:00', \MAD_Oficina\Chat\Reminders::describe(\MAD_Oficina\Chat\Reminders::pending('jessica@imad.example')[0])['when']);
+    }
+
     public function test_voice_messages_are_transcribed_and_understood(){
         $this->key();
         $this->claude = [['text' => 'Genial, me lo apunto.']];

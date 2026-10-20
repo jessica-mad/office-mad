@@ -38,6 +38,19 @@ final class Reminders {
         return self::get((int) $wpdb->insert_id);
     }
 
+    /** Hour until which the night still belongs to the day before («mañana» = the morning about to come). */
+    const NIGHT_UNTIL = 5;
+
+    /**
+     * Between midnight and 5:00, a reminder set for tomorrow is most likely meant for this
+     * coming morning. @return string|null the time («09:00») if that is the case
+     */
+    public static function night_tomorrow($when){
+        if ( (int) wp_date('G') >= self::NIGHT_UNTIL ) return null;
+        if ( ! preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})$/', trim((string) $when), $m) ) return null;
+        return $m[1] === wp_date('Y-m-d', time() + DAY_IN_SECONDS) ? $m[2] : null;
+    }
+
     public static function get($id){
         global $wpdb;
         return $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE id = %d', (int) $id), ARRAY_A) ?: null;
