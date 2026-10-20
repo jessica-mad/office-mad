@@ -31,6 +31,7 @@ class ChatTest extends MADOF_TestCase {
     private $speech_models = [];
     private $speech_configs = [];
     private $audio_bytes = 'fake-audio-bytes';
+    private $raw_prompts = [];
     private $sent_audio = [];
 
     public static function wpSetUpBeforeClass($factory){
@@ -97,6 +98,7 @@ class ChatTest extends MADOF_TestCase {
         if ( $url === 'https://api.anthropic.com/v1/messages' ) {
             $body = json_decode($args['body'], true);
             $this->prompts[] = $body;
+            $this->raw_prompts[] = $args['body'];
             $next = array_shift($this->claude);
             if ( $next === null ) return ['response' => ['code' => 500], 'body' => '{}'];
             $tool = isset($next['tool']);
@@ -642,6 +644,7 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame(['Nube SL', 'upload'], [$e[0]['supplier_name'], $e[0]['source']]);
         $this->assertNotNull(\MAD_Oficina\Suppliers\Suppliers::match('B99999999', '', ''), 'the new supplier is created with what was read');
         $this->assertStringContainsString('registrada', $this->tool_result($this->prompts[3]));
+        $this->assertStringContainsString('{"input":{},"type":"tool_use"', $this->raw_prompts[3], 'a tool called without arguments goes back as {} (else Claude answers 400)');
         $this->assertStringContainsString('Nube SL', $this->last_to_jessica());
     }
 

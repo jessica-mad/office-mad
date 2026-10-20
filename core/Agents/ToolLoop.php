@@ -37,7 +37,7 @@ final class ToolLoop {
             if ( is_wp_error($res) ) return $res;
             if ( ($res['stop_reason'] ?? '') !== 'tool_use' ) return ['text' => ClaudeClient::text($res), 'turns' => $turn];
 
-            $messages[] = ['role' => 'assistant', 'content' => $res['content']]; // unchanged, thinking blocks included
+            $messages[] = ClaudeClient::assistant_turn($res['content']); // thinking blocks included
             $results = [];
             foreach ( $res['content'] as $block ) {
                 if ( ($block['type'] ?? '') !== 'tool_use' ) continue;

@@ -101,7 +101,7 @@ final class Receptionist {
             }
 
             // Keep the assistant turn exactly as returned (thinking blocks included) and answer every tool call.
-            $messages[] = ['role' => 'assistant', 'content' => $response['content']];
+            $messages[] = ClaudeClient::assistant_turn($response['content']);
             $results = [];
             foreach ( $response['content'] as $block ){
                 if ( ($block['type'] ?? '') !== 'tool_use' ) continue;

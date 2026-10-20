@@ -35,6 +35,14 @@ final class ClaudeClient {
      * @param array $opts  ['timeout' => seconds]
      * @return array|\WP_Error decoded response
      */
+    /**
+     * The model's turn, sent back exactly as it came, except that a tool called with no
+     * arguments decodes to [] and must go back as {} (else: 400 «Input should be an object»).
+     */
+    public static function assistant_turn(array $content){
+        return ['role' => 'assistant', 'content' => array_map(fn($b) => ($b['type'] ?? '') === 'tool_use' && empty($b['input']) ? ['input' => new \stdClass()] + $b : $b, $content)];
+    }
+
     public static function create(array $body, array $ctx, array $opts = []){
         if ( ! self::has_key() ) {
             return new \WP_Error('madof_no_key', __('Falta la clave de Claude (MAD_OFICINA_ANTHROPIC_KEY).', 'mad-oficina'));
