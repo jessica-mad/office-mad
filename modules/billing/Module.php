@@ -46,7 +46,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -222,7 +222,9 @@ return new class($core) implements MAD_Oficina_Module {
         if ( trim($data['legal_name'] ?? '') === '' ) $this->back(['tab' => 'clients', 'profile' => $id], __('El nombre fiscal es obligatorio.', 'mad-oficina'), 'error');
         $id = \MAD_Oficina\Billing\Profiles::save($data, $id);
         \MAD_Oficina\Billing\Profiles::link($id, $data['client_id']); // its invoices follow
-        $this->back(['tab' => 'clients', 'profile' => $id], __('Cliente de facturación guardado.', 'mad-oficina'));
+        $n = \MAD_Oficina\Billing\Issuing::refresh_drafts($id);
+        $this->back(['tab' => 'clients', 'profile' => $id], __('Cliente de facturación guardado.', 'mad-oficina')
+            . ($n ? ' ' . sprintf(_n('El borrador pendiente ya lleva los datos nuevos.', 'Los %d borradores pendientes ya llevan los datos nuevos.', $n, 'mad-oficina'), $n) : ''));
     }
 
     /** Back to the office client's card when the action started there. */
@@ -374,6 +376,14 @@ return new class($core) implements MAD_Oficina_Module {
         if ( ! $done ) $this->back([], __('No he borrado nada: solo se borran borradores (las facturas emitidas se rectifican).', 'mad-oficina'), 'error');
         $this->back([], sprintf(_n('Borrador eliminado.', '%d borradores eliminados.', $done, 'mad-oficina'), $done)
             . ' ' . __('Los que preparó el calendario ya no vuelven solos; si quieres rehacer uno, Calendario → «Preparar ahora».', 'mad-oficina'));
+    }
+
+    public function handle_billing_new_details(){
+        $this->guard('billing_new_details');
+        $id = absint($_POST['invoice_id'] ?? 0);
+        $r = $this->issuing()->replace_for_new_details($id);
+        if ( is_wp_error($r) ) $this->back(['invoice' => $id], $r->get_error_message(), 'error');
+        $this->back(['edit' => $r['new']], sprintf(__('Preparados dos borradores: la rectificativa que anula la factura (con los datos antiguos, borrador #%1$d) y esta factura nueva con los datos nuevos. Revisa esta y pulsa «Emitir»; luego emite también la rectificativa desde la lista de borradores.', 'mad-oficina'), $r['rectify']));
     }
 
     public function handle_billing_rectify(){

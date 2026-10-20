@@ -84,6 +84,11 @@ $status_pill = function($inv){
         <?php if ( $inv['number'] && $inv['series'] === 'F' ) : echo AdminUi::form_open('billing_rectify', 'madof-inline'); ?>
             <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
             <button class="madof-btn is-ghost"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></button>
+        </form>
+        <?php echo AdminUi::form_open('billing_new_details', 'madof-inline'); ?>
+            <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+            <button class="madof-btn is-ghost" title="<?php esc_attr_e('Prepara una rectificativa que anula esta factura y una factura nueva con los mismos conceptos y los datos fiscales actuales del cliente. No se emite ni se envía nada hasta que pulses «Emitir».', 'mad-oficina'); ?>"
+                onclick="return confirm('<?php echo esc_js(__('¿Preparo la rectificativa que anula esta factura y una nueva con los datos fiscales actuales del cliente? Quedan como borradores.', 'mad-oficina')); ?>')"><?php esc_html_e('Rehacer con los datos fiscales nuevos', 'mad-oficina'); ?></button>
         </form><?php endif; ?>
         </div>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) ) : // Argentina too: its due date is asked like any other ?>

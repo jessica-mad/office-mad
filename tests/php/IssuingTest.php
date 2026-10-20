@@ -143,6 +143,31 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame('R-' . substr(current_time('Y'), 2) . '-01', Invoices::get($r)['number']);
     }
 
+    public function test_new_fiscal_details_cancel_the_issued_invoice_and_reach_the_drafts(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $pending = $this->draft(['issue_date' => '2026-11-28']);
+        $this->assertWPError($this->issuing()->replace_for_new_details($id), 'nothing changed in the fiscal details yet');
+
+        Profiles::save(['legal_name' => 'Taller Azul Nuevo SL', 'tax_id' => 'B22222222', 'email' => 'pagos@taz.example', 'client_id' => $this->client], $this->profile);
+        $this->assertSame(1, Issuing::refresh_drafts($this->profile));
+        $this->assertSame(['Taller Azul Nuevo SL', 'B22222222'], [Invoices::get($pending)['client_name'], Invoices::get($pending)['client_tax_id']], 'the next draft takes the new details');
+        $this->assertSame('B11111111', Invoices::get($id)['client_tax_id'], 'an issued invoice is never touched');
+
+        $r = $this->issuing()->replace_for_new_details($id);
+        $this->assertIsArray($r);
+        $rect = Invoices::get($r['rectify']);
+        $new = Invoices::get($r['new']);
+        $this->assertSame(['R', $id, -478.06, 'B11111111'], [$rect['series'], $rect['rectifies_id'], $rect['total'], $rect['client_tax_id']], 'the rectifying one cancels it, to the old details');
+        $this->assertSame(['F', 478.06, 'B22222222', 'draft'], [$new['series'], $new['total'], $new['client_tax_id'], $new['status']], 'the new one: same concepts, new details, waiting for «Emitir»');
+        $this->assertStringContainsString(Invoices::get($id)['number'], $new['notes']);
+
+        // Editing the rectifying draft keeps the original's details; refreshing drafts leaves it alone.
+        Issuing::refresh_drafts($this->profile);
+        $this->issuing()->save_draft(['profile_id' => $this->profile], [['description' => 'x', 'unit_price' => '-10']], $r['rectify']);
+        $this->assertSame('B11111111', Invoices::get($r['rectify'])['client_tax_id']);
+    }
+
     public function test_only_drafts_can_be_deleted(){
         $id = $this->draft();
         $approval = $this->issuing()->request($id);
