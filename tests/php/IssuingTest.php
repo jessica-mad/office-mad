@@ -161,6 +161,9 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame(['R', $id, -478.06, 'B11111111'], [$rect['series'], $rect['rectifies_id'], $rect['total'], $rect['client_tax_id']], 'the rectifying one cancels it, to the old details');
         $this->assertSame(['F', 478.06, 'B22222222', 'draft'], [$new['series'], $new['total'], $new['client_tax_id'], $new['status']], 'the new one: same concepts, new details, waiting for «Emitir»');
         $this->assertStringContainsString(Invoices::get($id)['number'], $new['notes']);
+        $this->assertGreaterThanOrEqual(Invoices::get($id)['issue_date'], $rect['issue_date'], 'never dated before the invoice it cancels');
+        $this->assertSame([(int) $r['rectify'], (int) $r['new']], [(int) Issuing::replacement_of($id)['rectify']['id'], (int) Issuing::replacement_of($r['new'])['new']['id']], 'the three are linked from any of them');
+        $this->assertEquals($r + ['existing' => true], $this->issuing()->replace_for_new_details($id), 'pressed again: the same two drafts');
 
         // Editing the rectifying draft keeps the original's details; refreshing drafts leaves it alone.
         Issuing::refresh_drafts($this->profile);

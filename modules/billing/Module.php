@@ -383,7 +383,9 @@ return new class($core) implements MAD_Oficina_Module {
         $id = absint($_POST['invoice_id'] ?? 0);
         $r = $this->issuing()->replace_for_new_details($id);
         if ( is_wp_error($r) ) $this->back(['invoice' => $id], $r->get_error_message(), 'error');
-        $this->back(['edit' => $r['new']], sprintf(__('Preparados dos borradores: la rectificativa que anula la factura (con los datos antiguos, borrador #%1$d) y esta factura nueva con los datos nuevos. Revisa esta y pulsa «Emitir»; luego emite también la rectificativa desde la lista de borradores.', 'mad-oficina'), $r['rectify']));
+        $this->back(['edit' => $r['new']], ! empty($r['existing'])
+            ? __('Ya estaban preparados: esta es la factura nueva. Arriba tienes el enlace a la rectificativa.', 'mad-oficina')
+            : __('Preparados dos borradores, sin número hasta que los emitas: esta factura nueva con los datos nuevos y la rectificativa que anula la original (enlace arriba). La factura original no cambia nunca: queda anulada cuando emitas la rectificativa.', 'mad-oficina'));
     }
 
     public function handle_billing_rectify(){

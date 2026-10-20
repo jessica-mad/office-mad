@@ -18,6 +18,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
 <div class="wrap madof-wrap">
     <p><a href="<?php echo esc_url($base); ?>">← <?php esc_html_e('Facturas', 'mad-oficina'); ?></a></p>
     <?php AdminUi::header(__('Facturación', 'mad-oficina'), $draft ? ($draft['series'] === 'R' ? __('Rectificativa (borrador)', 'mad-oficina') : __('Borrador de factura', 'mad-oficina')) : __('Nueva factura', 'mad-oficina')); ?>
+    <?php if ( $draft && ($rep = \MAD_Oficina\Billing\Issuing::replacement_of($draft['id'])) ) { $here = $draft['id']; include __DIR__ . '/replacement.php'; } ?>
 
 <?php if ( ! $profile ) : ?>
     <form method="get" class="madof-form madof-card">
@@ -56,8 +57,13 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <?php if ( ! empty($draft['series']) && $draft['series'] === 'R' ) : ?><input type="hidden" name="series" value="R"><?php endif; ?>
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Para', 'mad-oficina'); ?></span>
+            <?php if ( $draft && ! empty($draft['rectifies_id']) ) : // a rectifying invoice goes to the details the original was issued with ?>
+            <p><strong><?php echo esc_html($draft['client_name']); ?></strong> · <?php echo esc_html(implode(' · ', array_filter([$draft['client_tax_id'], $draft['client_address'], $draft['client_city'], $draft['client_email']]))); ?>
+                <br><small class="madof-muted"><?php esc_html_e('Los datos con los que se emitió la factura que rectifica.', 'mad-oficina'); ?></small></p>
+            <?php else : ?>
             <p><strong><?php echo esc_html($profile['legal_name']); ?></strong> · <?php echo esc_html(implode(' · ', array_filter([$profile['tax_id'], $profile['address'], $profile['city'], $profile['email']]))); ?>
                 · <a href="<?php echo esc_url($base . '&tab=clients&profile=' . $profile['id']); ?>"><?php esc_html_e('Cambiar sus datos', 'mad-oficina'); ?></a></p>
+            <?php endif; ?>
             <?php if ( ! $profile['tax_id'] && ! $is_ar ) : ?><p class="madof-warn"><?php esc_html_e('Le falta el NIF: complétalo en sus datos fiscales antes de emitir.', 'mad-oficina'); ?></p><?php endif; ?>
             <?php if ( ! $profile['email'] && ! $is_ar ) : ?><p class="madof-warn"><?php esc_html_e('No tiene email para facturas: podrás emitirla, pero no enviarla desde aquí.', 'mad-oficina'); ?></p><?php endif; ?>
             <div class="madof-cols">

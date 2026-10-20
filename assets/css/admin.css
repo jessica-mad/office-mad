@@ -220,3 +220,8 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-ads-attach{cursor:pointer;font:400 11px/1 var(--madof-pixel);text-transform:uppercase;letter-spacing:.08em;border:2px dashed var(--k);border-radius:10px;padding:10px 12px}
 .madof-ads-attach:focus-within{outline:2px solid var(--y)}
 .madof-task-desc{margin-top:4px;white-space:normal;color:#333;font-size:13px}.madof-tasks td{vertical-align:top}
+
+/* Change of fiscal details: the original, its rectifying invoice and the new one */
+.madof-replacement{margin:16px 0;background:var(--g)}
+.madof-replacement ul{margin:8px 0 8px 18px;list-style:square}
+.madof-replacement li{margin:4px 0}

@@ -51,6 +51,7 @@ $status_pill = function($inv){
     <section class="madof-card">
         <span class="madof-kicker"><?php echo esc_html(Invoices::SERIES[$inv['series']] . ' · ' . mysql2date('j M Y', $inv['issue_date'])); ?></span>
         <h2><?php echo esc_html($inv['number'] ?: __('Sin número', 'mad-oficina')); ?> · <?php echo esc_html($inv['client_name']); ?> <?php echo $status_pill($inv); ?></h2>
+        <?php if ( $rep = \MAD_Oficina\Billing\Issuing::replacement_of($inv['id']) ) { $here = $inv['id']; include __DIR__ . '/replacement.php'; } ?>
         <table class="madof-table"><tbody>
             <tr><th scope="row"><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><td><?php echo esc_html(implode(' · ', array_filter([$inv['client_name'], $inv['client_tax_id'], $inv['client_address'], $inv['client_city']]))); ?></td></tr>
             <?php if ( $inv['client_email'] ) : ?><tr><th scope="row"><?php esc_html_e('Email', 'mad-oficina'); ?></th><td><?php echo esc_html($inv['client_email']); ?></td></tr><?php endif; ?>
@@ -374,7 +375,7 @@ $status_pill = function($inv){
         <?php foreach ( $list as $inv ) : ?>
             <tr>
                 <?php if ( $drafts_here ) : ?><td><?php if ( $inv['status'] === 'draft' ) : ?><input type="checkbox" class="madof-draft-pick" form="madof-drafts-form" name="ids[]" value="<?php echo (int) $inv['id']; ?>" aria-label="<?php echo esc_attr(sprintf(__('Marcar el borrador de %s', 'mad-oficina'), $inv['client_name'])); ?>"><?php endif; ?></td><?php endif; ?>
-                <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : __('Borrador', 'mad-oficina'))); ?></strong></a>
+                <td><a href="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>"><strong><?php echo esc_html($inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : ($inv['series'] === 'R' ? __('Borrador · rectificativa', 'mad-oficina') : __('Borrador', 'mad-oficina')))); ?></strong></a>
                     <?php if ( ! $inv['number'] && ( $when = \MAD_Oficina\Billing\Calendar::scheduled_for($inv) ) ) echo '<br><small>' . esc_html(sprintf($inv['series'] === 'AR' ? __('te lo recuerdo el %s', 'mad-oficina') : (! empty($inv['auto_send']) ? __('se envía sola el %s', 'mad-oficina') : __('se envía el %s (con tu OK)', 'mad-oficina')), date_i18n('j/m', strtotime($when)))) . '</small>'; ?></td>
                 <td><?php echo esc_html(mysql2date('j M Y', $inv['issue_date'])); ?></td>
                 <td><?php if ( $inv['client_id'] && isset($codes[$inv['client_id']]) ) echo '<a class="madof-code" href="' . esc_url($base . '&client=' . $inv['client_id']) . '">' . esc_html($codes[$inv['client_id']]) . '</a> '; ?><?php echo esc_html($inv['client_name']); ?><?php if ( $inv['notes'] ) echo ' <span title="' . esc_attr($inv['notes']) . '">' . AdminUi::icon('alert') . '</span>'; ?></td>

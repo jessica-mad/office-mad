@@ -157,31 +157,62 @@ final class Issuing {
     public function replace_for_new_details($id){
         $inv = Invoices::get($id);
         if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se corrigen así facturas emitidas de la serie F.', 'mad-oficina'));
+        // Pressed again: the two drafts already prepared, not two more.
+        $done = self::replacement_of($id);
+        if ( $done && $done['rectify'] && $done['new'] && (int) $done['original']['id'] === (int) $id ) return ['rectify' => (int) $done['rectify']['id'], 'new' => (int) $done['new']['id'], 'existing' => true];
         $profile = Profiles::get((int) $inv['profile_id']);
         if ( ! $profile ) return new \WP_Error('madof_inv_profile', __('Esta factura no tiene datos fiscales del cliente unidos.', 'mad-oficina'));
         $same = true;
         foreach ( ['client_name' => 'legal_name', 'client_tax_id' => 'tax_id', 'client_address' => 'address', 'client_city' => 'city'] as $k => $pk ) if ( trim((string) $inv[$k]) !== trim((string) $profile[$pk]) ) $same = false;
         if ( $same ) return new \WP_Error('madof_inv_same', __('La ficha fiscal del cliente tiene los mismos datos que la factura: actualízala primero en Facturación → Clientes.', 'mad-oficina'));
 
-        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']));
+        // Today, or later if an invoice of the series already carries a later date (they go in order).
+        // Never before the invoice it replaces either.
+        $date_for = function($series) use ($inv){
+            $last = $this->last_issued($series, (int) current_time('Y'));
+            return max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
+        };
+        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']), $date_for('R'));
         if ( is_wp_error($r) ) return $r;
         $lines = array_map(fn($l) => ['description' => $l['description'], 'quantity' => (float) $l['quantity'], 'unit_price' => (float) $l['unit_price']], $inv['lines']);
         $new = $this->save_draft([
-            'profile_id' => $inv['profile_id'], 'issue_date' => current_time('Y-m-d'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'],
+            'profile_id' => $inv['profile_id'], 'issue_date' => $date_for('F'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'],
             'notes' => trim(sprintf(__('Sustituye a la factura %s, anulada por cambio de los datos fiscales.', 'mad-oficina'), $inv['number']) . "\n" . (string) $inv['notes']),
         ], $lines);
         if ( is_wp_error($new) ) { self::delete_draft($r); return $new; }
+        $map = get_option(self::REPLACED, []);
+        $map = is_array($map) ? $map : [];
+        $map[(int) $id] = ['rectify' => (int) $r, 'new' => (int) $new];
+        update_option(self::REPLACED, $map, false);
         return ['rectify' => (int) $r, 'new' => (int) $new];
     }
 
+    /** Which invoices a «Rehacer con los datos nuevos» links: original id => rectify, new. */
+    const REPLACED = 'madoficina_invoice_replaced';
+
+    /**
+     * The three invoices of a change of fiscal details, seen from any of them.
+     * @return array{original:?array, rectify:?array, new:?array}|null
+     */
+    public static function replacement_of($id){
+        $id = (int) $id;
+        $map = get_option(self::REPLACED, []);
+        foreach ( is_array($map) ? $map : [] as $orig => $pair ) {
+            if ( in_array($id, [(int) $orig, (int) $pair['rectify'], (int) $pair['new']], true) ) {
+                return ['original' => Invoices::get((int) $orig), 'rectify' => Invoices::get((int) $pair['rectify']), 'new' => Invoices::get((int) $pair['new'])];
+            }
+        }
+        return null;
+    }
+
     /** A rectifying draft (series R) that cancels the original: same lines, negative. */
-    public function rectify($id, $notes = ''){
+    public function rectify($id, $notes = '', $date = null){
         $inv = Invoices::get($id);
         if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se rectifican facturas emitidas de la serie F.', 'mad-oficina'));
         $lines = array_map(fn($l) => ['description' => sprintf(__('Rectifica %1$s: %2$s', 'mad-oficina'), $inv['number'], $l['description']), 'quantity' => (float) $l['quantity'], 'unit_price' => -1 * (float) $l['unit_price']], $inv['lines']);
         return $this->save_draft([
             'profile_id' => $inv['profile_id'], 'series' => 'R', 'rectifies_id' => $inv['id'],
-            'issue_date' => current_time('Y-m-d'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'], 'notes' => $notes,
+            'issue_date' => $date ?: current_time('Y-m-d'), 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'], 'notes' => $notes,
         ], $lines);
     }
 
