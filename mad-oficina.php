@@ -60,6 +60,7 @@ final class MAD_Oficina_Core {
         add_action('admin_post_madof_approval_resolve', [$this, 'handle_approval_resolve']);
         add_action('admin_post_madof_approval_bulk', [$this, 'handle_approval_bulk']);
         add_action('admin_post_madof_autonomy_save', [$this, 'handle_autonomy_save']);
+        add_action('admin_post_madof_agents_save', [$this, 'handle_agents_save']);
         add_action('admin_notices', [$this,'admin_notices']);
 
         if ( defined('WP_CLI') && WP_CLI ) {
@@ -104,6 +105,14 @@ final class MAD_Oficina_Core {
         );
         add_submenu_page(
             self::MENU_SLUG_ROOT,
+            __('Personajes y agentes','mad-oficina'),
+            __('Personajes y agentes','mad-oficina'),
+            self::CAPABILITY,
+            self::MENU_SLUG_ROOT . '-agentes',
+            [$this,'render_agents_page']
+        );
+        add_submenu_page(
+            self::MENU_SLUG_ROOT,
             __('Módulos','mad-oficina'),
             __('Módulos','mad-oficina'),
             self::CAPABILITY,
@@ -117,6 +126,37 @@ final class MAD_Oficina_Core {
             wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         }
         include MAD_OFICINA_DIR . 'views/modules-manager.php';
+    }
+
+    public function render_agents_page(){
+        if ( ! current_user_can(self::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
+        include MAD_OFICINA_DIR . 'views/agents.php';
+    }
+
+    /** Personajes y agentes: names and roles, Nora's persona, and each agent's model, effort and instructions. */
+    public function handle_agents_save(){
+        if ( ! current_user_can(self::CAPABILITY) ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'), 403);
+        check_admin_referer('madof_agents_save');
+        $p = wp_unslash($_POST);
+        \MAD_Oficina\Core\Agents\Registry::save((array) ($p['agents'] ?? []));
+        // Names and roles here; greetings stay as they are (they are edited with the portal).
+        $chars = get_option(\MAD_Oficina\Core\Agents\Characters::OPTION, []);
+        $chars = is_array($chars) ? $chars : [];
+        foreach ( (array) ($p['characters'] ?? []) as $slug => $c ) {
+            if ( ! isset(\MAD_Oficina\Core\Agents\Characters::defaults()[$slug]) ) continue;
+            $chars[$slug] = ['name' => (string) ($c['name'] ?? ''), 'role' => (string) ($c['role'] ?? '')] + (array) ($chars[$slug] ?? []);
+        }
+        \MAD_Oficina\Core\Agents\Characters::save($chars);
+        if ( isset($p['nora']) ) {
+            $key = self::option_key('chat');
+            $s = (array) get_option($key, []);
+            $s['assistant_name'] = mb_substr(sanitize_text_field((string) ($p['nora']['name'] ?? '')), 0, 40);
+            $s['assistant_personality'] = mb_substr(sanitize_textarea_field((string) ($p['nora']['personality'] ?? '')), 0, 800);
+            update_option($key, $s);
+        }
+        \MAD_Oficina\Core\AdminUi::flash(__('Guardado. Los cambios se aplican desde el próximo mensaje o la próxima tarea.', 'mad-oficina'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::MENU_SLUG_ROOT . '-agentes'));
+        exit;
     }
 
     public function render_inbox_page(){

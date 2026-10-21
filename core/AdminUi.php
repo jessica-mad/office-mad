@@ -23,6 +23,11 @@ final class AdminUi {
     }
 
     /** Opens a POST form to admin-post.php for "madof_{$action}" with its nonce. */
+    /** «Modelo e indicaciones: en Personajes y agentes», pointing at that agent's card. */
+    public static function agents_link($key){
+        return '<p class="description">' . esc_html__('El modelo y las indicaciones de este agente se eligen en', 'mad-oficina') . ' <a href="' . esc_url(admin_url('admin.php?page=mad-oficina-agentes#agente-' . $key)) . '">' . esc_html__('MAD Oficina → Personajes y agentes', 'mad-oficina') . '</a>.</p>';
+    }
+
     public static function form_open($action, $class = 'madof-form'){
         $html  = '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="' . esc_attr($class) . '">';
         $html .= '<input type="hidden" name="action" value="madof_' . esc_attr($action) . '">';

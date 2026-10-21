@@ -83,10 +83,7 @@ $labels = fn(array $keys, array $map) => implode(', ', array_map(fn($k) => $map[
             <div class="madof-cols">
                 <label><?php esc_html_e('Tope de gasto diario (USD)', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="chat_cap" value="<?php echo esc_attr(number_format((float) $chat->cap(), 2, '.', '')); ?>">
                     <small><?php echo esc_html(sprintf(__('Hoy: %s $. Al llegar al tope, la charla se cambia por los botones de reunión y brief.', 'mad-oficina'), number_format($spent, 3, ',', '.'))); ?></small></label>
-                <label><?php esc_html_e('Modelo', 'mad-oficina'); ?>
-                    <select name="chat_model"><?php foreach ( \MAD_Oficina\Core\Agents\ClaudeClient::PRICES as $model => $price ) : ?>
-                        <option value="<?php echo esc_attr($model); ?>" <?php selected($chat->model(), $model); ?>><?php echo esc_html($model); ?></option>
-                    <?php endforeach; ?></select></label>
+                <input type="hidden" name="chat_model" value="<?php echo esc_attr($chat->model()); ?>"><div><?php echo \MAD_Oficina\Core\AdminUi::agents_link('visitantes'); ?></div>
             </div>
             <p class="description"><?php printf(esc_html__('Límites: %1$d mensajes por charla, %2$d charlas al día por visitante. Las charlas se borran a los %3$d días.', 'mad-oficina'), \MAD_Oficina\Visitors\VisitorChat::PER_CONVERSATION, \MAD_Oficina\Visitors\VisitorChat::CONVERSATIONS_PER_DAY, \MAD_Oficina\Visitors\VisitorChat::RETENTION_DAYS); ?></p>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>

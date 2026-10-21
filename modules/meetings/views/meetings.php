@@ -72,14 +72,8 @@ $clients = Clients::all();
         <input type="hidden" name="action" value="madof_meetings_settings">
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Secretaria de actas', 'mad-oficina'); ?></span>
-            <label><?php esc_html_e('Modelo', 'mad-oficina'); ?>
-                <select name="secretary_model"><?php foreach ( ClaudeClient::PRICES as $model => $price ) : ?>
-                    <option value="<?php echo esc_attr($model); ?>" <?php selected($settings['secretary_model'] ?? Secretary::DEFAULT_MODEL, $model); ?>><?php echo esc_html(sprintf('%s · $%s / $%s por millón', $model, $price[0], $price[1])); ?></option>
-                <?php endforeach; ?></select>
-                <small><?php esc_html_e('Con Sonnet 5.5, una reunión de una hora cuesta unos 0,05–0,10 $.', 'mad-oficina'); ?></small></label>
-            <label><?php esc_html_e('Indicaciones adicionales', 'mad-oficina'); ?>
-                <textarea name="secretary_prompt" rows="5" placeholder="<?php esc_attr_e('Ej.: «En RF, Candy es Candela Rodríguez». «Las tareas de subir anuncios son siempre de Jessica».', 'mad-oficina'); ?>"><?php echo esc_textarea($settings['secretary_prompt'] ?? ''); ?></textarea>
-                <small><?php esc_html_e('Se añaden al final de sus instrucciones. Las reglas de seguridad no se pueden quitar.', 'mad-oficina'); ?></small></label>
+            <input type="hidden" name="secretary_model" value="<?php echo esc_attr($settings['secretary_model'] ?? Secretary::DEFAULT_MODEL); ?>"><input type="hidden" name="secretary_prompt" value="<?php echo esc_attr($settings['secretary_prompt'] ?? ''); ?>">
+            <?php echo \MAD_Oficina\Core\AdminUi::agents_link('secretaria'); ?>
             <?php if ( $secret ) : ?><label class="madof-check"><input type="checkbox" name="regenerate_secret" value="1"> <?php esc_html_e('Generar un secreto nuevo (tendrás que pegarlo otra vez en el script)', 'mad-oficina'); ?></label><?php endif; ?>
             <button class="madof-btn"><?php esc_html_e('Guardar', 'mad-oficina'); ?></button>
         </section>

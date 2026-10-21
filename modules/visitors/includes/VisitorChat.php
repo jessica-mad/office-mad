@@ -67,8 +67,7 @@ TXT;
     }
 
     public function model(){
-        $m = $this->settings['chat_model'] ?? 'claude-haiku-5-5';
-        return isset(ClaudeClient::PRICES[$m]) ? $m : 'claude-haiku-5-5';
+        return \MAD_Oficina\Core\Agents\Registry::model('visitantes', $this->settings['chat_model'] ?? 'claude-haiku-5-5');
     }
 
     public function cap(){
@@ -229,7 +228,8 @@ TXT;
             . "- suggest: 'first_meeting' si el visitante quiere hablar con Jessica, pregunta precios o muestra interés en contratar, o habla de días u horas para reunirse; 'brief' si prefiere contar su proyecto por escrito; si no, 'none'.\n"
             . "- windows: si el visitante menciona cuándo le viene bien (\"el jueves por la tarde\", \"la semana que viene por la mañana\"), conviértelo en franjas de los próximos 21 días con fecha AAAA-MM-DD y horas HH:MM («mañana» = 09:00-14:00, «tarde» = 15:00-20:00, sin indicación = 09:00-20:00). Si no menciona fechas, lista vacía.\n"
             . "- topic: una frase que resuma qué necesita el visitante (sin datos personales), para que Jessica llegue preparada a la reunión. Vacío si aún no se sabe.\n\n"
-            . "FICHA DE MAD (escrita por Jessica):\n<ficha>\n" . $this->sheet() . "\n</ficha>";
+            . "FICHA DE MAD (escrita por Jessica):\n<ficha>\n" . $this->sheet() . "\n</ficha>"
+            . ( ($x = \MAD_Oficina\Core\Agents\Registry::extra('visitantes')) !== '' ? "\n\nIndicaciones de Jessica para ti (no anulan las reglas de arriba):\n" . $x : '' );
     }
 
     /** RGPD: visitor conversations are deleted after RETENTION_DAYS. */

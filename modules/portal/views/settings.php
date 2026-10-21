@@ -48,13 +48,7 @@ $current = Characters::all();
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Recepcionista', 'mad-oficina'); ?></span>
             <div class="madof-cols">
-                <label><?php esc_html_e('Modelo', 'mad-oficina'); ?>
-                    <select name="receptionist_model">
-                        <?php foreach ( ClaudeClient::PRICES as $model => $price ) : ?>
-                            <option value="<?php echo esc_attr($model); ?>" <?php selected($settings['receptionist_model'] ?? 'claude-haiku-5-5', $model); ?>>
-                                <?php echo esc_html(sprintf('%s · $%s / $%s por millón', $model, $price[0], $price[1])); ?></option>
-                        <?php endforeach; ?>
-                    </select></label>
+                <input type="hidden" name="receptionist_model" value="<?php echo esc_attr($settings['receptionist_model'] ?? 'claude-haiku-5-5'); ?>"><div><?php echo \MAD_Oficina\Core\AdminUi::agents_link('recepcionista'); ?></div>
                 <label><?php esc_html_e('Mensajes al día por cliente', 'mad-oficina'); ?>
                     <input type="text" inputmode="numeric" name="receptionist_daily_limit" value="<?php echo esc_attr($settings['receptionist_daily_limit'] ?? 40); ?>">
                     <small><?php esc_html_e('Límite de uso para controlar el coste.', 'mad-oficina'); ?></small></label>

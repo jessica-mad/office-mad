@@ -225,3 +225,20 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-replacement{margin:16px 0;background:var(--g)}
 .madof-replacement ul{margin:8px 0 8px 18px;list-style:square}
 .madof-replacement li{margin:4px 0}
+
+/* Personajes y agentes */
+.madof-agent-head{display:grid;grid-template-columns:96px 1fr auto;gap:20px;align-items:start}
+.madof-portrait{image-rendering:pixelated;border:2px solid var(--k);border-radius:12px;background:var(--y);width:96px;height:auto}
+.madof-agent-who label{display:block}
+.madof-agent-spent{text-align:right;margin:0}
+.madof-agent-spent strong{display:block;font-size:22px;font-weight:500}
+.madof-agent{border-top:2px dashed rgba(11,11,11,.18);margin-top:20px;padding-top:16px}
+.madof-agent.is-off{opacity:.6}
+.madof-agent-title{display:flex;gap:10px;align-items:center}
+.madof-agent-usage{align-self:end}
+.madof-prompt{white-space:pre-wrap;background:var(--g);border-radius:14px;padding:14px 16px;max-height:420px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,monospace}
+.madof-big{font-size:26px;font-weight:500}
+.madof-sticky-save{position:sticky;bottom:0;background:var(--c);padding:12px 0;display:flex;gap:14px;align-items:center;z-index:2}
+@media (max-width:782px){.madof-agent-head{grid-template-columns:64px 1fr}.madof-agent-spent{grid-column:1/-1;text-align:left}.madof-portrait{width:64px}}
+.madof-agent-who label{display:flex;flex-direction:column;gap:4px;margin:0 0 10px}
+.madof-agent-who input,.madof-agent-who textarea{width:100%;max-width:520px}
