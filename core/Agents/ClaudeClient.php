@@ -23,6 +23,9 @@ final class ClaudeClient {
         'claude-opus-5-5'   => [4.00, 20.00],
     ];
 
+    /** USD per million cache-read tokens (writes cost 1.25× the input price, 5-minute entries). */
+    const CACHE_READ = ['claude-haiku-5-5' => 0.01, 'claude-sonnet-5-5' => 0.20, 'claude-opus-5-5' => 0.20];
+
     const FALLBACK_MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5'];
 
     public static function has_key(){
@@ -84,15 +87,19 @@ final class ClaudeClient {
         }
 
         $usage = $data['usage'] ?? [];
-        $in  = (int) ($usage['input_tokens'] ?? 0) + (int) ($usage['cache_creation_input_tokens'] ?? 0) + (int) ($usage['cache_read_input_tokens'] ?? 0);
+        $write = (int) ($usage['cache_creation_input_tokens'] ?? 0);
+        $read = (int) ($usage['cache_read_input_tokens'] ?? 0);
+        $in  = (int) ($usage['input_tokens'] ?? 0) + $write + $read;
         $out = (int) ($usage['output_tokens'] ?? 0);
-        self::log($ctx, $data['model'] ?? ($body['model'] ?? ''), $in, $out, ['stop_reason' => $data['stop_reason'] ?? null]);
+        self::log($ctx, $data['model'] ?? ($body['model'] ?? ''), $in, $out, ['stop_reason' => $data['stop_reason'] ?? null, 'cache_write' => $write, 'cache_read' => $read]);
         return $data;
     }
 
-    public static function cost($model, $in, $out){
+    /** @param int $in all input tokens, cached ones included ($write and $read are part of it) */
+    public static function cost($model, $in, $out, $write = 0, $read = 0){
         [$pin, $pout] = self::PRICES[$model] ?? [0, 0];
-        return round(($in * $pin + $out * $pout) / 1000000, 5);
+        $plain = max(0, $in - $write - $read);
+        return round(($plain * $pin + $write * $pin * 1.25 + $read * (self::CACHE_READ[$model] ?? $pin) + $out * $pout) / 1000000, 5);
     }
 
     /** Parses the JSON text block of a structured-output response. @return array|\WP_Error */
@@ -124,7 +131,7 @@ final class ClaudeClient {
             'model'         => $model,
             'input_tokens'  => $in,
             'output_tokens' => $out,
-            'cost_usd'      => self::cost($model, $in, $out),
+            'cost_usd'      => self::cost($model, $in, $out, (int) ($data['cache_write'] ?? 0), (int) ($data['cache_read'] ?? 0)),
             'data'          => wp_json_encode($data),
             'created_at'    => Time::now(),
         ]);

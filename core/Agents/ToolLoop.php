@@ -28,8 +28,12 @@ final class ToolLoop {
             $body = [
                 'model'         => $a['model'],
                 'max_tokens'    => (int) ($a['max_tokens'] ?? 8000),
-                'system'        => $a['system'],
+                // Tools and system are the same on every call of this agent: cached (they render
+                // first, so a marker on the system caches both); the growing conversation after
+                // them is cached by the automatic marker. Only what is new each turn is paid in full.
+                'system'        => is_string($a['system']) ? [['type' => 'text', 'text' => $a['system'], 'cache_control' => ['type' => 'ephemeral']]] : $a['system'],
                 'messages'      => $messages,
+                'cache_control' => ['type' => 'ephemeral'],
                 'output_config' => ['effort' => $a['effort'] ?? 'low'],
             ];
             if ( $tools ) $body['tools'] = $tools;

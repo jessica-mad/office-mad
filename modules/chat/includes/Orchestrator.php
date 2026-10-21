@@ -182,8 +182,9 @@ final class Orchestrator {
             'handler' => fn($in) => Memory::forget($email, $in['id'] ?? '') ? ['forgotten' => true] : new \WP_Error('madof_memory', 'No tenía nada con ese id.')];
 
         $facts = Memory::facts($email);
-        $system = sprintf('Eres %1$s, la asistente personal de %2$s, en Google Chat (MAD Oficina). Hoy es %3$s.', $p['name'], $who, wp_date('l j \d\e F \d\e Y, H:i'))
-            . ( (int) wp_date('G') < Reminders::NIGHT_UNTIL ? sprintf(' (Es de madrugada: para ella todavía es la noche del %s.)', wp_date('l', time() - DAY_IN_SECONDS)) : '' )
+        // The system prompt stays the same all day so it is read from the cache; the hour and
+        // what comes with this message go with the message itself.
+        $system = sprintf('Eres %1$s, la asistente personal de %2$s, en Google Chat (MAD Oficina). Hoy es %3$s; la hora exacta va al principio de cada mensaje suyo.', $p['name'], $who, wp_date('l j \d\e F \d\e Y'))
             . "\nTu forma de ser: " . $p['personality']
             . "\n\nCómo trabajas:\n"
             . "- No sabes los datos de la oficina: pregúntaselos a las áreas con sus herramientas (puedes preguntar a varias, una pregunta clara a cada una).\n"
@@ -211,14 +212,14 @@ final class Orchestrator {
             . "- Si la pregunta toca dos temas (p. ej. «qué acordamos con MOM y qué tareas salieron»), pregunta a las dos áreas, cada una por lo suyo.\n"
             . "- Si un área te dice que eso no es lo suyo, pregunta a la que encaje según este mapa; no insistas a la misma.\n"
             . "- Todavía NO lo sabe nadie: tu calendario y huecos, tus correos, archivos sueltos de Drive, " . ( in_array('campanas', array_map(fn($a) => $a->slug(), $this->agents()), true) ? '' : 'campañas de Ads, ' ) . "datos de contacto de clientes. Si te lo piden, dilo claro y sin dar vueltas.\n"
-            . $this->images_note()
             . $this->clients_directory()
             . (string) apply_filters('madoficina_assistant_context', '', $this->ctx)
             . ($facts ? "\n\nLo que te ha pedido recordar:\n" . implode("\n", array_map(fn($f) => '- [' . $f['id'] . '] ' . $f['text'], $facts)) : '');
 
         $messages = [];
         foreach ( Memory::history($email) as $t ) $messages[] = ['role' => $t['role'], 'content' => $t['text']];
-        $messages[] = ['role' => 'user', 'content' => (string) $text];
+        $now = '[' . wp_date('l j, H:i') . ( (int) wp_date('G') < Reminders::NIGHT_UNTIL ? sprintf(' · de madrugada: para ella todavía es la noche del %s', wp_date('l', time() - DAY_IN_SECONDS)) : '' ) . ']';
+        $messages[] = ['role' => 'user', 'content' => trim($now . $this->images_note()) . "\n" . (string) $text];
 
         $out = ToolLoop::run([
             'model' => (string) apply_filters('madoficina_agent_model', 'claude-opus-5-5', 'asistente'), 'system' => $system, 'messages' => $messages,

@@ -97,8 +97,15 @@ class ChatTest extends MADOF_TestCase {
         }
         if ( $url === 'https://api.anthropic.com/v1/messages' ) {
             $body = json_decode($args['body'], true);
-            $this->prompts[] = $body;
             $this->raw_prompts[] = $args['body'];
+            if ( is_array($body['system'] ?? null) ) $body['system'] = implode("\n", array_column($body['system'], 'text')); // cached system blocks, read as text
+            // Nora's «[day, hour · notes]» line goes on the message, not in the cached system: kept apart.
+            $last = count($body['messages'] ?? []) - 1;
+            if ( $last >= 0 && is_string($body['messages'][$last]['content']) && preg_match('/^(\[[^\]]*\](?:\nEste mensaje trae[^\n]*)?)\n/u', $body['messages'][$last]['content'], $m) ) {
+                $body['now'] = $m[1];
+                $body['messages'][$last]['content'] = substr($body['messages'][$last]['content'], strlen($m[0]));
+            }
+            $this->prompts[] = $body;
             $next = array_shift($this->claude);
             if ( $next === null ) return ['response' => ['code' => 500], 'body' => '{}'];
             $tool = isset($next['tool']);
@@ -637,7 +644,7 @@ class ChatTest extends MADOF_TestCase {
         $this->event(['type' => 'MESSAGE', 'user' => ['email' => 'jessica@imad.example'], 'space' => ['name' => 'spaces/JESSDM', 'type' => 'DM'],
             'message' => ['text' => 'pásale esta a Amparo', 'argumentText' => 'pásale esta a Amparo', 'attachment' => [['contentName' => 'nube.pdf', 'contentType' => 'application/pdf', 'attachmentDataRef' => ['resourceName' => 'PDF-REF']]]]]);
 
-        $this->assertStringContainsString('ask_finanzas', $this->prompts[0]['system'], 'Nora knows the files go to Finanzas');
+        $this->assertStringContainsString('ask_finanzas', $this->prompts[0]['now'], 'Nora knows the files go to Finanzas');
         $this->assertStringContainsString('nube.pdf · pdf', $this->prompts[0]['messages'][count($this->prompts[0]['messages']) - 1]['content']);
         $e = \MAD_Oficina\Suppliers\Expenses::all(['status' => 'registered']);
         $this->assertCount(1, $e, 'she sent it: approved, not left «por revisar»');
@@ -716,7 +723,7 @@ class ChatTest extends MADOF_TestCase {
             ['text' => 'Te aviso hoy a las 9:00.'],
         ];
         $this->say('recuérdame mañana a las 9 enviar el informe');
-        $this->assertStringContainsString('madrugada', $this->prompts[0]['system']);
+        $this->assertStringContainsString('madrugada', $this->prompts[0]['now'], 'the hour goes with the message, not in the cached system');
         $this->assertStringContainsString('HOY', $this->tool_result($this->prompts[1]), 'at 2 a.m. «mañana» is this morning');
         $this->assertSame(wp_date('Y-m-d') . ' 09:00', \MAD_Oficina\Chat\Reminders::describe(\MAD_Oficina\Chat\Reminders::pending('jessica@imad.example')[0])['when']);
     }
@@ -740,6 +747,22 @@ class ChatTest extends MADOF_TestCase {
         $this->assertSame('2026-10-23', $GLOBALS['wpdb']->get_var('SELECT due_date FROM ' . Schema::table('action_items') . ' WHERE id = ' . $cancelled));
         $this->assertSame('done', $this->status($done), 'a done one is not touched…');
         $this->assertStringContainsString('done_not_changed', $this->tool_result($this->prompts[3]), '…and she is asked');
+    }
+
+    public function test_nora_and_the_areas_are_cached_and_the_hour_is_not_in_the_system(){
+        $this->key();
+        $this->claude = [['tool' => 'ask_proyectos', 'input' => ['question' => '¿Qué tareas tiene LN?']], ['text' => 'Ninguna.'], ['text' => 'Ninguna abierta.']];
+        $this->say('¿qué tareas tiene LN?');
+        foreach ( [0, 1] as $i ) {
+            $raw = json_decode($this->raw_prompts[$i], true);
+            $this->assertSame(['type' => 'ephemeral'], end($raw['system'])['cache_control'], 'tools + system cached');
+            $this->assertSame(['type' => 'ephemeral'], $raw['cache_control'], 'and the conversation after them');
+        }
+        $this->assertStringNotContainsString(wp_date('H:i'), $this->prompts[0]['system'], 'no clock in the cached part');
+        $this->assertMatchesRegularExpression('/\d{1,2}:\d{2}/', $this->prompts[0]['now']);
+        // Cached reads cost a fraction: 1M read on Opus 5.5 = 0,20 $, not 4 $.
+        $this->assertSame(0.2, \MAD_Oficina\Core\Agents\ClaudeClient::cost('claude-opus-5-5', 1000000, 0, 0, 1000000));
+        $this->assertSame(5.0, \MAD_Oficina\Core\Agents\ClaudeClient::cost('claude-opus-5-5', 1000000, 0, 1000000, 0), 'a write costs 1.25×');
     }
 
     public function test_voice_messages_are_transcribed_and_understood(){
