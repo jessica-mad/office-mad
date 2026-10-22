@@ -178,4 +178,15 @@ class TaskCleanupTest extends MADOF_TestCase {
         $this->assertSame('done', $this->row($done)['status'], 'the done task stays done');
         $this->assertSame(1, (int) $GLOBALS['wpdb']->get_var($GLOBALS['wpdb']->prepare('SELECT COUNT(*) FROM ' . Schema::table('action_items') . ' WHERE title = %s', 'Enviar el presupuesto de la web')));
     }
+
+    public function test_only_near_identical_titles_count_as_the_same_task(){
+        $this->assertTrue(TaskChanges::same_title('Enviar el presupuesto de la web', 'Enviar presupuesto de la web.'));
+        $this->assertFalse(TaskChanges::same_title('Enviar presupuesto', 'Enviar presupuesto de la tienda nueva'), 'a longer, different task is new');
+        $this->assertFalse(TaskChanges::same_title('Enviar fotos de las mantas', 'Enviar fotos de las bufandas'));
+    }
+
+    public function test_jessica_alone_on_the_invite_is_not_a_team_meeting(){
+        $this->assertFalse(MAD_Oficina\Meetings\Secretary::only_team([['email' => 'jessica@imad.example']], 'imad.example'), 'the client may have joined by the link');
+        $this->assertTrue(MAD_Oficina\Meetings\Secretary::only_team([['email' => 'jessica@imad.example'], ['email' => 'liz@imad.example']], 'imad.example'));
+    }
 }

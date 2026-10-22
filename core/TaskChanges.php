@@ -25,10 +25,10 @@ final class TaskChanges {
         $a = self::norm_title($a); $b = self::norm_title($b);
         if ( $a === '' || $b === '' ) return false;
         if ( $a === $b ) return true;
-        $short = min(strlen($a), strlen($b));
-        if ( $short >= 15 && (strpos($a, $b) !== false || strpos($b, $a) !== false) ) return true;
+        // Near-identical wording only: «enviar presupuesto» is not «enviar presupuesto tienda nueva».
+        if ( abs(strlen($a) - strlen($b)) > max(4, (int) (0.15 * max(strlen($a), strlen($b)))) ) return false;
         similar_text($a, $b, $pct);
-        return $pct >= 88;
+        return $pct >= 90;
     }
 
     /**

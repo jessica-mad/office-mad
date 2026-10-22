@@ -33,6 +33,22 @@ $drive = fn($id) => $id ? 'https://drive.google.com/open?id=' . rawurlencode($id
             <p><?php echo esc_html(implode(' · ', array_map(fn($a) => trim($a['name'] . ' <' . $a['email'] . '>'), $meeting['attendees']))); ?></p>
         <?php endif; ?>
         <?php if ( ! empty($x['error']) ) : ?><p class="madof-warn"><?php echo esc_html($x['error']); ?></p><?php endif; ?>
+        <?php if ( isset($x['tasks']) ) :
+            // What the secretary got out of it, so «no ha sacado tareas» can be told apart from «salieron sin marcar» or «sin cliente».
+            $found = (array) $x['tasks'];
+            $dups = array_filter($found, fn($t) => \MAD_Oficina\Meetings\Secretary::existing_for($t, $meeting));
+            $doubt = array_filter($found, fn($t) => ($t['sure'] ?? true) === false);
+            global $wpdb;
+            $made = $wpdb->get_results($wpdb->prepare('SELECT client_id FROM ' . \MAD_Oficina\Core\Schema::table('action_items') . ' WHERE meeting_id = %d', $meeting['id']), ARRAY_A);
+            $loose = count(array_filter($made, fn($r) => ! $r['client_id'])); ?>
+            <p class="madof-muted"><strong><?php esc_html_e('Lo que sacó la secretaria:', 'mad-oficina'); ?></strong>
+                <?php echo esc_html(sprintf(_n('%d tarea', '%d tareas', count($found), 'mad-oficina'), count($found))
+                    . ($doubt ? ' · ' . sprintf(__('%d dudosas (salen sin marcar)', 'mad-oficina'), count($doubt)) : '')
+                    . ($dups ? ' · ' . sprintf(__('%d ya existían (salen sin marcar)', 'mad-oficina'), count($dups)) : '')
+                    . ' · ' . sprintf(_n('%d cambio a una tarea existente', '%d cambios a tareas existentes', count((array) ($x['task_updates'] ?? [])), 'mad-oficina'), count((array) ($x['task_updates'] ?? [])))
+                    . ($meeting['internal'] ? ' · ' . __('tratada como reunión interna', 'mad-oficina') : '')
+                    . ( in_array($meeting['status'], ['approved', 'archived'], true ) ? ' · ' . sprintf(_n('al aprobar se creó %d', 'al aprobar se crearon %d', count($made), 'mad-oficina'), count($made)) . ($loose ? ' ' . sprintf(__('(%d sin cliente: búscalas en Tareas)', 'mad-oficina'), $loose) : '') : '')); ?></p>
+        <?php endif; ?>
 
         <div class="madof-actions">
             <?php if ( $pending ) : ?>

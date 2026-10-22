@@ -92,11 +92,19 @@ final class Secretary {
         return true;
     }
 
-    /** Everyone invited is from MAD (Jessica with Liz): a team meeting. */
+    /**
+     * Everyone invited is from MAD and there are at least two of them (Jessica with Liz): a
+     * team meeting. Jessica alone on the list is not: the client may have joined by the link.
+     */
     public static function only_team(array $attendees, $own_domain){
         if ( ! $attendees || ! $own_domain ) return false;
-        foreach ( $attendees as $a ) if ( ! str_ends_with(strtolower((string) ($a['email'] ?? '')), '@' . $own_domain) ) return false;
-        return true;
+        $emails = [];
+        foreach ( $attendees as $a ) {
+            $e = strtolower((string) ($a['email'] ?? ''));
+            if ( ! str_ends_with($e, '@' . $own_domain) ) return false;
+            $emails[$e] = true;
+        }
+        return count($emails) >= 2;
     }
 
     /** «MOM» → client id, or null. */
