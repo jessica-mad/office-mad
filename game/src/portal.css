@@ -224,7 +224,7 @@ button.madof-slot[aria-checked="true"]{background:var(--y);box-shadow:3px 3px 0 
 .madof-cu.is-panel .madof-cu-table{display:none}
 .madof-cu-panel{background:var(--c);color:var(--k);border-radius:16px;padding:14px 16px 18px;min-width:0}
 .madof-cu-panel[hidden]{display:none}
-.madof-cu-panel-title{font:400 22px/1.2 var(--madof-font);margin:2px 0 12px;outline:none}
+.madof-cu-panel-title{font:400 22px/1.2 var(--madof-font);margin:2px 0 12px}
 .madof-cu-panel .madof-cu-back{margin-bottom:10px}
 .madof-cu-waiting{display:grid;gap:8px}
 .madof-cu-waiting>.madof-kicker{color:var(--y)}
@@ -242,4 +242,31 @@ html.madof-sheet-open,html.madof-sheet-open body{overflow:hidden}
   .madof-side.is-open{display:block}
   .madof-cu-text{font-size:16px}
 }
-.madof-app .madof-cu-panel-title:focus{outline:none}
+/* Auditoría 1: el tema no puede repintar los títulos (salían en blanco o amarillo sobre crema) */
+#mad-oficina h2,#mad-oficina h3,#mad-oficina h4{color:#0B0B0B!important}
+/* kickers sobre crema en gris (AA: #66665E da 5,5:1 sobre #FDF8EA; #8A8A80 se quedaba en 3,3:1) */
+#mad-oficina .madof-dialog-body .madof-kicker,#mad-oficina .madof-cu-panel-body .madof-kicker,#mad-oficina .madof-reception .madof-kicker{color:#66665E!important}
+#mad-oficina .madof-cu-panel-title:focus{outline:2px solid #FBB62F;outline-offset:3px}
+
+/* Auditoría 2: vista clásica. display:grid/block ganaba al atributo hidden y el mapa seguía visible */
+.madof-office[hidden],.madof-classic[hidden]{display:none!important}
+
+/* Auditoría 4: un solo «volver», con migas («Recepción › Reuniones») */
+.madof-crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;font:400 10px/1 var(--madof-pixel);letter-spacing:.12em;text-transform:uppercase}
+.madof-crumbs .madof-cu-back{margin:0}
+.madof-cu.is-panel .madof-cu-home{visibility:hidden}
+
+/* Auditoría 5: esqueletos mientras carga */
+.madof-skeleton{display:grid;gap:10px;padding:6px 0}
+.madof-skeleton span{display:block;height:16px;border-radius:8px;background:linear-gradient(90deg,var(--g) 25%,#e8e8cf 50%,var(--g) 75%);background-size:200% 100%;animation:madof-shimmer 1.2s linear infinite}
+.madof-skeleton span:first-child{height:22px;width:60%}
+.madof-skeleton .is-short{width:40%}
+.madof-booting .madof-reception{margin:16px auto}
+@keyframes madof-shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.madof-skeleton span{animation:none}}
+
+/* Auditoría 7c: «Ver como {cliente}» */
+.madof-viewas{position:sticky;top:var(--wp-admin--admin-bar--height,0px);z-index:5;background:var(--k);color:var(--y);padding:8px 18px;font-size:14px;text-align:center}
+.madof-viewas strong{color:var(--c);font-weight:600}
+.madof-viewas .madof-link{color:var(--y);text-decoration:underline}
+.madof-viewas[hidden]{display:none}

@@ -1,6 +1,7 @@
 // HTML panels shown over the office (or over the classic view). All text that
 // comes from the server is escaped with esc().
 import { icon } from './icons.js';
+import { sectionsFor } from './sections.js';
 
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -30,45 +31,39 @@ const slotList = (slots, readonly = false) => slots.length
   : '<p class="madof-meta">No quedan huecos libres en los próximos días. Escríbele a Jessica y lo buscáis juntas.</p>';
 const soon = (text) => `<div class="madof-soon">${pill('Pronto', 'is-on')}<p>${esc(text)}</p></div>`;
 
-/* ───────────── menu (reception quick buttons) ───────────── */
-export const MENU = [
-  { panel: 'proyecto', label: 'Cómo va mi proyecto', icon: 'timeline' },
-  { panel: 'reuniones', label: 'Mis reuniones', icon: 'calendar' },
-  { panel: 'tareas', label: 'Tareas en compromiso', icon: 'check' },
-  { panel: 'ideas', label: 'Ideas para el futuro', icon: 'bulb' },
-  { panel: 'documentos', label: 'Mis documentos', icon: 'folder' },
-  { panel: 'facturas', label: 'Mis facturas y presupuestos', icon: 'receipt' },
-  { panel: 'campanas', label: 'Mis campañas', icon: 'megaphone', soon: true },
-  { panel: 'reunion', label: 'Pedir una reunión', icon: 'plus' },
-  { panel: 'encargo', label: 'Nuevo encargo', icon: 'pencil' },
-  { panel: 'chat', label: 'Escribir libremente', icon: 'chat', chat: true },
-];
+// While a section loads: grey blocks where its content will be, instead of an empty space.
+export const SKELETON = `<div class="madof-skeleton" aria-busy="true" aria-label="Cargando"><span></span><span></span><span class="is-short"></span><span></span><span class="is-short"></span></div>`;
 
-export const VISITOR_MENU = [
-  { panel: 'que-hacemos', label: 'Qué hacemos', icon: 'chat' },
-  { panel: 'primera-reunion', label: 'Pedir una primera reunión', icon: 'calendar' },
-  { panel: 'brief', label: 'Dejar un brief', icon: 'pencil' },
-];
+// A Meet recording keeps the room code as its name («abc-defg-hij (…)»): shown as «Reunión con {cliente} · {fecha}».
+const MEET_CODE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}\b/i;
+const clientName = (ctx) => ctx.me.client?.name || ctx.me.clients?.find((c) => c.id === ctx.api.getClient())?.name || '';
+const meetingTitle = (m, ctx) => MEET_CODE.test(String(m.title || '').trim())
+  ? ['Reunión' + (clientName(ctx) ? ` con ${clientName(ctx)}` : ''), date(m.starts_at)].filter(Boolean).join(' · ')
+  : m.title;
+
+/* ───────────── menu (reception quick buttons) ───────────── */
+// The sections and their names live in sections.js (one list for both views).
+
+// «Ver como {cliente}» (gerencia): who the office greets. null = the person logged in.
+let viewAs = null;
+export const setViewAs = (name) => { viewAs = name || null; };
+export const personName = (me) => viewAs || me.user?.name || '';
 
 // Panel → area of the office it shows (see PortalAreas on the server, which is what enforces it).
 export const PANEL_AREA = { proyecto: 'timeline', reuniones: 'meetings', tareas: 'tasks', ideas: 'ideas', documentos: 'documents', estudio: 'tasks', facturas: 'billing' };
 export const canSee = (me, panel) => !PANEL_AREA[panel] || !Array.isArray(me.areas) || me.areas.includes(PANEL_AREA[panel]);
 
 export function menuButtons(me, { compact = false } = {}) {
-  const items = me.role === 'visitor' ? VISITOR_MENU
-    : me.role === 'team'
-    ? [{ panel: 'mis-tareas', label: 'Mis encargos', icon: 'check' }]
-    : MENU.map((m) => (m.panel === 'encargo' ? { ...m, soon: !me.brief } : m))
-      .filter((m) => (!m.chat || me.chat.enabled) && canSee(me, m.panel)).concat(me.role === 'manager' ? [{ panel: 'bandeja', label: 'Bandeja de gerencia', icon: 'inbox' }] : []);
+  const items = sectionsFor(me, canSee);
   return `<div class="madof-menu ${compact ? 'is-compact' : ''}">${items.map((m) => `
-    <button type="button" class="madof-menu-btn" data-panel="${m.panel}">
+    <button type="button" class="madof-menu-btn" data-panel="${m.id}">
       <span class="madof-menu-icon">${icon(m.icon)}</span><span class="madof-menu-label">${esc(m.label)}${m.soon ? '<span class="madof-tag">Pronto</span>' : ''}</span>
     </button>`).join('')}</div>`;
 }
 
 export function greeting(me) {
   const r = me.characters.recepcionista;
-  const who = me.user.name ? `, ${me.user.name}` : '';
+  const who = personName(me) ? `, ${personName(me)}` : '';
   if (me.role === 'team') return `¡Hola${who}! Soy ${r.name}. Aquí tienes tus encargos.`;
   if (me.role === 'visitor') return `¡Hola! Soy ${r.name}, de la recepción de MAD. ¿En qué te puedo ayudar?`;
   return `¡Hola${who}! Soy ${r.name}, de recepción. ¿Qué necesitas hoy?`;
@@ -398,13 +393,14 @@ export const PANELS = {
 
   reuniones: {
     kicker: 'Sala de reuniones', title: 'Tus reuniones', needsClient: true,
-    async render({ api }) {
+    async render(ctx) {
+      const { api } = ctx;
       const list = await api.section('meetings');
       if (!list.length) return empty('Aún no hay reuniones con resumen. Después de cada reunión, aquí tendrás lo que hablamos.');
       return list.map((m) => `
         <article class="madof-item">
           <div class="madof-date">${esc(date(m.starts_at))}</div>
-          <h3>${esc(m.title)}</h3>
+          <h3>${esc(meetingTitle(m, ctx))}</h3>
           ${m.summary ? `<p>${esc(m.summary)}</p>` : ''}
           ${m.agreements.length ? `<h4 class="madof-kicker">Acuerdos</h4><ul>${m.agreements.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
           <div class="madof-actions">
@@ -516,7 +512,8 @@ export const PANELS = {
           <p>Jessica la confirma en cuanto la vea y te llegará la invitación de Google Calendar con el enlace de Meet.</p></div>`;
       }
       let last = '';
-      if (r && r.status === 'approved') {
+      // A confirmed meeting whose date has passed is no longer «tu última reunión pedida».
+      if (r && r.status === 'approved' && !(r.start && r.start * 1000 < Date.now())) {
         last = `<div class="madof-request is-ok">${pill('Confirmada', 'is-on')}<p>Tu última reunión pedida: <strong>${esc(r.label)}</strong>.${r.meet ? ` <a href="${esc(r.meet)}" target="_blank" rel="noopener">Enlace de Meet</a>` : ''}</p></div>`;
       } else if (r && r.status === 'rejected') {
         last = `<div class="madof-request">${pill('No pudo ser')}<p>Jessica no pudo el ${esc(r.label)}. Elige otro hueco, por favor.</p></div>`;

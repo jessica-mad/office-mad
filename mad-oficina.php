@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MAD Oficina
  * Description: Oficina virtual para clientes (pixel art) y back-office automatizado con agentes de IA para MAD · Marketing & Ads.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: MAD · Marketing & Ads
  * Author URI: https://imad.pro
  * Text Domain: mad-oficina
@@ -13,7 +13,7 @@
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('MAD_OFICINA_VERSION', '0.1.0');
+define('MAD_OFICINA_VERSION', '0.2.0');
 define('MAD_OFICINA_FILE', __FILE__);
 define('MAD_OFICINA_DIR', plugin_dir_path(__FILE__));
 define('MAD_OFICINA_URL', plugin_dir_url(__FILE__));

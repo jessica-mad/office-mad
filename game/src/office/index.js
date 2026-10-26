@@ -5,7 +5,7 @@ import OfficeScene from './OfficeScene.js';
  * Mounts the pixel office inside `container`.
  * @returns {Promise<{setStates(states:object):void, destroy():void}>}
  */
-export async function createOffice(container, { assets, v, me, onRoom, onCharacter }) {
+export async function createOffice(container, { assets, v, me, greetName, onRoom, onCharacter }) {
   // Bubbles and room plates use Silkscreen: make sure it is loaded before drawing text.
   try { await document.fonts.load('8px Silkscreen'); } catch { /* falls back to monospace */ }
 
@@ -25,11 +25,13 @@ export async function createOffice(container, { assets, v, me, onRoom, onCharact
       scene: [],
     });
     game.scene.add('office', OfficeScene, true, {
-      assets, v, me, onRoom, onCharacter,
+      assets, v, me, greetName, onRoom, onCharacter,
       onReady: (scene) => resolve({
         setStates: (states) => scene.setStates(states),
         focus: (slug) => scene.focusOn(slug),
         unfocus: () => scene.unfocus(),
+        // «Ver como {cliente}»: the receptionist greets that client.
+        setGreetName: (name) => { scene.opts.greetName = name || me.user.name; scene.greet(); },
         // While an HTML dialog is open, clicks must not reach rooms/characters underneath.
         setInputEnabled: (on) => { scene.input.enabled = on; },
         destroy: () => game.destroy(true),

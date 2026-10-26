@@ -2,11 +2,12 @@
 import './portal.css';
 import { createApi } from './api.js';
 import { icon } from './icons.js';
-import { PANELS, ROOM_PANEL, CHARACTER_PANEL, menuButtons, greeting, esc, canSee } from './panels.js';
+import { PANELS, ROOM_PANEL, CHARACTER_PANEL, menuButtons, greeting, esc, canSee, setViewAs, SKELETON } from './panels.js';
 import { createCloseup } from './closeup.js';
 
 const POLL_MS = 25000;
 const DESKTOP = window.matchMedia('(min-width: 761px)');
+const PHONE = window.matchMedia('(max-width: 767px)');
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
 const store = {
   get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
@@ -16,10 +17,16 @@ const store = {
 async function boot(root) {
   const config = JSON.parse(root.dataset.config || '{}');
   const api = createApi(config);
+  // Everything the first screen needs is asked at once, not one after the other.
+  const early = {
+    state: config.visitor ? null : api.state().catch(() => null),
+    waiting: config.manager ? api.waiting().catch(() => null) : null,
+  };
   let me;
   if (config.visitor) {
     me = visitorMe(config);
   } else {
+    root.innerHTML = `<div class="madof-shell madof-booting"><div class="madof-bar"><div class="madof-stamp"><b>MAD</b><span>·</span>OFICINA</div></div><div class="madof-reception">${SKELETON}</div></div>`;
     try {
       me = await api.me();
     } catch (e) {
@@ -31,6 +38,7 @@ async function boot(root) {
   if (me.role === 'manager') {
     const saved = Number(store.get('madof-client')) || null;
     if (saved && me.clients.some((c) => c.id === saved)) api.setClient(saved);
+    setViewAs(me.clients.find((c) => c.id === api.getClient())?.name);
   }
 
   const ctx = { api, me, config };
@@ -45,9 +53,9 @@ async function boot(root) {
   let office = null;
   let pollTimer = null;
 
-  // The office is the default view (also on a phone: the plan is vertical); the classic one,
-  // with reduced motion. A choice made with the button is remembered.
-  let view = store.get('madof-view') || (REDUCED.matches ? 'classic' : 'office');
+  // The office is the default view; the classic one on a phone and with reduced motion.
+  // A choice made with the button is remembered.
+  let view = store.get('madof-view') || (REDUCED.matches || PHONE.matches ? 'classic' : 'office');
 
   // Close-up of a character: side column on desktop (always there, reception by default),
   // full-screen sheet on a phone.
@@ -56,7 +64,11 @@ async function boot(root) {
   const closeup = createCloseup(side, ctx, {
     onBack: () => backToOffice(),
     onGo: (slug) => showCharacter(slug),
-    waiting: me.role === 'manager' ? async () => (await api.waiting()).characters : null,
+    waiting: me.role === 'manager' ? async () => {
+      const first = early.waiting && await early.waiting; // the one asked at start, used once
+      early.waiting = null;
+      return (first || await api.waiting()).characters;
+    } : null,
     onResolved: () => refreshStates(),
   });
   function showCharacter(slug) {
@@ -110,9 +122,13 @@ async function boot(root) {
         officeEl.querySelector('.madof-canvas').innerHTML = '';
         office = await createOffice(officeEl.querySelector('.madof-canvas'), {
           assets: config.assets, v: config.assets_v || config.version, me,
+          greetName: me.role === 'manager' ? (me.clients.find((c) => c.id === api.getClient())?.name || me.user.name) : me.user.name,
           onRoom: (room) => openRoom(room),
           onCharacter: (slug) => openCharacter(slug),
         });
+        const first = early.state && await early.state;
+        early.state = null;
+        if (first?.characters) office.setStates(first.characters);
       } catch (err) {
         console.error(err);
         officeEl.querySelector('.madof-canvas').innerHTML = '<p class="madof-error">No he podido cargar la oficina. Usa la vista clásica.</p>';
@@ -122,7 +138,7 @@ async function boot(root) {
   }
 
   async function refreshStates() {
-    if (!office || me.role === 'visitor') return;
+    if (!office || me.role === 'visitor' || early.state) return; // the first state is on its way
     try { office.setStates((await api.state()).characters); } catch { /* keep last state */ }
   }
   function schedulePoll() {
@@ -157,6 +173,7 @@ async function boot(root) {
     if (btn.dataset.panel) dialog.open(btn.dataset.panel);
     else if (btn.dataset.room) openRoom(btn.dataset.room);
     else if (btn.dataset.action === 'toggle-view') setView(view === 'office' ? 'classic' : 'office');
+    else if (btn.dataset.action === 'exit-viewas' && picker) { picker.value = ''; picker.dispatchEvent(new Event('change')); }
     else if (btn.dataset.action === 'fullscreen') {
       const el = $('.madof-stage');
       if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen?.();
@@ -169,10 +186,24 @@ async function boot(root) {
       const id = Number(picker.value) || null;
       api.setClient(id);
       store.set('madof-client', id ? String(id) : null);
-      $('.madof-who').textContent = id ? me.clients.find((c) => c.id === id).name : 'Gerencia';
+      const name = id ? me.clients.find((c) => c.id === id).name : '';
+      setViewAs(name);
+      $('.madof-who').textContent = name || 'Gerencia';
+      viewAsStrip(name);
+      const title = $('.madof-reception-title');
+      if (title) title.textContent = greeting(me);
+      office?.setGreetName?.(name);
       if (closeup.slug) closeup.show(closeup.slug, { focus: false }); // its panels now show this client
     });
   }
+  // «Estás viendo la oficina de {cliente} · Salir de esta vista».
+  function viewAsStrip(name) {
+    const strip = $('.madof-viewas');
+    if (!strip) return;
+    strip.hidden = !name;
+    strip.querySelector('strong').textContent = name || '';
+  }
+  viewAsStrip(me.role === 'manager' ? me.clients.find((c) => c.id === api.getClient())?.name : '');
 
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedulePoll(); });
   setView(view);
@@ -201,6 +232,7 @@ function shell(me, api) {
   const rooms = Object.entries(me.rooms).filter(([slug]) => slug !== 'gerencia' || me.role === 'manager');
   return `
   <div class="madof-shell">
+    ${me.role === 'manager' ? '<div class="madof-viewas" role="status" hidden>Estás viendo la oficina de <strong></strong> · <button type="button" class="madof-link" data-action="exit-viewas">Salir de esta vista</button></div>' : ''}
     <header class="madof-bar">
       <div class="madof-stamp" aria-label="MAD Oficina"><b>MAD</b><span>·</span>OFICINA</div>
       <div class="madof-who">${esc(who)}</div>
@@ -292,7 +324,7 @@ function createDialog(root, ctx, onToggle = () => {}) {
       root.querySelector('.madof-close').focus();
       return;
     }
-    body.innerHTML = '<p class="madof-app-loading">Un momento…</p>';
+    body.innerHTML = SKELETON;
     root.querySelector('.madof-close').focus();
     try {
       const html = await panel.render(ctx);

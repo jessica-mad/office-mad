@@ -2,7 +2,8 @@
 // greeting, and their table of actions. Every tile opens a panel that already exists
 // (PANELS in panels.js) inside the same column (desktop) or sheet (phone).
 import { icon } from './icons.js';
-import { PANELS, esc, canSee } from './panels.js';
+import { PANELS, esc, canSee, personName, SKELETON } from './panels.js';
+import { sectionsOf, labelOf } from './sections.js';
 
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -26,32 +27,10 @@ const SUMMARY = {
   brief: 'Cuéntanos tu proyecto y te respondemos.',
 };
 
-const T = (panel, label, ic, extra = {}) => ({ panel, label, icon: ic, ...extra });
-
-/** The tiles of a character for this person (the server still decides what each panel may show). */
+/** The tiles of a character for this person, from the one list of sections (sections.js). */
 export function actionsFor(me, slug) {
-  const role = me.role;
-  if (role === 'visitor') {
-    return slug === 'recepcionista'
-      ? [T('que-hacemos', 'Qué hacemos', 'chat'), T('primera-reunion', 'Primera reunión', 'calendar'), T('brief', 'Dejar un brief', 'pencil')]
-      : null; // «Solo clientes»
-  }
-  if (role === 'team') return slug === 'liz' ? [T('mis-tareas', 'Mis encargos', 'check')] : null;
-  const list = {
-    recepcionista: [
-      T('proyecto', 'Mi proyecto', 'timeline'), T('reuniones', 'Reuniones', 'calendar'), T('tareas', 'Tareas', 'check'),
-      T('ideas', 'Ideas', 'bulb'), T('documentos', 'Documentos', 'folder'), T('facturas', 'Facturas', 'receipt'),
-      T('reunion', 'Pedir reunión', 'plus'), T('encargo', 'Nuevo encargo', 'pencil', { soon: !me.brief }), T('chat', 'Escribir', 'chat', { chat: true }),
-    ],
-    secretaria: [T('reuniones', 'Mis reuniones', 'calendar')],
-    coordinadora: [T('proyecto', 'Cómo va mi proyecto', 'timeline'), T('tareas', 'Tareas en compromiso', 'check'), T('ideas', 'Ideas para el futuro', 'bulb')],
-    liz: [T('estudio', 'Encargos de diseño y vídeo', 'pencil')],
-    archivera: [T('documentos', 'Mis documentos', 'folder')],
-    contable: [T('facturas', 'Mis facturas y presupuestos', 'receipt')],
-    analista: [T('campanas', 'Mis campañas', 'megaphone', { soon: true })],
-    jessica: role === 'manager' ? [T('bandeja', 'Bandeja', 'inbox')] : [T('reunion', 'Pedir reunión', 'plus')],
-  }[slug] || [];
-  return list.filter((a) => (!a.chat || me.chat?.enabled) && canSee(me, a.panel));
+  const list = sectionsOf(me, slug, canSee);
+  return list ? list.map((x) => ({ panel: x.id, label: x.label, icon: x.icon, soon: x.soon })) : null;
 }
 
 /** What the character says: the second greeting for visitors (receptionist) and for Jessica herself. */
@@ -59,7 +38,7 @@ export function greetingFor(me, slug) {
   const c = me.characters[slug] || {};
   const alt = (slug === 'recepcionista' && me.role === 'visitor') || (slug === 'jessica' && me.role === 'manager');
   const text = (alt && c.greeting_alt) || c.greeting || '';
-  const name = me.user?.name || '';
+  const name = personName(me);
   return name ? text.replace(/\{nombre\}/g, name) : text.replace(/,?\s*\{nombre\}/g, '').replace(/\{nombre\}/g, '');
 }
 
@@ -142,7 +121,7 @@ export function createCloseup(host, ctx, opts = {}) {
       <section class="madof-cu" aria-label="${esc(`${c.name}, ${c.role}`)}" data-slug="${esc(slug)}">
         <div class="madof-cu-look">
           <div class="madof-cu-top">
-            <button type="button" class="madof-cu-back" data-cu-back>‹ Oficina</button>
+            <button type="button" class="madof-cu-back madof-cu-home" data-cu-back>‹ Oficina</button>
             <span class="madof-kicker">${esc(roomLabel)}</span>
           </div>
           <div class="madof-cu-portrait" style="background-image:url('${esc(portraitUrl(slug))}')" role="img" aria-label="${esc(`${c.name} en ${roomLabel}`)}"></div>
@@ -162,8 +141,10 @@ export function createCloseup(host, ctx, opts = {}) {
               ${!actions.length ? '<p class="madof-empty">Esta parte no está abierta para tu usuario. Si la necesitas, pídeselo a Jessica.</p>' : ''}`}
         </div>
         <div class="madof-cu-panel" hidden>
-          <button type="button" class="madof-cu-back" data-cu-close-panel>‹ Volver</button>
-          <span class="madof-kicker madof-cu-panel-kicker"></span>
+          <nav class="madof-crumbs" aria-label="Estás en">
+            <button type="button" class="madof-cu-back" data-cu-close-panel>‹ ${esc(roomLabel || c.name)}</button>
+            <span aria-hidden="true">›</span> <span class="madof-crumbs-here" aria-current="page"></span>
+          </nav>
           <h2 class="madof-cu-panel-title" tabindex="-1"></h2>
           <div class="madof-cu-panel-body"></div>
         </div>
@@ -187,7 +168,7 @@ export function createCloseup(host, ctx, opts = {}) {
     const sec = host.querySelector('.madof-cu');
     const box = host.querySelector('.madof-cu-panel');
     const body = box.querySelector('.madof-cu-panel-body');
-    box.querySelector('.madof-cu-panel-kicker').textContent = panel.kicker;
+    box.querySelector('.madof-crumbs-here').textContent = labelOf(name) || panel.kicker;
     box.querySelector('.madof-cu-panel-title').textContent = typeof panel.title === 'function' ? panel.title(ctx) : panel.title;
     sec.classList.add('is-panel');
     box.hidden = false;
@@ -196,7 +177,7 @@ export function createCloseup(host, ctx, opts = {}) {
     const my = ++token;
     if (panel.needsClient && me.role === 'manager' && !ctx.api.getClient()) { body.innerHTML = '<p class="madof-empty">Elige arriba un cliente para ver su oficina tal y como la ve él.</p>'; return; }
     if (!canSee(me, name)) { body.innerHTML = '<p class="madof-empty">Esta parte de la oficina no está abierta para tu usuario. Si la necesitas, pídeselo a Jessica.</p>'; return; }
-    body.innerHTML = '<p class="madof-app-loading">Un momento…</p>';
+    body.innerHTML = SKELETON;
     try {
       const html = await panel.render(ctx);
       if (my !== token) return;

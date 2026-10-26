@@ -72,8 +72,14 @@ export default class OfficeScene extends Phaser.Scene {
     this.buildCharacters();
     this.opts.onReady?.(this);
 
+    this.time.delayedCall(700, () => this.greet());
+  }
+
+  /** The receptionist's hello, to whoever the office is shown for. */
+  greet() {
     const recep = this.characters.recepcionista;
-    if (recep) this.time.delayedCall(700, () => this.say(recep, `¡Hola${this.opts.me.user.name ? ', ' + this.opts.me.user.name : ''}!`, 5000));
+    const name = this.opts.greetName ?? this.opts.me.user.name;
+    if (recep) this.say(recep, `¡Hola${name ? ', ' + name : ''}!`, 5000);
   }
 
   /* ───────────── map ───────────── */

@@ -46,6 +46,12 @@ return new class($core) implements MAD_Oficina_Module {
     public function init(){
         add_shortcode('mad_oficina', [$this, 'render_shortcode']);
         add_action('admin_post_madof_portal_settings', [$this, 'save_settings']);
+        add_action('template_redirect', [$this, 'private_page']);
+    }
+
+    /** The office page is a private area: no marketing trackers, no indexing (see Privacy). */
+    public function private_page(){
+        if ( \MAD_Oficina\Portal\Privacy::is_office_page() ) \MAD_Oficina\Portal\Privacy::apply();
     }
 
     public function admin_init(){}
@@ -96,6 +102,8 @@ return new class($core) implements MAD_Oficina_Module {
             'assets'  => $base . 'game/',
             'version' => MAD_Oficina_Core::asset_version('game/portal.js'),
             'assets_v' => $this->game_assets_version(),
+            // Lets the page ask for the antechamber at the same time as /me (gerencia only; the server checks it again).
+            'manager' => current_user_can(\MAD_Oficina\Core\Roles::CAP_MANAGE),
         ];
         if ( ! empty($extra['visitor']) ) {
             $config += $extra + ['characters' => \MAD_Oficina\Core\Agents\Characters::public_data()];

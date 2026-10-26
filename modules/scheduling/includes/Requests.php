@@ -91,10 +91,11 @@ final class Requests {
         ));
         if ( ! $row ) return null;
         $a = Approvals::get($row->id);
-        $out = ['status' => $a['status'], 'label' => Slots::label((int) $a['payload']['start'], $this->tz())];
+        $out = ['status' => $a['status'], 'label' => Slots::label((int) $a['payload']['start'], $this->tz()), 'start' => (int) $a['payload']['start']];
         if ( $a['status'] === 'approved' ) {
             $r = $a['resolution']['result'] ?? [];
-            $out['label'] = Slots::label((int) ($r['start'] ?? $a['payload']['start']), $this->tz());
+            $out['start'] = (int) ($r['start'] ?? $a['payload']['start']);
+            $out['label'] = Slots::label($out['start'], $this->tz());
             $out['meet'] = $r['meet'] ?? null;
         }
         return $out;
