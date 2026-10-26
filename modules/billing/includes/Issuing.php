@@ -71,11 +71,6 @@ final class Issuing {
         }
         $profile = Profiles::get((int) ($data['profile_id'] ?? 0));
         if ( ! $profile ) return new \WP_Error('madof_inv_profile', __('Elige a quién va la factura (sus datos fiscales).', 'mad-oficina'));
-        // A draft of a client moved to a legal name not joined to anyone yet: it is that client's new one.
-        if ( $id && ! $profile['client_id'] && ! empty($inv['client_id']) ) {
-            Profiles::link($profile['id'], (int) $inv['client_id']);
-            $profile = Profiles::get($profile['id']);
-        }
 
         $clean = [];
         foreach ( $lines as $l ) {

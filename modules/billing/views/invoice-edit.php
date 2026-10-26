@@ -55,12 +55,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <input type="hidden" name="invoice_id" value="<?php echo (int) ($draft['id'] ?? 0); ?>">
         <?php
         // Who it goes to can change while it is a draft (a client that now invoices under another legal name).
-        // This client's legal names first, then every other current one already saved (a new one not joined yet).
-        $mine = $profile['client_id'] ? Profiles::for_client((int) $profile['client_id']) : [$profile];
-        $mine_ids = array_map(fn($c) => (int) $c['id'], $mine);
-        $rest = array_values(array_filter(Profiles::all('active'), fn($c) => ! in_array((int) $c['id'], $mine_ids, true) && $c['series'] === $profile['series']));
-        usort($rest, fn($a, $b) => strcasecmp($a['legal_name'], $b['legal_name']));
-        $choices = array_merge($mine, $rest);
+        $choices = $profile['client_id'] ? Profiles::for_client((int) $profile['client_id']) : [];
         if ( ! $draft || ! empty($draft['rectifies_id']) || count($choices) < 2 ) : ?>
         <input type="hidden" name="profile_id" value="<?php echo (int) $profile['id']; ?>">
         <?php endif; ?>
@@ -73,14 +68,11 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
             <?php else : ?>
             <?php if ( $draft && empty($draft['rectifies_id']) && count($choices) >= 2 ) : ?>
             <label><?php esc_html_e('Razón social', 'mad-oficina'); ?>
-                <select name="profile_id">
-                    <optgroup label="<?php esc_attr_e('De este cliente', 'mad-oficina'); ?>"><?php foreach ( $mine as $c ) echo '<option value="' . (int) $c['id'] . '"' . selected((int) $profile['id'], (int) $c['id'], false) . '>' . esc_html($c['legal_name'] . ($c['tax_id'] ? ' · ' . $c['tax_id'] : '') . ($c['status'] === 'active' ? '' : ' (' . __('anterior', 'mad-oficina') . ')')) . '</option>'; ?></optgroup>
-                    <?php if ( $rest ) : ?><optgroup label="<?php esc_attr_e('Otras razones sociales guardadas', 'mad-oficina'); ?>"><?php foreach ( $rest as $c ) echo '<option value="' . (int) $c['id'] . '">' . esc_html($c['legal_name'] . ($c['tax_id'] ? ' · ' . $c['tax_id'] : '')) . '</option>'; ?></optgroup><?php endif; ?>
-                </select>
-                <small><?php esc_html_e('Elige la razón social con los datos nuevos y pulsa «Guardar borrador»: la factura toma sus datos. Si no está unida a este cliente, únela en su ficha para que lo próximo también salga a su nombre.', 'mad-oficina'); ?></small></label>
+                <select name="profile_id"><?php foreach ( $choices as $c ) echo '<option value="' . (int) $c['id'] . '"' . selected((int) $profile['id'], (int) $c['id'], false) . '>' . esc_html($c['legal_name'] . ($c['tax_id'] ? ' · ' . $c['tax_id'] : '') . ($c['status'] === 'active' ? '' : ' (' . __('anterior', 'mad-oficina') . ')')) . '</option>'; ?></select>
+                <small><?php esc_html_e('Cámbiala y pulsa «Guardar borrador»: la factura toma sus datos fiscales.', 'mad-oficina'); ?></small></label>
             <?php endif; ?>
             <p><strong><?php echo esc_html($profile['legal_name']); ?></strong> · <?php echo esc_html(implode(' · ', array_filter([$profile['tax_id'], $profile['address'], $profile['city'], $profile['email']]))); ?>
-                · <a href="<?php echo esc_url($base . '&tab=clients&profile=' . $profile['id']); ?>"><?php esc_html_e('Editar esta ficha fiscal', 'mad-oficina'); ?></a></p>
+                · <a href="<?php echo esc_url($base . '&tab=clients&profile=' . $profile['id']); ?>"><?php esc_html_e('Cambiar sus datos', 'mad-oficina'); ?></a></p>
             <?php endif; ?>
             <?php if ( ! $profile['tax_id'] && ! $is_ar ) : ?><p class="madof-warn"><?php esc_html_e('Le falta el NIF: complétalo en sus datos fiscales antes de emitir.', 'mad-oficina'); ?></p><?php endif; ?>
             <?php if ( ! $profile['email'] && ! $is_ar ) : ?><p class="madof-warn"><?php esc_html_e('No tiene email para facturas: podrás emitirla, pero no enviarla desde aquí.', 'mad-oficina'); ?></p><?php endif; ?>

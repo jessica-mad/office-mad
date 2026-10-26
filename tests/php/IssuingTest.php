@@ -227,11 +227,6 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame(['B11111111', $this->profile], [Invoices::get($issued)['client_tax_id'], (int) Invoices::get($issued)['profile_id']], 'an issued invoice is never touched');
         $this->assertSame(15, Profiles::get($new)['billing_day'], 'its billing day comes along');
 
-        // A legal name saved but not joined to the client yet: choosing it in the draft joins it.
-        $loose = Profiles::save(['legal_name' => 'Azul Tercera SL', 'tax_id' => 'B66666666']);
-        $this->issuing()->save_draft(['profile_id' => $loose], [['description' => 'x', 'unit_price' => '10']], $pending);
-        $this->assertSame(['B66666666', $this->client], [Invoices::get($pending)['client_tax_id'], (int) Profiles::get($loose)['client_id']]);
-
         // And a draft can be sent to another legal name of the same client from the editor.
         $this->issuing()->save_draft(['profile_id' => $this->profile], [['description' => 'x', 'unit_price' => '10']], $pending);
         $this->assertSame('B11111111', Invoices::get($pending)['client_tax_id']);
