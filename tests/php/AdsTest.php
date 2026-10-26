@@ -323,23 +323,25 @@ class AdsTest extends MADOF_TestCase {
     }
 
     public function test_nuria_asks_the_why_once_with_letters_and_nora_can_answer_it(){
+        // Relative to today: her daily message only counts for a week.
+        $d0 = wp_date('Y-m-d', time() - 2 * DAY_IN_SECONDS); $d1 = wp_date('Y-m-d', time() - DAY_IN_SECONDS); $d2 = wp_date('Y-m-d');
         $acc = Accounts::get(Accounts::upsert('google', ['external_id' => '5550001111', 'name' => 'Luz Clara', 'currency' => 'EUR']));
         Accounts::link($acc['id'], $this->client);
         $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas', 20), $this->gcampaign('102', 'Marca', 10)];
-        $this->sync()->account(Accounts::get($acc['id']), '2026-10-15');
+        $this->sync()->account(Accounts::get($acc['id']), $d0);
         $this->g['campaigns'] = [$this->gcampaign('101', 'Rebajas', 35, 'PAUSED'), $this->gcampaign('102', 'Marca', 12)];
-        $this->sync()->account(Accounts::get($acc['id']), '2026-10-16');
+        $this->sync()->account(Accounts::get($acc['id']), $d1);
         delete_option(\MAD_Oficina\Ads\Ask::DAY);
         $sent = []; $f = $this->chat_fake($sent);
-        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-16 08:00:00 Europe/Madrid')), 'not before 9:00');
-        $this->assertTrue(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-16 09:30:00 Europe/Madrid')));
+        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime($d1 . ' 08:00:00 Europe/Madrid')), 'not before 9:00');
+        $this->assertTrue(\MAD_Oficina\Ads\Ask::run([], strtotime($d1 . ' 09:30:00 Europe/Madrid')));
         $this->assertCount(1, $sent);
-        $this->assertMatchesRegularExpression('/A\. (Marca|Rebajas) \(Google Ads, 16\/10\)/', $sent[0]);
+        $this->assertMatchesRegularExpression('/A\. (Marca|Rebajas) \(Google Ads, ' . preg_quote(wp_date('j/m', strtotime($d1)), '/') . '\)/', $sent[0]);
         $this->assertStringContainsString('B. ', $sent[0]);
         $this->assertStringContainsString('LCS · Luz Clara', $sent[0]);
         $this->assertStringContainsString('la A porque', \MAD_Oficina\Ads\Ask::context(), 'Nora knows what «la A» is');
         delete_option(\MAD_Oficina\Ads\Ask::DAY);
-        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime('2026-10-17 09:30:00 Europe/Madrid')), 'each change is asked once');
+        $this->assertFalse(\MAD_Oficina\Ads\Ask::run([], strtotime($d2 . ' 09:30:00 Europe/Madrid')), 'each change is asked once');
         remove_filter('pre_http_request', $f, 5);
 
         // «la A porque…»: Nuria saves it in every change of A, with «Deshacer».
