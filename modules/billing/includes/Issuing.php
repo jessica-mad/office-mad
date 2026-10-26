@@ -71,6 +71,12 @@ final class Issuing {
         }
         $profile = Profiles::get((int) ($data['profile_id'] ?? 0));
         if ( ! $profile ) return new \WP_Error('madof_inv_profile', __('Elige a quién va la factura (sus datos fiscales).', 'mad-oficina'));
+        // A draft goes to the client's current legal name, never to one marked «anterior» (rectifying ones keep the original's).
+        $rectifying = ! empty($data['rectifies_id']) || ( $id && ! empty(Invoices::get($id)['rectifies_id']) );
+        if ( ! $rectifying && $profile['status'] === 'inactive' && $profile['client_id'] ) {
+            $current = array_values(array_filter(Profiles::for_client((int) $profile['client_id']), fn($p) => $p['status'] === 'active' && $p['series'] === $profile['series']));
+            if ( count($current) === 1 ) $profile = $current[0];
+        }
 
         $clean = [];
         foreach ( $lines as $l ) {
@@ -146,6 +152,28 @@ final class Issuing {
         return (int) $wpdb->query($wpdb->prepare('UPDATE ' . Invoices::table() . " SET client_name = %s, client_tax_id = %s, client_address = %s, client_city = %s, client_email = %s, updated_at = %s
             WHERE profile_id = %d AND status = 'draft' AND number IS NULL AND rectifies_id IS NULL",
             $p['legal_name'], $p['tax_id'], $p['address'], $p['city'], $p['email'], Time::now(), $p['id']));
+    }
+
+    /**
+     * Drafts and running agreements always hang from the client's current legal name: what is
+     * still under one marked «anterior» goes to the current one (when there is exactly one).
+     * Safe to call any time; issued invoices never move. @return array{drafts:int, agreements:int}
+     */
+    public static function follow_current($client_id = null){
+        global $wpdb;
+        $moved = ['drafts' => 0, 'agreements' => 0];
+        $where = $client_id ? $wpdb->prepare(' AND client_id = %d', (int) $client_id) : ' AND client_id IS NOT NULL';
+        foreach ( $wpdb->get_col("SELECT DISTINCT client_id FROM " . Profiles::table() . " WHERE status = 'inactive'" . $where) as $cid ) {
+            $all = Profiles::for_client((int) $cid);
+            foreach ( array_unique(array_column($all, 'series')) as $series ) {
+                $current = array_values(array_filter($all, fn($p) => $p['status'] === 'active' && $p['series'] === $series));
+                if ( count($current) !== 1 ) continue; // none, or two companies at once: she decides in each draft
+                foreach ( array_filter($all, fn($p) => $p['status'] === 'inactive' && $p['series'] === $series) as $old ) {
+                    foreach ( self::move_to_profile($old['id'], $current[0]['id']) as $k => $n ) $moved[$k] += $n;
+                }
+            }
+        }
+        return $moved;
     }
 
     /**

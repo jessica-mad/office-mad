@@ -54,8 +54,8 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
     <?php echo AdminUi::form_open('billing_draft_save', 'madof-form madof-invoice-form'); ?>
         <input type="hidden" name="invoice_id" value="<?php echo (int) ($draft['id'] ?? 0); ?>">
         <?php
-        // Who it goes to can change while it is a draft (a client that now invoices under another legal name).
-        $choices = $profile['client_id'] ? Profiles::for_client((int) $profile['client_id']) : [];
+        // A client with two current legal names: she picks which one this draft goes to.
+        $choices = $profile['client_id'] ? array_values(array_filter(Profiles::for_client((int) $profile['client_id']), fn($c) => $c['status'] === 'active')) : [];
         if ( ! $draft || ! empty($draft['rectifies_id']) || count($choices) < 2 ) : ?>
         <input type="hidden" name="profile_id" value="<?php echo (int) $profile['id']; ?>">
         <?php endif; ?>
@@ -68,8 +68,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
             <?php else : ?>
             <?php if ( $draft && empty($draft['rectifies_id']) && count($choices) >= 2 ) : ?>
             <label><?php esc_html_e('Razón social', 'mad-oficina'); ?>
-                <select name="profile_id"><?php foreach ( $choices as $c ) echo '<option value="' . (int) $c['id'] . '"' . selected((int) $profile['id'], (int) $c['id'], false) . '>' . esc_html($c['legal_name'] . ($c['tax_id'] ? ' · ' . $c['tax_id'] : '') . ($c['status'] === 'active' ? '' : ' (' . __('anterior', 'mad-oficina') . ')')) . '</option>'; ?></select>
-                <small><?php esc_html_e('Cámbiala y pulsa «Guardar borrador»: la factura toma sus datos fiscales.', 'mad-oficina'); ?></small></label>
+                <select name="profile_id"><?php foreach ( $choices as $c ) echo '<option value="' . (int) $c['id'] . '"' . selected((int) $profile['id'], (int) $c['id'], false) . '>' . esc_html($c['legal_name'] . ($c['tax_id'] ? ' · ' . $c['tax_id'] : '')) . '</option>'; ?></select></label>
             <?php endif; ?>
             <p><strong><?php echo esc_html($profile['legal_name']); ?></strong> · <?php echo esc_html(implode(' · ', array_filter([$profile['tax_id'], $profile['address'], $profile['city'], $profile['email']]))); ?>
                 · <a href="<?php echo esc_url($base . '&tab=clients&profile=' . $profile['id']); ?>"><?php esc_html_e('Cambiar sus datos', 'mad-oficina'); ?></a></p>

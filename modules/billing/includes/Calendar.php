@@ -162,6 +162,11 @@ final class Calendar {
      */
     public function prepare_one(array $profile, $month){
         global $wpdb;
+        // Never under a legal name marked «anterior»: its agreements go to the current one first.
+        if ( $profile['client_id'] && $profile['status'] === 'inactive' ) {
+            Issuing::follow_current((int) $profile['client_id']);
+            if ( ! Agreements::all(['profile_id' => $profile['id'], 'status' => 'active']) ) return 0;
+        }
         $lines = [];
         foreach ( Agreements::between($month, $month) as $it ) {
             if ( (int) $it['profile_id'] !== (int) $profile['id'] || ! Agreements::covers($it, $month) ) continue;

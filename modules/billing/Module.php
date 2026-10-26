@@ -266,13 +266,7 @@ return new class($core) implements MAD_Oficina_Module {
         $status = ($_POST['status'] ?? '') === 'inactive' ? 'inactive' : 'active';
         \MAD_Oficina\Billing\Profiles::set_status($profile['id'], $status);
         // What was still to come under the previous legal name goes to the current one.
-        $others = array_filter(\MAD_Oficina\Billing\Profiles::for_client((int) $profile['client_id']), fn($p) => (int) $p['id'] !== (int) $profile['id']);
-        $active = array_values(array_filter($others, fn($p) => $p['status'] === 'active'));
-        $moved = ['drafts' => 0, 'agreements' => 0];
-        $pairs = $status === 'active'
-            ? array_map(fn($p) => [$p['id'], $profile['id']], array_filter($others, fn($p) => $p['status'] === 'inactive'))
-            : ( count($active) === 1 ? [[$profile['id'], $active[0]['id']]] : [] );
-        foreach ( $pairs as [$from, $to] ) foreach ( \MAD_Oficina\Billing\Issuing::move_to_profile($from, $to) as $k => $n ) $moved[$k] += $n;
+        $moved = \MAD_Oficina\Billing\Issuing::follow_current((int) $profile['client_id']);
         $note = $moved['drafts'] || $moved['agreements'] ? ' ' . sprintf(__('Pasan a la razón social actual: %1$d borradores y %2$d acuerdos (las facturas ya emitidas no se tocan).', 'mad-oficina'), $moved['drafts'], $moved['agreements']) : '';
         $this->back_to_client($profile['client_id'], ($status === 'active'
             ? sprintf(__('«%s» vuelve a ser una razón social actual.', 'mad-oficina'), $profile['legal_name'])
@@ -669,6 +663,7 @@ return new class($core) implements MAD_Oficina_Module {
         if ( isset($_GET['edit']) ) {
             $issuing = $this->issuing();
             $draft = $_GET['edit'] === 'new' ? null : \MAD_Oficina\Billing\Invoices::get(absint($_GET['edit']));
+            if ( $draft && $draft['client_id'] && empty($draft['rectifies_id']) && \MAD_Oficina\Billing\Issuing::follow_current((int) $draft['client_id'])['drafts'] ) $draft = \MAD_Oficina\Billing\Invoices::get($draft['id']);
             if ( $draft && $draft['status'] !== 'draft' ) { wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'invoice' => $draft['id']], admin_url('admin.php'))); exit; }
             if ( $draft ) $profile = \MAD_Oficina\Billing\Profiles::get((int) $draft['profile_id']);
             elseif ( isset($_GET['profile']) ) $profile = \MAD_Oficina\Billing\Profiles::get(absint($_GET['profile']));

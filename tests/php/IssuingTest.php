@@ -227,9 +227,36 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame(['B11111111', $this->profile], [Invoices::get($issued)['client_tax_id'], (int) Invoices::get($issued)['profile_id']], 'an issued invoice is never touched');
         $this->assertSame(15, Profiles::get($new)['billing_day'], 'its billing day comes along');
 
-        // And a draft can be sent to another legal name of the same client from the editor.
+        // A draft never goes back to the one marked «anterior».
         $this->issuing()->save_draft(['profile_id' => $this->profile], [['description' => 'x', 'unit_price' => '10']], $pending);
-        $this->assertSame('B11111111', Invoices::get($pending)['client_tax_id']);
+        $this->assertSame('B33333333', Invoices::get($pending)['client_tax_id']);
+    }
+
+    public function test_marked_before_the_move_existed_the_draft_and_the_calendar_still_follow_the_current_one(){
+        // PPT: both legal names joined, the new one «actual» and the old one «anterior», but the draft and the fee still under the old one.
+        $draft = $this->draft(['issue_date' => '2026-11-28']);
+        $fee = \MAD_Oficina\Billing\Agreements::create(['profile_id' => $this->profile, 'kind' => 'monthly', 'concept' => 'Fee', 'amount' => '500', 'start_month' => '2026-01']);
+        $new = Profiles::save(['legal_name' => 'POO POO TRAS ECO, SL', 'tax_id' => 'B66888991', 'client_id' => $this->client]);
+        Profiles::set_status($this->profile, 'inactive');
+        $this->assertSame('B11111111', Invoices::get($draft)['client_tax_id']);
+
+        // Opening the draft is enough.
+        $admin = $this->factory()->user->create(['role' => 'administrator']);
+        get_user_by('id', $admin)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        wp_set_current_user($admin);
+        $_GET = ['edit' => (string) $draft];
+        ob_start(); MAD_Oficina_Core::instance()->get_module('billing')->render_settings_page(); $html = ob_get_clean();
+        $_GET = [];
+        $this->assertSame(['B66888991', $new], [Invoices::get($draft)['client_tax_id'], (int) Invoices::get($draft)['profile_id']]);
+        $this->assertStringContainsString('POO POO TRAS ECO, SL', $html);
+        $this->assertStringNotContainsString('<select name="profile_id"', $html, 'one current legal name: nothing to choose');
+        $this->assertSame($new, (int) \MAD_Oficina\Billing\Agreements::get($fee)['profile_id']);
+
+        // The calendar, asked for the old one, does not bring it back.
+        $cal = new \MAD_Oficina\Billing\Calendar([]);
+        $cal->prepare_one(Profiles::get($this->profile), '2026-11');
+        $this->assertSame('B66888991', Invoices::get($draft)['client_tax_id']);
+        $this->assertSame(1, count(Invoices::all(['profile_id' => $new])), 'no second draft');
     }
 
     public function test_only_drafts_can_be_deleted(){
