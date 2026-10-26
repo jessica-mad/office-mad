@@ -206,6 +206,32 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertStringContainsString('No encuentro los datos fiscales', $e->get_error_message());
     }
 
+    public function test_a_new_legal_name_takes_the_pending_drafts_and_the_running_agreements(){
+        Profiles::save(['legal_name' => 'Taller Azul SL', 'tax_id' => 'B11111111', 'email' => 'pagos@taz.example', 'client_id' => $this->client, 'billing_day' => 15], $this->profile);
+        $issued = $this->draft();
+        Approvals::resolve($this->issuing()->request($issued), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $pending = $this->draft(['issue_date' => '2026-11-28']);
+        $fee = \MAD_Oficina\Billing\Agreements::create(['profile_id' => $this->profile, 'kind' => 'monthly', 'concept' => 'Fee', 'amount' => '500', 'start_month' => '2026-01']);
+        $new = Profiles::save(['legal_name' => 'Azul Estudio SL', 'tax_id' => 'B33333333', 'client_id' => $this->client]);
+
+        // On the client card: the new one is «actual», the old one «anterior».
+        $admin = $this->factory()->user->create(['role' => 'administrator']);
+        get_user_by('id', $admin)->add_cap(MAD_Oficina_Core::CAPABILITY);
+        wp_set_current_user($admin);
+        $_POST = $_REQUEST = ['_wpnonce' => wp_create_nonce('madof_billing_profile_status'), 'profile_id' => $this->profile, 'status' => 'inactive'];
+        try { MAD_Oficina_Core::instance()->get_module('billing')->handle_billing_profile_status(); } catch ( \Throwable $e ) {}
+        $_POST = $_REQUEST = [];
+
+        $this->assertSame([$new, 'B33333333'], [(int) Invoices::get($pending)['profile_id'], Invoices::get($pending)['client_tax_id']], 'the next draft goes to the new legal name');
+        $this->assertSame($new, (int) \MAD_Oficina\Billing\Agreements::get($fee)['profile_id'], 'and so does the monthly fee');
+        $this->assertSame(['B11111111', $this->profile], [Invoices::get($issued)['client_tax_id'], (int) Invoices::get($issued)['profile_id']], 'an issued invoice is never touched');
+        $this->assertSame(15, Profiles::get($new)['billing_day'], 'its billing day comes along');
+
+        // And a draft can be sent to another legal name of the same client from the editor.
+        $this->issuing()->save_draft(['profile_id' => $this->profile], [['description' => 'x', 'unit_price' => '10']], $pending);
+        $this->assertSame('B11111111', Invoices::get($pending)['client_tax_id']);
+    }
+
     public function test_only_drafts_can_be_deleted(){
         $id = $this->draft();
         $approval = $this->issuing()->request($id);

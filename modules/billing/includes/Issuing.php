@@ -149,6 +149,27 @@ final class Issuing {
     }
 
     /**
+     * The client now invoices under another legal name: what was still to come under the old
+     * one moves to the new one — its pending drafts (with the new details) and its running
+     * agreements (monthly fees…), plus its billing day and payment terms if the new one has none.
+     * Issued invoices never move.
+     * @return array{drafts:int, agreements:int}
+     */
+    public static function move_to_profile($from_id, $to_id){
+        global $wpdb;
+        $from = Profiles::get((int) $from_id); $to = Profiles::get((int) $to_id);
+        if ( ! $from || ! $to || $from['id'] === $to['id'] ) return ['drafts' => 0, 'agreements' => 0];
+        $drafts = (int) $wpdb->query($wpdb->prepare('UPDATE ' . Invoices::table() . ' SET profile_id = %d' . ($to['client_id'] ? ', client_id = ' . (int) $to['client_id'] : '') . ", updated_at = %s WHERE profile_id = %d AND status = 'draft' AND number IS NULL AND rectifies_id IS NULL",
+            $to['id'], Time::now(), $from['id']));
+        $items = (int) $wpdb->query($wpdb->prepare('UPDATE ' . Agreements::table() . " SET profile_id = %d, updated_at = %s WHERE profile_id = %d AND status = 'active' AND (end_month IS NULL OR end_month >= %s)",
+            $to['id'], Time::now(), $from['id'], current_time('Y-m')));
+        $terms = array_filter(['billing_day' => $to['billing_day'] ? null : $from['billing_day'], 'payment_days' => $to['payment_days'] !== null ? null : $from['payment_days']], fn($v) => $v !== null);
+        if ( $terms ) $wpdb->update(Profiles::table(), $terms + ['updated_at' => Time::now()], ['id' => $to['id']]);
+        self::refresh_drafts($to['id']);
+        return ['drafts' => $drafts, 'agreements' => $items];
+    }
+
+    /**
      * An issued invoice made out with the client's old fiscal details: a rectifying draft
      * that cancels it (to the old details) and a new draft with the same concepts and the
      * new details. Both wait for Jessica's «Emitir» like any other.

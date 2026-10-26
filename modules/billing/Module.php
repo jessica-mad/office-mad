@@ -265,9 +265,18 @@ return new class($core) implements MAD_Oficina_Module {
         if ( ! $profile || ! $profile['client_id'] ) $this->back(['tab' => 'clients'], __('Esos datos fiscales no existen.', 'mad-oficina'), 'error');
         $status = ($_POST['status'] ?? '') === 'inactive' ? 'inactive' : 'active';
         \MAD_Oficina\Billing\Profiles::set_status($profile['id'], $status);
-        $this->back_to_client($profile['client_id'], $status === 'active'
+        // What was still to come under the previous legal name goes to the current one.
+        $others = array_filter(\MAD_Oficina\Billing\Profiles::for_client((int) $profile['client_id']), fn($p) => (int) $p['id'] !== (int) $profile['id']);
+        $active = array_values(array_filter($others, fn($p) => $p['status'] === 'active'));
+        $moved = ['drafts' => 0, 'agreements' => 0];
+        $pairs = $status === 'active'
+            ? array_map(fn($p) => [$p['id'], $profile['id']], array_filter($others, fn($p) => $p['status'] === 'inactive'))
+            : ( count($active) === 1 ? [[$profile['id'], $active[0]['id']]] : [] );
+        foreach ( $pairs as [$from, $to] ) foreach ( \MAD_Oficina\Billing\Issuing::move_to_profile($from, $to) as $k => $n ) $moved[$k] += $n;
+        $note = $moved['drafts'] || $moved['agreements'] ? ' ' . sprintf(__('Pasan a la razón social actual: %1$d borradores y %2$d acuerdos (las facturas ya emitidas no se tocan).', 'mad-oficina'), $moved['drafts'], $moved['agreements']) : '';
+        $this->back_to_client($profile['client_id'], ($status === 'active'
             ? sprintf(__('«%s» vuelve a ser una razón social actual.', 'mad-oficina'), $profile['legal_name'])
-            : sprintf(__('«%s» queda como razón social anterior. Su historial sigue en la ficha y en su oficina.', 'mad-oficina'), $profile['legal_name']));
+            : sprintf(__('«%s» queda como razón social anterior. Su historial sigue en la ficha y en su oficina.', 'mad-oficina'), $profile['legal_name'])) . $note);
     }
 
     /** New fiscal data for an office client that has never been invoiced. */
