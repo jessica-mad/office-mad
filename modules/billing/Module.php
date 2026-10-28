@@ -386,7 +386,7 @@ return new class($core) implements MAD_Oficina_Module {
         $this->guard('billing_new_details');
         $id = absint($_POST['invoice_id'] ?? 0);
         $reason = sanitize_text_field(wp_unslash($_POST['reason'] ?? ''));
-        $r = $this->issuing()->replace_for_new_details($id, $reason);
+        $r = $this->issuing()->replace_for_new_details($id, $reason, sanitize_key($_POST['target'] ?? 'same'), sanitize_text_field($_POST['new_date'] ?? ''));
         if ( is_wp_error($r) ) {
             // Also kept next to the button, so it can't go unnoticed.
             set_transient('madof_new_details_error_' . $id, $r->get_error_message(), 10 * MINUTE_IN_SECONDS);
@@ -395,9 +395,10 @@ return new class($core) implements MAD_Oficina_Module {
         delete_transient('madof_new_details_error_' . $id);
         $ids = array_filter([$r['rectify'], $r['new']], fn($i) => $i && ($x = \MAD_Oficina\Billing\Invoices::get($i)) && $x['status'] === 'draft' && ! $x['number']);
         if ( ! $ids ) $this->back(['invoice' => $r['rectify']], __('La rectificativa ya estaba emitida.', 'mad-oficina'));
-        if ( $r['new'] ) $this->back(['review' => implode(',', $ids)], __('Así quedan la rectificativa y la factura nueva. Todavía no se ha emitido nada.', 'mad-oficina'));
-        // By substitution: drawn right below the form, on the same screen.
-        \MAD_Oficina\Core\AdminUi::flash(__('Así queda la rectificativa: la misma factura con los datos correctos. Todavía no se ha emitido: revísala abajo y pulsa «Emitir y enviar». La original no cambia nunca.', 'mad-oficina'));
+        // Drawn right below the form, on the same screen.
+        \MAD_Oficina\Core\AdminUi::flash($r['new']
+            ? __('Así quedan la rectificativa que anula la original y la factura nueva. Todavía no se ha emitido nada: revísalas abajo.', 'mad-oficina')
+            : __('Así quedan la rectificativa y la factura corregida con su mismo número y fecha. Todavía no se ha emitido nada: revísalas abajo.', 'mad-oficina'));
         wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r['rectify']], admin_url('admin.php')) . '#rectificar');
         exit;
     }
@@ -456,7 +457,9 @@ return new class($core) implements MAD_Oficina_Module {
         }
         $back = wp_get_referer() ?: add_query_arg(['page' => $this->menu_slug(), 'review' => implode(',', array_keys($items))], admin_url('admin.php'));
         if ( ! $items ) { \MAD_Oficina\Core\AdminUi::flash(__('No hay nada que enviar.', 'mad-oficina'), 'error'); wp_safe_redirect($back); exit; }
-        $r = $this->issuing()->send_now($items, get_current_user_id());
+        $corrected = [];
+        foreach ( (array) ($p['corrected'] ?? []) as $oid => $d ) if ( is_array($d) ) $corrected[absint($oid)] = ['send' => $send, 'to' => sanitize_text_field($d['to'] ?? ''), 'subject' => sanitize_text_field($d['subject'] ?? ''), 'body' => sanitize_textarea_field($d['body'] ?? '')];
+        $r = $this->issuing()->send_now($items, get_current_user_id(), $corrected);
         if ( $r['error'] ) {
             \MAD_Oficina\Core\AdminUi::flash(trim(implode(' ', $r['done']) . ' ' . sprintf(__('No se ha podido seguir: %s', 'mad-oficina'), $r['error'])), 'error');
             wp_safe_redirect($r['done'] ? add_query_arg(['page' => $this->menu_slug()], admin_url('admin.php')) : $back);

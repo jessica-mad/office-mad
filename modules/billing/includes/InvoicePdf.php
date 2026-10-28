@@ -112,6 +112,9 @@ final class InvoicePdf {
         $is_r = $inv['series'] === 'R';
         $sub = $is_r && ($inv['rectify_mode'] ?? '') === 'substitution';
         $fmt = fn($d) => $d ? date_i18n('d/m/Y', strtotime($d)) : '';
+        // Corrected in place (same number and date): says by which rectifying invoice.
+        $corr = $inv['corrected_by'] ?? null;
+        if ( ! $corr && ! $is_r && ! empty($inv['id']) && ($c = Issuing::corrected_of((int) $inv['id'])) ) $corr = Invoices::get((int) $c['by']);
         $cmp = null;
         if ( $is_r && $original ) {
             $o = ['base' => (float) $original['base'], 'vat' => (float) $original['vat'], 'irpf' => (float) $original['irpf'], 'total' => (float) $original['total']];
@@ -159,6 +162,7 @@ body.is-r .concepts{margin-top:6mm}
 body.is-r .header{margin-bottom:6mm;width:88%}
 body.is-r .meta{font-size:10.5pt}
 body.is-r .parties{margin:3mm 0}
+.corrected{margin:0 0 4mm;padding:2mm 3mm;border-left:3px solid #FFC400;background:#F2F2DC;font-size:8.8pt}
 .rect-band{background:#FFC400;color:#0B0B0B;font-weight:800;font-size:11pt;text-transform:uppercase;letter-spacing:.12em;padding:2.2mm 4mm;margin:-5mm 0 5mm}
 .rect-box{width:100%;border-collapse:collapse;margin:0 0 4mm;border:2px solid #0B0B0B}
 .rect-box th{width:38mm;text-align:left;font-weight:800;font-size:9pt;padding:1.6mm 3mm;background:#F2F2DC;vertical-align:top;border-bottom:1px solid #BDBDBD}
@@ -183,6 +187,7 @@ body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 1
 <table class="meta"><tr><th><?php echo $e($is_r ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($inv['number'] ?: '—'); ?></td></tr>
 <tr><th><?php echo $e($is_r ? __('Fecha de expedición:', 'mad-oficina') : __('Fecha:', 'mad-oficina')); ?></th><td><?php echo $e($date); ?></td></tr>
 <?php if ( $is_r && $original && $original['issue_date'] !== $inv['issue_date'] ) : ?><tr><th><?php echo $e(__('Fecha de la operación:', 'mad-oficina')); ?></th><td><?php echo $e($fmt($original['issue_date'])); ?></td></tr><?php endif; ?></table>
+<?php if ( $corr ) : ?><p class="corrected"><?php echo $e(sprintf(__('Factura corregida: los datos del destinatario se sustituyeron por los correctos mediante la factura rectificativa %1$s del %2$s.', 'mad-oficina'), $corr['number'] ?: Invoices::preview_number($corr), $fmt($corr['issue_date']))); ?></p><?php endif; ?>
 <?php if ( $is_r ) : ?>
 <table class="rect-box">
   <?php if ( $original ) : ?><tr><th><?php echo $e(__('Factura rectificada', 'mad-oficina')); ?></th><td><?php echo $e(sprintf(__('Serie %1$s · Nº %2$s · expedida el %3$s', 'mad-oficina'), $original['series'], $original['number'], $fmt($original['issue_date']))); ?></td></tr><?php endif; ?>

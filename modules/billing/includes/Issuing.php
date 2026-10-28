@@ -220,47 +220,112 @@ final class Issuing {
     }
 
     /**
-     * An issued invoice made out with the client's old fiscal details: one rectifying draft
-     * «por sustitución» (RD 1619/2012, art. 15) with the same concepts, amounts and date of
-     * the operation and the corrected recipient. It counts zero; the original stays as it was.
-     * It waits for Jessica's «Emitir y enviar» like any other.
-     * @return array{rectify:int, new:int}|\WP_Error
+     * An issued invoice made out with the client's old fiscal details. Two ways, as she chooses:
+     *  · «same»: the invoice keeps its number and date and is corrected with the right details
+     *    once the rectifying invoice (by substitution, counting zero) that documents it is issued.
+     *  · «new»: a rectifying invoice that cancels it whole and a new invoice of series F, with
+     *    the next number and the date she picks.
+     * Nothing is issued until her «Emitir y enviar».
+     * @param string $target 'same' | 'new'
+     * @return array{rectify:int, new:int, same:bool}|\WP_Error
      */
-    public function replace_for_new_details($id, $reason = ''){
+    public function replace_for_new_details($id, $reason = '', $target = 'same', $new_date = null){
         $inv = Invoices::get($id);
         if ( ! $inv ) return new \WP_Error('madof_inv', __('Esa factura no existe.', 'mad-oficina'));
         if ( ! $inv['number'] ) return new \WP_Error('madof_inv_rect', __('Esta factura todavía es un borrador: cámbiale los datos editándola, no hace falta rectificarla.', 'mad-oficina'));
         if ( $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', sprintf(__('Solo se rehacen así facturas de la serie F; esta es de la serie %s.', 'mad-oficina'), $inv['series']));
-        // Pressed again: the draft already prepared (brought up to date while it is a draft), not another.
+        $target = $target === 'new' ? 'new' : 'same';
+        $reason = trim((string) $reason);
+        // Pressed again: while all is still a draft, start over with what she chose now.
         $done = self::replacement_of($id);
-        $redo = 0;
-        if ( $done && $done['rectify'] && (int) $done['original']['id'] === (int) $id ) {
-            $r = $done['rectify'];
-            if ( $done['new'] || $r['status'] !== 'draft' || $r['number'] || $r['rectify_mode'] !== 'substitution' ) return ['rectify' => (int) $r['id'], 'new' => (int) ($done['new']['id'] ?? 0), 'existing' => true];
-            $redo = (int) $r['id'];
-            if ( trim((string) $reason) === '' ) $reason = (string) $r['rectify_reason'];
+        if ( $done && (int) $done['original']['id'] === (int) $id ) {
+            $drafts = array_filter([$done['rectify'], $done['new']]);
+            if ( array_filter($drafts, fn($d) => $d['status'] !== 'draft' || $d['number']) ) return ['rectify' => (int) ($done['rectify']['id'] ?? 0), 'new' => (int) ($done['new']['id'] ?? 0), 'same' => $done['same'], 'existing' => true];
+            if ( $reason === '' && $done['rectify'] ) $reason = (string) $done['rectify']['rectify_reason'];
+            foreach ( $drafts as $d ) self::delete_draft((int) $d['id']);
+            self::forget_replacement($id);
         }
+        if ( self::corrected_of($id) ) return new \WP_Error('madof_inv_done', __('Esta factura ya se corrigió con una rectificativa.', 'mad-oficina'));
         [$original, $profile] = self::profiles_for_new_details($inv);
         if ( ! $profile ) return new \WP_Error('madof_inv_profile', sprintf(__('No encuentro los datos fiscales de «%1$s» (NIF %2$s) en Clientes de facturación. Créalos o únelos allí y vuelve a pulsar el botón.', 'mad-oficina'), $inv['client_name'], $inv['client_tax_id'] ?: '—'));
         if ( ! self::details_differ($inv, $profile) ) return new \WP_Error('madof_inv_same', sprintf(__('La ficha fiscal «%s» tiene los mismos datos que la factura (nombre, NIF, dirección y localidad). Actualízala primero en Facturación → Clientes de facturación, o crea la nueva razón social unida al mismo cliente.', 'mad-oficina'), $profile['legal_name']));
         $lines = self::lines_of($inv);
         if ( ! $lines ) return new \WP_Error('madof_inv_lines', __('Esta factura no tiene conceptos ni base imponible guardados, así que no sé qué rectificar. Revisa la fila original de la hoja antigua (abajo) y prepara la rectificativa a mano.', 'mad-oficina'));
         [$vat, $irpf] = self::rates_of($inv);
-        // Today, or later if a rectifying invoice already carries a later date (they go in order).
-        $last = $this->last_issued('R', (int) current_time('Y'));
-        $date = max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
-        $r = $this->save_draft([
-            'profile_id' => $profile['id'], 'series' => 'R', 'rectifies_id' => $inv['id'], 'rectify_mode' => 'substitution',
-            'issue_date' => $date, 'vat_rate' => $vat, 'irpf_rate' => $irpf,
-            'rectify_reason' => trim((string) $reason) !== '' ? $reason : self::DEFAULT_DETAILS_REASON,
-        ], $lines, $redo);
-        if ( is_wp_error($r) ) return $r;
-        if ( $redo ) return ['rectify' => $redo, 'new' => 0, 'existing' => true];
+        // Today, or later if an invoice of the series already carries a later date (they go in order).
+        $date_for = function($series) use ($inv){
+            $last = $this->last_issued($series, (int) current_time('Y'));
+            return max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
+        };
+
+        if ( $target === 'same' ) {
+            $r = $this->save_draft([
+                'profile_id' => $profile['id'], 'series' => 'R', 'rectifies_id' => $inv['id'], 'rectify_mode' => 'substitution',
+                'issue_date' => $date_for('R'), 'vat_rate' => $vat, 'irpf_rate' => $irpf,
+                'rectify_reason' => $reason !== '' ? $reason : self::DEFAULT_DETAILS_REASON,
+            ], $lines);
+            if ( is_wp_error($r) ) return $r;
+            $new = 0;
+        } else {
+            $r = $this->rectify($id, '', $date_for('R'), ($original ?: $profile)['id'], $reason !== '' ? $reason : self::DEFAULT_NEW_REASON);
+            if ( is_wp_error($r) ) return $r;
+            $new = $this->save_draft([
+                'profile_id' => $profile['id'], 'issue_date' => self::valid_date((string) $new_date) ?: $date_for('F'), 'vat_rate' => $vat, 'irpf_rate' => $irpf,
+                'notes' => trim(sprintf(__('Sustituye a la factura %s, anulada por cambio de los datos fiscales.', 'mad-oficina'), $inv['number']) . ($inv['source'] === 'import' ? '' : "\n" . (string) $inv['notes'])),
+            ], $lines);
+            if ( is_wp_error($new) ) { self::delete_draft($r); return $new; }
+        }
         $map = get_option(self::REPLACED, []);
         $map = is_array($map) ? $map : [];
-        $map[(int) $id] = ['rectify' => (int) $r, 'new' => 0];
+        $map[(int) $id] = ['rectify' => (int) $r, 'new' => (int) $new, 'same' => $target === 'same'];
         update_option(self::REPLACED, $map, false);
-        return ['rectify' => (int) $r, 'new' => 0];
+        return ['rectify' => (int) $r, 'new' => (int) $new, 'same' => $target === 'same'];
+    }
+
+    const DEFAULT_NEW_REASON = 'Error en los datos de identificación del destinatario. Se anula la factura y se sustituye por una nueva con los datos correctos.';
+
+    private static function forget_replacement($id){
+        $map = get_option(self::REPLACED, []);
+        if ( is_array($map) ) { unset($map[(int) $id]); update_option(self::REPLACED, $map, false); }
+    }
+
+    /** Invoices corrected in place («same»): original id => {from: old recipient, by: rectifying id, at}. */
+    const CORRECTED = 'madoficina_invoice_corrected';
+
+    public static function corrected_of($id){
+        $m = get_option(self::CORRECTED, []);
+        return is_array($m) && isset($m[(int) $id]) ? $m[(int) $id] : null;
+    }
+
+    /** The original as it will look once corrected: its number and date, the rectifying one's recipient. */
+    public static function corrected_preview(array $original, array $rect){
+        foreach ( self::RECIPIENT as $k ) $original[$k] = $rect[$k];
+        $original['corrected_by'] = $rect;
+        return $original;
+    }
+
+    /**
+     * A substitution rectifying invoice of a «same» replacement was issued: the original takes
+     * the right details, keeping its number, date and amounts; the old ones are kept here and
+     * the PDF goes to Drive again as «(v2)», saying which rectifying invoice corrected it.
+     */
+    public function apply_correction(array $rect){
+        global $wpdb;
+        $rep = self::replacement_of($rect['id']);
+        if ( ! $rep || empty($rep['same']) || ! $rep['original'] || (int) $rep['rectify']['id'] !== (int) $rect['id'] || self::corrected_of($rep['original']['id']) ) return null;
+        $orig = $rep['original'];
+        $m = get_option(self::CORRECTED, []);
+        $m = is_array($m) ? $m : [];
+        $m[(int) $orig['id']] = ['from' => array_intersect_key($orig, array_flip(self::RECIPIENT)), 'by' => (int) $rect['id'], 'at' => Time::now()];
+        update_option(self::CORRECTED, $m, false);
+        $wpdb->update(Invoices::table(), array_intersect_key($rect, array_flip(self::RECIPIENT)) + ['profile_id' => $rect['profile_id'], 'pdf_url' => null, 'pdf_file_id' => null, 'updated_at' => Time::now()], ['id' => (int) $orig['id']]);
+        $v = get_option(self::UNDONE, []);
+        $v = is_array($v) ? $v : [];
+        $v[(int) $orig['id']] = ($v[(int) $orig['id']] ?? 0) + 1;
+        update_option(self::UNDONE, $v, false);
+        $fixed = Invoices::get($orig['id']);
+        $this->queue_archive($fixed, null);
+        return $fixed;
     }
 
     /** The reason she typed on the review page, on a rectifying draft. */
@@ -338,7 +403,8 @@ final class Issuing {
         $map = get_option(self::REPLACED, []);
         foreach ( is_array($map) ? $map : [] as $orig => $pair ) {
             if ( in_array($id, array_filter([(int) $orig, (int) $pair['rectify'], (int) $pair['new']]), true) ) {
-                return ['original' => Invoices::get((int) $orig), 'rectify' => Invoices::get((int) $pair['rectify']), 'new' => $pair['new'] ? Invoices::get((int) $pair['new']) : null];
+                return ['original' => Invoices::get((int) $orig), 'rectify' => Invoices::get((int) $pair['rectify']), 'new' => $pair['new'] ? Invoices::get((int) $pair['new']) : null,
+                    'same' => ! $pair['new'] && ($pair['same'] ?? true)];
             }
         }
         return null;
@@ -409,7 +475,7 @@ final class Issuing {
      * @param array $items [invoice id => {expected, send, to, subject, body, issue_date}]
      * @return array{done: string[], error: ?string}
      */
-    public function send_now(array $items, $user_id = 0){
+    public function send_now(array $items, $user_id = 0, array $corrected = []){
         $invs = [];
         foreach ( $items as $id => $in ) {
             $inv = Invoices::get((int) $id);
@@ -434,6 +500,14 @@ final class Issuing {
             $r = Approvals::resolve((int) $approval, 'approve', $input, $user_id, 'web');
             if ( is_wp_error($r) ) return ['done' => $done, 'error' => $r->get_error_message()];
             $done[] = (string) $r['message'];
+        }
+        // The original corrected in place (same number and date) goes to the client too, if she said so.
+        foreach ( $corrected as $orig_id => $in ) {
+            $c = self::corrected_of($orig_id);
+            if ( ! $c || empty($in['send']) ) continue;
+            $q = $this->queue_resend((int) $orig_id, (array) $in);
+            $o = Invoices::get((int) $orig_id);
+            $done[] = is_wp_error($q) ? $q->get_error_message() : sprintf(__('Factura %1$s corregida (mismo número y fecha): el cartero la guarda y la envía a %2$s en unos minutos.', 'mad-oficina'), $o['number'], sanitize_text_field($in['to'] ?? ''));
         }
         return ['done' => $done, 'error' => null];
     }
@@ -534,6 +608,7 @@ final class Issuing {
             ];
         }
         $this->queue_archive($issued, $email);
+        if ( $issued['series'] === 'R' && $issued['rectify_mode'] === 'substitution' ) $this->apply_correction($issued);
 
         return ['message' => $send
             ? sprintf(__('Factura %1$s emitida. El cartero la archiva y la envía a %2$s en unos minutos.', 'mad-oficina'), $issued['number'], $email['to'])
@@ -628,6 +703,14 @@ final class Issuing {
         if ( (int) $inv['seq'] !== $last ) return new \WP_Error('madof_inv_not_last', sprintf(__('Ya hay facturas posteriores en la serie %s: deshacerla dejaría un hueco en la numeración. Corrígela con una rectificativa.', 'mad-oficina'), $inv['series']));
         if ( $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . Invoices::table() . ' WHERE rectifies_id = %d AND number IS NOT NULL', $id)) ) return new \WP_Error('madof_inv_rectified', __('Ya tiene una rectificativa: corrígela desde ahí.', 'mad-oficina'));
         $was_sent = $inv['status'] === 'sent' || $inv['sent_at'];
+        // A rectifying one that had corrected its original in place: the original takes back its details.
+        if ( $inv['series'] === 'R' && ($c = self::corrected_of((int) $inv['rectifies_id'])) && (int) $c['by'] === (int) $id ) {
+            $wpdb->update(Invoices::table(), $c['from'] + ['pdf_url' => null, 'pdf_file_id' => null, 'updated_at' => Time::now()], ['id' => (int) $inv['rectifies_id']]);
+            $m = get_option(self::CORRECTED, []);
+            unset($m[(int) $inv['rectifies_id']]);
+            update_option(self::CORRECTED, $m, false);
+            Orders::queue('libro_upsert', ['rows' => [self::libro_row(Invoices::get((int) $inv['rectifies_id']))]]);
+        }
         $number = $inv['number'];
         $wpdb->update(Invoices::table(), [
             'number' => null, 'seq' => null, 'status' => 'draft', 'issued_at' => null, 'sent_at' => null, 'issuer' => null,

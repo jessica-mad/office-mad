@@ -16,6 +16,7 @@ $docs = array_values(array_filter(array_map(fn($id) => Invoices::get((int) $id),
 usort($docs, fn($a, $b) => ($b['series'] === 'R') <=> ($a['series'] === 'R'));
 if ( ! $docs ) { echo '<p class="madof-warn">' . esc_html__('No hay borradores que enviar: puede que ya se hayan emitido.', 'mad-oficina') . '</p>'; return; }
 $base = admin_url('admin.php?page=mad-oficina-facturacion');
+$extra = 0;
 ?>
 <?php echo AdminUi::form_open('billing_send', 'madof-form madof-send'); ?>
     <?php foreach ( $docs as $inv ) :
@@ -50,12 +51,38 @@ $base = admin_url('admin.php?page=mad-oficina-facturacion');
             </div>
         </div>
     </section>
+    <?php
+    // «Same number and date»: the original as it will be once corrected, sent together.
+    $crep = $inv['series'] === 'R' ? Issuing::replacement_of($inv['id']) : null;
+    if ( $crep && $crep['same'] && $crep['original'] && ! Issuing::corrected_of($crep['original']['id']) ) :
+        $fixed = Issuing::corrected_preview($crep['original'], $inv);
+        $cmail = $issuing->email_for($fixed, $fixed['issue_date'], $fixed['number']);
+        $ckey = 'corrected[' . (int) $fixed['id'] . ']';
+        $extra = ($extra ?? 0) + 1; ?>
+    <section class="madof-card madof-send-doc">
+        <div class="madof-send-head"><div>
+            <span class="madof-kicker"><?php esc_html_e('Factura corregida', 'mad-oficina'); ?></span>
+            <h2><?php echo esc_html(sprintf(__('La factura %1$s del %2$s, con los datos buenos', 'mad-oficina'), $fixed['number'], date_i18n('d/m/Y', strtotime($fixed['issue_date'])))); ?></h2>
+            <p><?php echo esc_html($fixed['client_name'] . ' · ' . $fixed['client_tax_id'] . ' · ' . __('Total', 'mad-oficina') . ' ' . Money::format($fixed['total'])); ?> · <?php esc_html_e('Mismo número, fecha e importes. Se corrige al emitir la rectificativa.', 'mad-oficina'); ?></p>
+        </div></div>
+        <div class="madof-send-grid">
+            <?php echo InvoicePdf::preview_frame($fixed, Issuing::issuer_for($crep['original'], $settings)); ?>
+            <div class="madof-send-mail">
+                <span class="madof-kicker"><?php esc_html_e('El email', 'mad-oficina'); ?></span>
+                <label><?php esc_html_e('Para', 'mad-oficina'); ?><input type="text" name="<?php echo esc_attr($ckey); ?>[to]" value="<?php echo esc_attr($cmail['to'] ?: $mail['to']); ?>" placeholder="email@cliente.com"></label>
+                <label><?php esc_html_e('Asunto', 'mad-oficina'); ?><input type="text" name="<?php echo esc_attr($ckey); ?>[subject]" value="<?php echo esc_attr(sprintf(__('Factura %s corregida · MAD', 'mad-oficina'), $fixed['number'])); ?>"></label>
+                <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="<?php echo esc_attr($ckey); ?>[body]" rows="8"><?php echo esc_textarea(sprintf(__("Hola,\n\nTe adjunto la factura %1\$s corregida con vuestros datos fiscales correctos (mismo número, fecha e importe). La rectificativa que te acabo de enviar deja constancia del cambio.\n\nCualquier cosa, me dices.\n\nUn abrazo,\nJessica\nMAD · Marketing & Ads", 'mad-oficina'), $fixed['number'])); ?></textarea></label>
+                <p class="description"><?php esc_html_e('Sale después de la rectificativa, en otro email, con el PDF corregido.', 'mad-oficina'); ?></p>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
     <?php endforeach; ?>
 
     <p class="madof-sticky-save">
-        <button class="madof-btn" name="mode" value="send"><?php echo esc_html(count($docs) > 1 ? __('Emitir y enviar las dos', 'mad-oficina') : __('Emitir y enviar', 'mad-oficina')); ?></button>
+        <button class="madof-btn" name="mode" value="send"><?php echo esc_html(count($docs) + ($extra ?? 0) > 1 ? __('Emitir y enviar las dos', 'mad-oficina') : __('Emitir y enviar', 'mad-oficina')); ?></button>
         <button class="madof-btn is-ghost" name="mode" value="issue"><?php esc_html_e('Solo emitir (la envío yo)', 'mad-oficina'); ?></button>
-        <small class="madof-muted"><?php echo esc_html(count($docs) > 1
+        <small class="madof-muted"><?php echo esc_html(count($docs) + ($extra ?? 0) > 1
             ? __('Primero la rectificativa y luego la nueva, cada una en su email. Al emitir se numeran, se guardan en Emitidas y se apuntan en el Libro MAD.', 'mad-oficina')
             : __('Al emitir se numera, se guarda en Emitidas y se apunta en el Libro MAD.', 'mad-oficina')); ?></small>
     </p>

@@ -261,3 +261,8 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-rectify{margin:16px 0}
 .madof-rectify-who th{text-align:left}
 .madof-rectify-who tr.is-changed td:last-child{background:var(--y);font-weight:600}
+.madof-choice{border:0;padding:0;margin:12px 0}
+.madof-choice legend{font-weight:600;margin-bottom:6px}
+.madof-choice .madof-check{display:flex;gap:10px;align-items:flex-start;margin:8px 0}
+.madof-choice .madof-check input{margin-top:4px}
+.madof-new-date{display:block;max-width:280px;margin:8px 0 0 28px}

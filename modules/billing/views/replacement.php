@@ -19,12 +19,15 @@ $rep_drafts = array_filter([$rep['rectify'], $rep['new']], fn($i) => $i && $i['s
 <section class="madof-card madof-replacement">
     <span class="madof-kicker"><?php esc_html_e('Cambio de datos fiscales', 'mad-oficina'); ?></span>
     <ul>
-        <?php echo $rep_item($rep['original'], __('Factura original (no se modifica)', 'mad-oficina')); ?>
+        <?php echo $rep_item($rep['original'], $rep['new'] ? __('Factura original (queda anulada)', 'mad-oficina') : __('Factura', 'mad-oficina')); ?>
         <?php if ( $rep['new'] ) : // made before rectifying by substitution: a cancelling one and a new invoice ?>
         <?php echo $rep_item($rep['rectify'], __('Rectificativa que la anula (con los datos antiguos)', 'mad-oficina')); ?>
         <?php echo $rep_item($rep['new'], __('Factura nueva (con los datos nuevos)', 'mad-oficina')); ?>
         <?php else : ?>
         <?php echo $rep_item($rep['rectify'], __('Rectificativa por sustitución (con los datos correctos)', 'mad-oficina')); ?>
+        <li><?php echo ($c = \MAD_Oficina\Billing\Issuing::corrected_of((int) $rep['original']['id']))
+            ? esc_html(sprintf(__('La factura %1$s ya lleva los datos buenos, con su mismo número y fecha (antes: %2$s · %3$s).', 'mad-oficina'), $rep['original']['number'], $c['from']['client_name'], $c['from']['client_tax_id']))
+            : esc_html(sprintf(__('Al emitir la rectificativa, la factura %s se corrige con los datos buenos y conserva su número y fecha.', 'mad-oficina'), $rep['original']['number'])); ?></li>
         <?php endif; ?>
     </ul>
     <?php if ( $rep_drafts && $here ) : ?>
