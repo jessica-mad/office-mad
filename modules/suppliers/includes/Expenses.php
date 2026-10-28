@@ -38,6 +38,21 @@ final class Expenses {
         if ( ! empty($f['month']) ) { $w[] = 'LEFT(issue_date, 7) = %s'; $a[] = $f['month']; }
         if ( ! empty($f['supplier_id']) ) { $w[] = 'supplier_id = %d'; $a[] = $f['supplier_id']; }
         if ( ! empty($f['client_id']) ) { $w[] = 'client_id = %d'; $a[] = $f['client_id']; }
+        if ( isset($f['q']) && trim((string) $f['q']) !== '' ) {
+            // Every word somewhere: supplier (as read or as registered), concept, number, NIF, email, file, notes…
+            foreach ( preg_split('/\s+/', trim((string) $f['q'])) as $word ) {
+                $like = '%' . $wpdb->esc_like($word) . '%';
+                $cols = ['supplier_name', 'supplier_tax_id', 'concept', 'number', 'category', 'sender', 'subject', 'filename', 'notes', 'recipient_name'];
+                $or = array_map(fn($c) => "{$c} LIKE %s", $cols);
+                $or[] = 'supplier_id IN (SELECT id FROM ' . Schema::table('suppliers') . ' WHERE name LIKE %s)';
+                $args = array_fill(0, count($or), $like);
+                // An amount («49,90» or «49.90»): that total or base.
+                $n = str_replace(',', '.', preg_replace('/[€\s]/u', '', $word));
+                if ( is_numeric($n) && str_contains($n, '.') ) { $or[] = 'total = %f OR base = %f'; $args[] = (float) $n; $args[] = (float) $n; }
+                $w[] = '(' . implode(' OR ', $or) . ')';
+                array_push($a, ...$args);
+            }
+        }
         if ( ! empty($f['around']) ) { $w[] = 'issue_date BETWEEN %s AND %s'; $a[] = gmdate('Y-m-d', strtotime($f['around'] . ' -120 days')); $a[] = gmdate('Y-m-d', strtotime($f['around'] . ' +15 days')); }
         $a[] = $limit;
         $sql = 'SELECT * FROM ' . self::table() . ' WHERE ' . implode(' AND ', $w) . ' ORDER BY issue_date DESC, id DESC LIMIT %d';

@@ -333,6 +333,26 @@ $table = function(array $list, $show_reason = false, $pick = false, $review = fa
 <?php else :
     $year = absint($_GET['year'] ?? current_time('Y'));
     $quarter = absint($_GET['q'] ?? 0);
+    $search = trim(sanitize_text_field(wp_unslash($_GET['s'] ?? ''))); ?>
+    <form method="get" class="madof-filters madof-search" role="search">
+        <input type="hidden" name="page" value="mad-oficina-gastos">
+        <label class="screen-reader-text" for="madof-exp-search"><?php esc_html_e('Buscar gastos', 'mad-oficina'); ?></label>
+        <input type="search" id="madof-exp-search" name="s" value="<?php echo esc_attr($search); ?>" placeholder="<?php esc_attr_e('Buscar: proveedor, concepto, nº de factura, NIF, email o importe', 'mad-oficina'); ?>">
+        <button class="madof-btn is-small"><?php esc_html_e('Buscar', 'mad-oficina'); ?></button>
+        <?php if ( $search !== '' ) : ?><a href="<?php echo esc_url($base); ?>"><?php esc_html_e('Quitar la búsqueda', 'mad-oficina'); ?></a><?php endif; ?>
+    </form>
+    <?php if ( $search !== '' ) :
+        // All years and every state, grouped by state.
+        $found = Expenses::all(['q' => $search], 300);
+        $groups = [];
+        foreach ( $found as $e ) $groups[$e['status']][] = $e; ?>
+        <p class="madof-lead" aria-live="polite"><?php echo esc_html(sprintf(_n('%1$d gasto con «%2$s», de todos los años.', '%1$d gastos con «%2$s», de todos los años.', count($found), 'mad-oficina'), count($found), $search)); ?></p>
+        <?php if ( ! $found ) echo '<p class="madof-empty">' . esc_html__('Nada con eso. Prueba con una parte del nombre o del concepto.', 'mad-oficina') . '</p>'; ?>
+        <?php foreach ( $groups as $st => $list ) : ?>
+            <h2 class="madof-kicker"><?php echo esc_html(__(Expenses::STATUSES[$st] ?? $st, 'mad-oficina')); ?> · <?php echo (int) count($list); ?></h2>
+            <?php $table($list, $st !== 'registered'); ?>
+        <?php endforeach; ?>
+    <?php else :
     $list = Expenses::all(['status' => 'registered', 'year' => $year, 'quarter' => $quarter ?: null]);
     $sum = fn($k) => array_sum(array_map(fn($e) => $e['currency'] === 'EUR' ? (float) $e[$k] : 0, $list)); ?>
     <nav class="madof-filters">
@@ -345,5 +365,6 @@ $table = function(array $list, $show_reason = false, $pick = false, $review = fa
         <div class="madof-stat"><span class="madof-kicker"><?php esc_html_e('Total pagado', 'mad-oficina'); ?></span><strong><?php echo esc_html(Money::format($sum('total'))); ?></strong><small><?php esc_html_e('solo en euros', 'mad-oficina'); ?></small></div>
     </section>
     <?php $table($list); ?>
+    <?php endif; ?>
 <?php endif; ?>
 </div>
