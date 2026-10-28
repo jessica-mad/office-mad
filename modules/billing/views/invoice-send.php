@@ -27,9 +27,10 @@ $base = admin_url('admin.php?page=mad-oficina-facturacion');
             <div>
                 <span class="madof-kicker"><?php echo esc_html($inv['series'] === 'R' ? __('Rectificativa', 'mad-oficina') : __('Factura', 'mad-oficina')); ?></span>
                 <h2><?php echo esc_html(sprintf(__('Será la %1$s %2$s', 'mad-oficina'), $inv['series'] === 'R' ? __('rectificativa', 'mad-oficina') : __('factura', 'mad-oficina'), $number ?: '—')); ?></h2>
-                <p><?php echo esc_html($inv['client_name']); ?> · <?php echo esc_html((string) $inv['client_tax_id']); ?> · <?php esc_html_e('Total', 'mad-oficina'); ?> <strong><?php echo esc_html(Money::format($inv['total'])); ?></strong></p>
+                <p><?php echo esc_html($inv['client_name']); ?> · <?php echo esc_html((string) $inv['client_tax_id']); ?> · <?php echo esc_html($inv['series'] === 'R' ? __('Diferencia', 'mad-oficina') : __('Total', 'mad-oficina')); ?> <strong><?php echo esc_html(Money::format($inv['total'])); ?></strong></p>
+                <?php if ( $inv['series'] === 'R' ) : ?><p><?php echo esc_html(($inv['rectify_mode'] === 'substitution' ? __('Por sustitución', 'mad-oficina') : __('Por diferencias', 'mad-oficina')) . ' · ' . __('Motivo:', 'mad-oficina') . ' ' . ($inv['rectify_reason'] ?: '—')); ?></p><?php endif; ?>
             </div>
-            <a class="madof-btn is-ghost" href="<?php echo esc_url($inv['rectifies_id'] && ! Issuing::replacement_of($inv['id']) ? add_query_arg(['rectify' => (int) $inv['rectifies_id'], 'draft' => (int) $inv['id']], $base) . '#rectificar' : add_query_arg('edit', (int) $inv['id'], $base)); ?>"><?php esc_html_e('Cambiar algo', 'mad-oficina'); ?></a>
+            <a class="madof-btn is-ghost" href="<?php echo esc_url($inv['rectifies_id'] ? add_query_arg(['rectify' => (int) $inv['rectifies_id'], 'draft' => (int) $inv['id']], $base) . ($inv['rectify_mode'] === 'substitution' ? '#datos' : '#rectificar') : add_query_arg('edit', (int) $inv['id'], $base)); ?>"><?php esc_html_e('Cambiar algo', 'mad-oficina'); ?></a>
         </div>
         <input type="hidden" name="<?php echo esc_attr($key); ?>[expected]" value="<?php echo esc_attr($number); ?>">
         <input type="hidden" name="<?php echo esc_attr($key); ?>[issue_date]" value="<?php echo esc_attr($inv['issue_date']); ?>">

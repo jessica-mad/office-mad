@@ -20,12 +20,16 @@ $rep_drafts = array_filter([$rep['rectify'], $rep['new']], fn($i) => $i && $i['s
     <span class="madof-kicker"><?php esc_html_e('Cambio de datos fiscales', 'mad-oficina'); ?></span>
     <ul>
         <?php echo $rep_item($rep['original'], __('Factura original (no se modifica)', 'mad-oficina')); ?>
+        <?php if ( $rep['new'] ) : // made before rectifying by substitution: a cancelling one and a new invoice ?>
         <?php echo $rep_item($rep['rectify'], __('Rectificativa que la anula (con los datos antiguos)', 'mad-oficina')); ?>
         <?php echo $rep_item($rep['new'], __('Factura nueva (con los datos nuevos)', 'mad-oficina')); ?>
+        <?php else : ?>
+        <?php echo $rep_item($rep['rectify'], __('Rectificativa por sustitución (con los datos correctos)', 'mad-oficina')); ?>
+        <?php endif; ?>
     </ul>
     <?php if ( $rep_drafts && $here ) : ?>
         <p><a class="madof-btn" href="<?php echo esc_url($rep_base . '&review=' . implode(',', array_map(fn($i) => (int) $i['id'], $rep_drafts))); ?>"><?php echo esc_html(count($rep_drafts) > 1 ? __('Ver cómo quedan y enviar las dos', 'mad-oficina') : __('Ver cómo queda y enviar', 'mad-oficina')); ?></a></p>
     <?php elseif ( ! $rep_drafts ) : ?>
-        <p class="madof-muted"><?php esc_html_e('Las dos están emitidas: la original queda anulada por la rectificativa.', 'mad-oficina'); ?></p>
+        <p class="madof-muted"><?php echo $rep['new'] ? esc_html__('Las dos están emitidas: la original queda anulada por la rectificativa.', 'mad-oficina') : esc_html__('Emitida: la rectificativa sustituye los datos de la original.', 'mad-oficina'); ?></p>
     <?php endif; ?>
 </section>

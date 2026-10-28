@@ -46,7 +46,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -385,16 +385,21 @@ return new class($core) implements MAD_Oficina_Module {
     public function handle_billing_new_details(){
         $this->guard('billing_new_details');
         $id = absint($_POST['invoice_id'] ?? 0);
-        $r = $this->issuing()->replace_for_new_details($id);
+        $reason = sanitize_text_field(wp_unslash($_POST['reason'] ?? ''));
+        $r = $this->issuing()->replace_for_new_details($id, $reason);
         if ( is_wp_error($r) ) {
             // Also kept next to the button, so it can't go unnoticed.
             set_transient('madof_new_details_error_' . $id, $r->get_error_message(), 10 * MINUTE_IN_SECONDS);
-            $this->back(['invoice' => $id], sprintf(__('No he podido rehacer la factura: %s', 'mad-oficina'), $r->get_error_message()), 'error');
+            $this->back(['rectify' => $id], sprintf(__('No he podido preparar la rectificativa: %s', 'mad-oficina'), $r->get_error_message()), 'error');
         }
         delete_transient('madof_new_details_error_' . $id);
-        $ids = array_filter([$r['rectify'], $r['new']], fn($i) => ($x = \MAD_Oficina\Billing\Invoices::get($i)) && $x['status'] === 'draft' && ! $x['number']);
-        if ( ! $ids ) $this->back(['invoice' => $id], __('Ya estaban emitidas las dos: la rectificativa y la nueva.', 'mad-oficina'));
-        $this->back(['review' => implode(',', $ids)], __('Así quedan la rectificativa que anula la original y la factura nueva con los datos actuales. Todavía no se ha emitido nada: revísalas y pulsa «Emitir y enviar las dos». La original no cambia nunca.', 'mad-oficina'));
+        $ids = array_filter([$r['rectify'], $r['new']], fn($i) => $i && ($x = \MAD_Oficina\Billing\Invoices::get($i)) && $x['status'] === 'draft' && ! $x['number']);
+        if ( ! $ids ) $this->back(['invoice' => $r['rectify']], __('La rectificativa ya estaba emitida.', 'mad-oficina'));
+        if ( $r['new'] ) $this->back(['review' => implode(',', $ids)], __('Así quedan la rectificativa y la factura nueva. Todavía no se ha emitido nada.', 'mad-oficina'));
+        // By substitution: drawn right below the form, on the same screen.
+        \MAD_Oficina\Core\AdminUi::flash(__('Así queda la rectificativa: la misma factura con los datos correctos. Todavía no se ha emitido: revísala abajo y pulsa «Emitir y enviar». La original no cambia nunca.', 'mad-oficina'));
+        wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r['rectify']], admin_url('admin.php')) . '#rectificar');
+        exit;
     }
 
     /** «Rectificar»: the differences she wrote become a rectifying draft, shown right below. */
@@ -414,6 +419,14 @@ return new class($core) implements MAD_Oficina_Module {
         \MAD_Oficina\Core\AdminUi::flash(__('Así queda la rectificativa. Todavía no se ha emitido: si está bien, pulsa «Emitir y enviar».', 'mad-oficina'));
         wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r], admin_url('admin.php')) . '#rectificar');
         exit;
+    }
+
+    public function handle_billing_resend(){
+        $this->guard('billing_resend');
+        $p = wp_unslash($_POST);
+        $id = absint($p['invoice_id'] ?? 0);
+        $r = $this->issuing()->queue_resend($id, $p);
+        $this->back(['invoice' => $id], is_wp_error($r) ? $r->get_error_message() : __('Reenvío en marcha: el cartero la manda desde tu Gmail con el PDF en unos minutos.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
     }
 
     /** «Emitir y enviar» from the review: numbered, archived and sent, no inbox in between. */

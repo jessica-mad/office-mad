@@ -84,13 +84,21 @@ $status_pill = function($inv){
         <?php endif; ?>
         <?php if ( $inv['number'] && $inv['series'] === 'F' ) : ?>
         <a class="madof-btn is-ghost" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-facturacion&rectify=' . (int) $inv['id'])); ?>"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></a>
-        <?php echo AdminUi::form_open('billing_new_details', 'madof-inline'); ?>
-            <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
-            <button class="madof-btn is-ghost" title="<?php esc_attr_e('Prepara una rectificativa que anula esta factura y una factura nueva con los mismos conceptos y los datos fiscales actuales del cliente. No se emite ni se envía nada hasta que pulses «Emitir».', 'mad-oficina'); ?>"
-                onclick="return confirm('<?php echo esc_js(__('¿Preparo la rectificativa que anula esta factura y una nueva con los datos fiscales actuales del cliente? Antes de emitir nada te enseño cómo quedan las dos.', 'mad-oficina')); ?>')"><?php esc_html_e('Rehacer con los datos fiscales nuevos', 'mad-oficina'); ?></button>
-        </form><?php endif; ?>
+        <a class="madof-btn is-ghost" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-facturacion&rectify=' . (int) $inv['id'] . '#datos')); ?>"><?php esc_html_e('Corregir los datos del cliente', 'mad-oficina'); ?></a>
+        <?php endif; ?>
         </div>
-        <?php if ( $err = get_transient('madof_new_details_error_' . $inv['id']) ) : ?><p class="madof-warn" role="alert"><strong><?php esc_html_e('«Rehacer con los datos fiscales nuevos» no se ha hecho:', 'mad-oficina'); ?></strong> <?php echo esc_html($err); ?></p><?php endif; ?>
+        <?php if ( $inv['number'] && $inv['series'] !== 'AR' ) : $rs = (new \MAD_Oficina\Billing\Issuing($settings))->email_for($inv, $inv['issue_date'], $inv['number']); ?>
+        <details class="madof-more madof-resend"><summary><?php echo esc_html($inv['status'] === 'sent' ? __('Reenviar por email', 'mad-oficina') : __('Enviar por email', 'mad-oficina')); ?></summary>
+            <?php echo AdminUi::form_open('billing_resend', 'madof-form'); ?>
+                <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+                <label><?php esc_html_e('Para', 'mad-oficina'); ?><input type="text" name="to" value="<?php echo esc_attr($rs['to']); ?>" placeholder="email@cliente.com" required></label>
+                <label><?php esc_html_e('Asunto', 'mad-oficina'); ?><input type="text" name="subject" value="<?php echo esc_attr($rs['subject']); ?>"></label>
+                <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="body" rows="7"><?php echo esc_textarea($rs['body']); ?></textarea></label>
+                <button class="madof-btn"><?php esc_html_e('Reenviar con el PDF', 'mad-oficina'); ?></button>
+            </form>
+        </details>
+        <?php endif; ?>
+        <?php if ( $err = get_transient('madof_new_details_error_' . $inv['id']) ) : ?><p class="madof-warn" role="alert"><strong><?php esc_html_e('«Corregir los datos del cliente» no se ha hecho:', 'mad-oficina'); ?></strong> <?php echo esc_html($err); ?></p><?php endif; ?>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) ) : // Argentina too: its due date is asked like any other ?>
             <?php echo AdminUi::form_open('billing_paid', 'madof-inline'); ?>
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">

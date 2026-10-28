@@ -42,7 +42,7 @@ final class Collections {
         $today = $today ?: current_time('Y-m-d');
         if ( get_option(self::DAY) === $today ) return 0;
         update_option(self::DAY, $today, false);
-        $rows = $wpdb->get_results("SELECT * FROM " . Invoices::table() . " WHERE status IN ('issued','sent') AND paid = 0 AND (number IS NOT NULL OR series = 'AR') ORDER BY issue_date", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT * FROM " . Invoices::table() . " WHERE status IN ('issued','sent') AND paid = 0 AND total > 0 AND (number IS NOT NULL OR series = 'AR') ORDER BY issue_date", ARRAY_A);
         $asked = self::asked();
         foreach ( array_keys($asked) as $id ) if ( ! in_array($id, array_map('intval', array_column($rows, 'id')), true) ) unset($asked[$id]); // collected meanwhile
         update_option(self::ASKED, $asked, false);

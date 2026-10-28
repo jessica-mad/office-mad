@@ -154,21 +154,29 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame(['Taller Azul Nuevo SL', 'B22222222'], [Invoices::get($pending)['client_name'], Invoices::get($pending)['client_tax_id']], 'the next draft takes the new details');
         $this->assertSame('B11111111', Invoices::get($id)['client_tax_id'], 'an issued invoice is never touched');
 
-        $r = $this->issuing()->replace_for_new_details($id);
+        $r = $this->issuing()->replace_for_new_details($id, 'NIF equivocado');
         $this->assertIsArray($r);
         $rect = Invoices::get($r['rectify']);
-        $new = Invoices::get($r['new']);
-        $this->assertSame(['R', $id, -478.06, 'B11111111'], [$rect['series'], $rect['rectifies_id'], $rect['total'], $rect['client_tax_id']], 'the rectifying one cancels it, to the old details');
-        $this->assertSame(['F', 478.06, 'B22222222', 'draft'], [$new['series'], $new['total'], $new['client_tax_id'], $new['status']], 'the new one: same concepts, new details, waiting for «Emitir»');
-        $this->assertStringContainsString(Invoices::get($id)['number'], $new['notes']);
-        $this->assertGreaterThanOrEqual(Invoices::get($id)['issue_date'], $rect['issue_date'], 'never dated before the invoice it cancels');
-        $this->assertSame([(int) $r['rectify'], (int) $r['new']], [(int) Issuing::replacement_of($id)['rectify']['id'], (int) Issuing::replacement_of($r['new'])['new']['id']], 'the three are linked from any of them');
-        $this->assertEquals($r + ['existing' => true], $this->issuing()->replace_for_new_details($id), 'pressed again: the same two drafts');
+        $orig = Invoices::get($id);
+        $this->assertSame(['R', $id, 'substitution', 'NIF equivocado'], [$rect['series'], $rect['rectifies_id'], $rect['rectify_mode'], $rect['rectify_reason']]);
+        $this->assertSame(['B22222222', 'Taller Azul Nuevo SL'], [$rect['client_tax_id'], $rect['client_name']], 'by substitution: the corrected recipient');
+        $this->assertSame([400.0, 51.0], array_map(fn($l) => (float) $l['amount'], $rect['lines']), 'the same concepts and amounts, printed whole');
+        $this->assertSame([0.0, 0.0, 0.0], [$rect['base'], $rect['vat'], $rect['total']], 'it counts only what changes: nothing');
+        $this->assertSame(['B11111111', '26-008'], [$orig['client_tax_id'], $orig['number']], 'the original is never touched');
+        $this->assertSame(0, $r['new'], 'no second invoice with a new number and date');
+        $this->assertSame((int) $r['rectify'], (int) Issuing::replacement_of($id)['rectify']['id']);
 
-        // Editing the rectifying draft keeps the original's details; refreshing drafts leaves it alone.
-        Issuing::refresh_drafts($this->profile);
-        $this->issuing()->save_draft(['profile_id' => $this->profile], [['description' => 'x', 'unit_price' => '-10']], $r['rectify']);
-        $this->assertSame('B11111111', Invoices::get($r['rectify'])['client_tax_id']);
+        // Pressed again with a new reason: the same draft, updated.
+        $again = $this->issuing()->replace_for_new_details($id, 'Razón social y NIF equivocados');
+        $this->assertSame([$r['rectify'], true], [$again['rectify'], $again['existing']]);
+        $this->assertSame('Razón social y NIF equivocados', Invoices::get($r['rectify'])['rectify_reason']);
+
+        $html = InvoicePdf::preview_html(Invoices::get($r['rectify']), []);
+        foreach ( ['Factura rectificativa', 'por sustitución', 'Serie F · Nº 26-008 · expedida el 28/10/2026', 'Razón social y NIF equivocados', 'Datos que se sustituyen', 'B11111111', 'Original', 'Rectificada', 'Diferencia'] as $needle ) $this->assertStringContainsString($needle, $html);
+        $mail = $this->issuing()->email_for(Invoices::get($r['rectify']), current_time('Y-m-d'), 'R-26-01');
+        $this->assertSame('Factura rectificativa R-26-01 · MAD', $mail['subject']);
+        $this->assertStringContainsString('rectifica la factura 26-008 del 28/10/2026', $mail['body']);
+        $this->assertTrue(is_int($this->issuing()->request($r['rectify'])), 'a zero one can be issued');
     }
 
     public function test_the_number_it_will_take_is_shown_before_issuing_and_the_preview_has_no_draft_mark(){
@@ -200,7 +208,8 @@ class IssuingTest extends MADOF_TestCase {
 
         $html = InvoicePdf::preview_html($rect, Issuing::issuer_for($rect, []));
         $this->assertStringContainsString('Factura rectificativa', $html);
-        $this->assertStringContainsString('Rectifica la factura 26-008', $html);
+        $this->assertStringContainsString('Serie F · Nº 26-008', $html);
+        $this->assertStringContainsString('por diferencias', $html);
         $this->assertStringContainsString('Error en el importe de redes', $html);
         $this->assertStringContainsString('R-26-01', $html);
 
@@ -217,8 +226,8 @@ class IssuingTest extends MADOF_TestCase {
         $id = $this->draft();
         Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
         Profiles::save(['legal_name' => 'Taller Azul Nuevo SL', 'tax_id' => 'B22222222', 'email' => 'pagos@taz.example', 'client_id' => $this->client], $this->profile);
-        $pair = $this->issuing()->replace_for_new_details($id);
-        $this->assertSame('Cambio de los datos fiscales del destinatario. Se sustituye por una factura nueva con los datos correctos.', Invoices::get($pair['rectify'])['rectify_reason']);
+        $pair = ['rectify' => $this->issuing()->replace_for_new_details($id)['rectify'], 'new' => $this->draft()];
+        $this->assertSame(Issuing::DEFAULT_DETAILS_REASON, Invoices::get($pair['rectify'])['rectify_reason']);
         $before = count($this->orders('invoice_archive'));
 
         $wrong = $this->issuing()->send_now([$pair['new'] => ['expected' => '26-099', 'send' => true, 'to' => 'pagos@taz.example'], $pair['rectify'] => ['expected' => 'R-26-01', 'send' => true, 'to' => 'pagos@taz.example']]);
@@ -248,6 +257,21 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertFalse(Profiles::set_email($p, 'no-es-un-email'));
     }
 
+    public function test_an_issued_invoice_can_be_sent_again_with_its_pdf(){
+        $id = $this->draft();
+        $this->assertWPError($this->issuing()->queue_resend($id, ['to' => 'pagos@taz.example']), 'a draft is not resent');
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $this->assertWPError($this->issuing()->queue_resend($id, ['to' => 'no-es-email']));
+        $this->assertNotWPError($this->issuing()->queue_resend($id, ['to' => 'pagos@taz.example']));
+        $this->assertNotWPError($this->issuing()->queue_resend($id, ['to' => 'pagos@taz.example']));
+        $orders = $this->orders('payment_reminder');
+        $this->assertCount(2, $orders, 'each press sends once');
+        $this->assertNotSame($orders[0]['payload']['key'], $orders[1]['payload']['key']);
+        $this->assertSame(['Factura 26-008 · MAD', $id], [$orders[0]['payload']['email']['subject'], $orders[0]['payload']['invoice_id']]);
+        Issuing::order_done('payment_reminder', $orders[0]['payload'], true, ['sent' => true]);
+        $this->assertSame('sent', Invoices::get($id)['status'], 'only issued before: now it counts as sent');
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,
@@ -260,10 +284,10 @@ class IssuingTest extends MADOF_TestCase {
         Profiles::save(['legal_name' => 'Taller Azul Nuevo SL', 'tax_id' => 'B22222222', 'email' => 'pagos@taz.example', 'client_id' => $this->client], $this->profile);
         $r = $this->issuing()->replace_for_new_details($id);
         $this->assertIsArray($r, is_wp_error($r) ? $r->get_error_message() : '');
-        $rect = Invoices::get($r['rectify']); $new = Invoices::get($r['new']);
-        $this->assertSame(['Rectifica 26-019: Gestión redes febrero'], array_column($rect['lines'], 'description'), 'the concept from the old sheet');
-        $this->assertSame([-318.0, 'B11111111'], [$rect['total'], $rect['client_tax_id']], 'base, 21 % VAT and 15 % IRPF from its amounts');
-        $this->assertSame([318.0, 'B22222222', 21.0, 15.0], [$new['total'], $new['client_tax_id'], $new['vat_rate'], $new['irpf_rate']]);
+        $rect = Invoices::get($r['rectify']);
+        $this->assertSame(['Gestión redes febrero'], array_column($rect['lines'], 'description'), 'the concept from the old sheet');
+        $this->assertSame([0.0, 'B22222222', 21.0, 15.0, 'substitution'], [$rect['total'], $rect['client_tax_id'], $rect['vat_rate'], $rect['irpf_rate'], $rect['rectify_mode']], 'rates from its amounts; it counts zero');
+        $this->assertSame(0, $r['new']);
     }
 
     public function test_an_unjoined_import_finds_its_profile_by_tax_id_and_a_new_company_is_the_current_profile(){
@@ -274,8 +298,7 @@ class IssuingTest extends MADOF_TestCase {
         [$orig, $cur] = Issuing::profiles_for_new_details(Invoices::get($id));
         $this->assertSame([$this->profile, $new_profile], [(int) $orig['id'], (int) $cur['id']]);
         $r = $this->issuing()->replace_for_new_details($id);
-        $this->assertSame('B33333333', Invoices::get($r['new'])['client_tax_id']);
-        $this->assertSame($this->profile, (int) Invoices::get($r['rectify'])['profile_id'], 'the rectifying one hangs from the profile it was issued to');
+        $this->assertSame('B33333333', Invoices::get($r['rectify'])['client_tax_id'], 'by substitution: to the new company');
 
         $orphan = $this->legacy_invoice(['profile_id' => null, 'number' => '26-021', 'seq' => 21, 'client_name' => 'Nadie SL', 'client_tax_id' => 'X0000000T']);
         $e = $this->issuing()->replace_for_new_details($orphan);

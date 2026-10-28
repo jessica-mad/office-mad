@@ -101,7 +101,7 @@ final class Shifts {
         if ( $counts['unmatched'] ) $missing[] = sprintf(_n('%1$d movimiento del banco sin cuadrar: %2$s', '%1$d movimientos del banco sin cuadrar: %2$s', $counts['unmatched'], 'mad-oficina'), $counts['unmatched'], $bank_url);
         [, $last] = Bank::covered();
         if ( ! $last || strtotime($last) < strtotime($today . ' -35 days') ) $missing[] = $last ? sprintf(__('El último extracto del banco llega al %s: súbeme el nuevo.', 'mad-oficina'), date_i18n('j/m', strtotime($last))) : __('Todavía no me has subido ningún extracto del banco.', 'mad-oficina');
-        $overdue = $wpdb->get_results($wpdb->prepare('SELECT number, client_name, total, currency, due_date FROM ' . Invoices::table() . " WHERE status IN ('issued','sent') AND paid = 0 AND due_date IS NOT NULL AND due_date < %s ORDER BY due_date LIMIT 6", $today), ARRAY_A);
+        $overdue = $wpdb->get_results($wpdb->prepare('SELECT number, client_name, total, currency, due_date FROM ' . Invoices::table() . " WHERE status IN ('issued','sent') AND paid = 0 AND total > 0 AND due_date IS NOT NULL AND due_date < %s ORDER BY due_date LIMIT 6", $today), ARRAY_A);
         foreach ( $overdue as $o ) $missing[] = sprintf(__('%1$s debe %2$s desde el %3$s (%4$s)', 'mad-oficina'), $o['client_name'], Money::format((float) $o['total']) . ($o['currency'] !== 'EUR' ? ' ' . $o['currency'] : ''), date_i18n('j/m', strtotime($o['due_date'])), $o['number'] ?: __('Argentina', 'mad-oficina'));
         $pending = 0;
         foreach ( \MAD_Oficina\Core\FinanceAccess::types() as $type ) $pending += count(Approvals::pending(500, $type));

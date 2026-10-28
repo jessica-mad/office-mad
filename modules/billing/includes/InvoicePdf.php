@@ -102,9 +102,20 @@ final class InvoicePdf {
             ! empty($issuer['issuer_city']) ? __('Localidad:', 'mad-oficina') . ' ' . $issuer['issuer_city'] : '',
             ! empty($issuer['issuer_tax_id']) ? ($issuer['issuer_tax_label'] ?? 'N.I.F.') . ': ' . $issuer['issuer_tax_id'] : '',
         ]);
-        $pay = array_filter([$issuer['issuer_bank'] ?? '', ! empty($issuer['issuer_iban']) ? 'IBAN ' . $issuer['issuer_iban'] : '', $issuer['payment_terms'] ?? '']);
+        $pay = $inv['series'] === 'R' && (float) $inv['total'] <= 0 ? [] : array_filter([$issuer['issuer_bank'] ?? '', ! empty($issuer['issuer_iban']) ? 'IBAN ' . $issuer['issuer_iban'] : '', $issuer['payment_terms'] ?? '']);
         $contact = implode(' / ', array_filter([$issuer['issuer_phone'] ?? '', $issuer['issuer_email'] ?? '']));
         $draft = $inv['number'] ? '' : '<div class="draft">' . $e(__('BORRADOR', 'mad-oficina')) . '</div>';
+        // A rectifying invoice (RD 1619/2012, arts. 6 and 15): says so, identifies the invoice it
+        // rectifies (series, number, date), the reason, and the amounts before, after and the difference.
+        $is_r = $inv['series'] === 'R';
+        $sub = $is_r && ($inv['rectify_mode'] ?? '') === 'substitution';
+        $fmt = fn($d) => $d ? date_i18n('d/m/Y', strtotime($d)) : '';
+        $cmp = null;
+        if ( $is_r && $original ) {
+            $o = ['base' => (float) $original['base'], 'vat' => (float) $original['vat'], 'irpf' => (float) $original['irpf'], 'total' => (float) $original['total']];
+            $d = ['base' => (float) $inv['base'], 'vat' => (float) $inv['vat'], 'irpf' => (float) $inv['irpf'], 'total' => (float) $inv['total']];
+            $cmp = [$o, array_map(fn($k) => round($o[$k] + $d[$k], 2), array_combine(array_keys($o), array_keys($o))), $d];
+        }
 
         ob_start(); ?>
 <!doctype html><html lang="es"><head><meta charset="utf-8"><style>
@@ -141,21 +152,36 @@ body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-heig
 .totals tr.total th,.totals tr.total td{color:#FFC400;font-weight:800;font-size:13pt;border-bottom:3px solid #0B0B0B}
 .contact{position:fixed;bottom:0;right:0;text-align:right;font-size:9pt}
 .contact strong{display:block;font-weight:800}
-.rectifies{margin:0 0 4mm;font-size:9.5pt}
+.contact.in-flow{position:static;margin-top:4mm;text-align:left;font-size:8.6pt}
+body.is-r .concepts{margin-top:6mm}
+body.is-r .header{margin-bottom:6mm}
+.rect-band{background:#FFC400;color:#0B0B0B;font-weight:800;font-size:11pt;text-transform:uppercase;letter-spacing:.12em;padding:2.2mm 4mm;margin:-5mm 0 5mm}
+.rect-box{width:100%;border-collapse:collapse;margin:0 0 4mm;border:2px solid #0B0B0B}
+.rect-box th{width:38mm;text-align:left;font-weight:800;font-size:9pt;padding:1.6mm 3mm;background:#F2F2DC;vertical-align:top;border-bottom:1px solid #BDBDBD}
+.rect-box td{font-size:9pt;padding:1.6mm 3mm;vertical-align:top;border-bottom:1px solid #BDBDBD}
+.totals.cmp th,.totals.cmp td{font-size:8.6pt;padding:1.6mm 1.2mm;text-align:right}
+.totals.cmp th{text-align:left}
+.totals.cmp tr.head th{font-size:7.6pt;text-align:right;text-transform:uppercase;letter-spacing:.04em}
+.totals.cmp tr.total th,.totals.cmp tr.total td{font-size:10pt}
 .draft{position:fixed;top:95mm;left:0;right:0;text-align:center;font-size:80pt;font-weight:800;color:#FFC400;opacity:.18}
 <?php if ( $web ) : // a sheet of A4 on screen, with the PDF's margins ?>
 html{background:#fff}
 body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 16mm;box-sizing:border-box}
 .contact{position:absolute;bottom:16mm;right:16mm}
 <?php endif; ?>
-</style></head><body>
+</style></head><body<?php echo $is_r ? ' class="is-r"' : ''; ?>>
 <?php echo $draft; ?>
 <img class="header" src="<?php echo esc_attr($header); ?>" alt="">
-<table class="meta"><tr><th><?php echo $e($inv['series'] === 'R' ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($inv['number'] ?: '—'); ?></td></tr>
-<tr><th><?php echo $e(__('Fecha:', 'mad-oficina')); ?></th><td><?php echo $e($date); ?></td></tr></table>
-<?php if ( $inv['series'] === 'R' && ($original || ! empty($inv['rectify_reason'])) ) : ?>
-<p class="rectifies"><?php if ( $original ) echo $e(sprintf(__('Rectifica la factura %1$s, del %2$s.', 'mad-oficina'), $original['number'], date_i18n('d/m/Y', strtotime($original['issue_date'])))); ?>
-<?php if ( ! empty($inv['rectify_reason']) ) echo ' ' . $e(__('Motivo:', 'mad-oficina')) . ' ' . $e($inv['rectify_reason']); ?></p>
+<?php if ( $is_r ) : ?><div class="rect-band"><?php echo $e(__('Factura rectificativa', 'mad-oficina') . ' · ' . ($sub ? __('por sustitución', 'mad-oficina') : __('por diferencias', 'mad-oficina'))); ?></div><?php endif; ?>
+<table class="meta"><tr><th><?php echo $e($is_r ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($inv['number'] ?: '—'); ?></td></tr>
+<tr><th><?php echo $e($is_r ? __('Fecha de expedición:', 'mad-oficina') : __('Fecha:', 'mad-oficina')); ?></th><td><?php echo $e($date); ?></td></tr>
+<?php if ( $is_r && $original && $original['issue_date'] !== $inv['issue_date'] ) : ?><tr><th><?php echo $e(__('Fecha de la operación:', 'mad-oficina')); ?></th><td><?php echo $e($fmt($original['issue_date'])); ?></td></tr><?php endif; ?></table>
+<?php if ( $is_r ) : ?>
+<table class="rect-box">
+  <?php if ( $original ) : ?><tr><th><?php echo $e(__('Factura rectificada', 'mad-oficina')); ?></th><td><?php echo $e(sprintf(__('Serie %1$s · Nº %2$s · expedida el %3$s', 'mad-oficina'), $original['series'], $original['number'], $fmt($original['issue_date']))); ?></td></tr><?php endif; ?>
+  <tr><th><?php echo $e(__('Motivo', 'mad-oficina')); ?></th><td><?php echo $e($inv['rectify_reason'] ?: '—'); ?></td></tr>
+  <?php if ( $sub && $original ) : ?><tr><th><?php echo $e(__('Datos que se sustituyen', 'mad-oficina')); ?></th><td><?php echo $e(implode(' · ', array_filter([$original['client_name'], $original['client_tax_id'], $original['client_address'], $original['client_city']]))); ?></td></tr><?php endif; ?>
+</table>
 <?php endif; ?>
 <hr class="rule">
 <table class="parties"><tr>
@@ -171,20 +197,28 @@ body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 1
   <tbody><?php echo $lines; ?></tbody>
 </table>
 <table class="bottom"><tr>
-  <td style="width:30%"></td>
-  <td style="width:32%" class="pay">
+  <?php if ( ! $cmp ) : ?><td style="width:30%"></td><?php endif; ?>
+  <td style="width:<?php echo $cmp ? 34 : 32; ?>%" class="pay">
     <?php if ( $pay ) : ?><h3><?php echo $e(__('Forma de pago', 'mad-oficina')); ?></h3>
     <p class="method"><?php echo $e($issuer['payment_method'] ?? __('Transferencia bancaria', 'mad-oficina')); ?></p>
     <?php foreach ( $pay as $p ) echo '<p>' . nl2br($e($p)) . '</p>'; endif; ?>
+    <?php if ( $is_r && $contact ) : // a rectifying one is longer: the contact goes here, not at the page foot ?><div class="contact in-flow"><strong><?php echo $e(__('Contacto', 'mad-oficina')); ?></strong><?php echo $e($contact); ?></div><?php endif; ?>
   </td>
-  <td style="width:38%"><table class="totals">
+  <td style="width:<?php echo $cmp ? 66 : 38; ?>%"><?php if ( $cmp ) : ?><table class="totals cmp">
+    <tr class="head"><th></th><th><?php echo $e(__('Original', 'mad-oficina')); ?></th><th><?php echo $e(__('Rectificada', 'mad-oficina')); ?></th><th><?php echo $e(__('Diferencia', 'mad-oficina')); ?></th></tr>
+    <?php foreach ( ['base' => __('Base', 'mad-oficina'), 'vat' => sprintf(__('I.V.A. %s', 'mad-oficina'), self::rate($inv['vat_rate'])), 'irpf' => sprintf(__('IRPF %s', 'mad-oficina'), self::rate($inv['irpf_rate'])), 'total' => __('Total', 'mad-oficina')] as $k => $label ) :
+        if ( $k === 'irpf' && ! $cmp[0]['irpf'] && ! $cmp[2]['irpf'] ) continue;
+        $sign = $k === 'irpf' ? -1 : 1; ?>
+    <tr<?php echo $k === 'total' ? ' class="total"' : ''; ?>><th><?php echo $e($label); ?></th><?php foreach ( $cmp as $col ) echo '<td>' . $e(self::money($sign * $col[$k])) . '</td>'; ?></tr>
+    <?php endforeach; ?>
+  </table><?php else : ?><table class="totals">
     <tr><th><?php echo $e(__('Base', 'mad-oficina')); ?></th><td><?php echo $e(self::money($inv['base'])); ?></td></tr>
     <tr><th><?php echo $e(sprintf(__('I.V.A. %s', 'mad-oficina'), self::rate($inv['vat_rate']))); ?></th><td><?php echo $e(self::money($inv['vat'])); ?></td></tr>
     <?php if ( (float) $inv['irpf'] != 0.0 ) : ?><tr><th><?php echo $e(sprintf(__('IRPF %s', 'mad-oficina'), self::rate($inv['irpf_rate']))); ?></th><td><?php echo (float) $inv['irpf'] > 0 ? '−' . $e(self::money($inv['irpf'])) : $e(self::money(-$inv['irpf'])); // a rectifying one gives it back ?></td></tr><?php endif; ?>
     <tr class="total"><th><?php echo $e(__('Total', 'mad-oficina')); ?></th><td><?php echo $e(self::money($inv['total'])); ?></td></tr>
-  </table></td>
+  </table><?php endif; ?></td>
 </tr></table>
-<?php if ( $contact ) : ?><div class="contact"><strong><?php echo $e(__('Contacto', 'mad-oficina')); ?></strong><?php echo $e($contact); ?></div><?php endif; ?>
+<?php if ( $contact && ! $is_r ) : ?><div class="contact"><strong><?php echo $e(__('Contacto', 'mad-oficina')); ?></strong><?php echo $e($contact); ?></div><?php endif; ?>
 </body></html>
 <?php
         return ob_get_clean();

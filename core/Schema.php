@@ -372,6 +372,7 @@ final class Schema {
   pdf_url varchar(255) NULL,
   rectifies_id bigint(20) unsigned NULL,
   rectify_reason varchar(500) NULL,
+  rectify_mode varchar(12) NULL,
   source varchar(20) NOT NULL DEFAULT 'plugin',
   legacy_key char(40) NULL,
   legacy longtext NULL,

@@ -258,3 +258,6 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-rectify-lines td.num,.madof-rectify-lines th.num{text-align:right;white-space:nowrap}
 .madof-rectify-lines td.num input{width:110px;text-align:right}
 @media (max-width:900px){.madof-send-grid{grid-template-columns:1fr}}
+.madof-rectify{margin:16px 0}
+.madof-rectify-who th{text-align:left}
+.madof-rectify-who tr.is-changed td:last-child{background:var(--y);font-weight:600}
