@@ -74,13 +74,15 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
             <p class="madof-warn"><?php esc_html_e('Esta factura no tiene conceptos ni base imponible guardados: no sé qué rectificar.', 'mad-oficina'); ?></p>
         <?php else : ?>
         <table class="madof-table madof-rectify-lines">
-            <thead><tr><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th class="num"><?php esc_html_e('Facturado', 'mad-oficina'); ?></th><th class="num"><?php esc_html_e('Debería ser', 'mad-oficina'); ?></th></tr></thead>
+            <thead><tr><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th class="num"><?php esc_html_e('Facturado', 'mad-oficina'); ?></th><th class="num"><?php esc_html_e('Debería ser', 'mad-oficina'); ?></th><th><span class="screen-reader-text"><?php esc_html_e('Quitar', 'mad-oficina'); ?></span></th></tr></thead>
             <tbody>
-            <?php foreach ( $old as $i => $l ) : $c = (array) ($state['lines'][$i] ?? []); ?>
-                <tr>
+            <?php foreach ( $old as $i => $l ) : $c = (array) ($state['lines'][$i] ?? []); $off = ! empty($c['remove']); ?>
+                <tr class="<?php echo $off ? 'is-removed' : ''; ?>" data-line>
                     <td><textarea name="lines[<?php echo (int) $i; ?>][description]" rows="2" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"><?php echo esc_textarea($c['description'] ?? $l['description']); ?></textarea></td>
                     <td class="num"><?php echo esc_html(Money::format($l['quantity'] * $l['unit_price'])); ?></td>
-                    <td class="num"><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][amount]" value="<?php echo esc_attr($c['amount'] ?? $num($l['quantity'] * $l['unit_price'])); ?>" aria-label="<?php esc_attr_e('Importe correcto', 'mad-oficina'); ?>"></td>
+                    <td class="num"><input type="text" inputmode="decimal" name="lines[<?php echo (int) $i; ?>][amount]" value="<?php echo esc_attr($c['amount'] ?? $num($l['quantity'] * $l['unit_price'])); ?>" aria-label="<?php esc_attr_e('Importe correcto', 'mad-oficina'); ?>"<?php disabled($off); ?>></td>
+                    <td><input type="hidden" name="lines[<?php echo (int) $i; ?>][remove]" value="<?php echo $off ? '1' : ''; ?>" data-remove>
+                        <button type="button" class="madof-link" data-toggle-line aria-pressed="<?php echo $off ? 'true' : 'false'; ?>"><?php echo $off ? esc_html__('Devolver', 'mad-oficina') : esc_html__('Quitar', 'mad-oficina'); ?></button></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -90,6 +92,7 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
                     <td><textarea name="added[<?php echo (int) $j; ?>][description]" rows="1" placeholder="<?php esc_attr_e('Concepto que faltaba (opcional)', 'mad-oficina'); ?>"><?php echo esc_textarea($a['description'] ?? ''); ?></textarea></td>
                     <td class="num madof-muted">—</td>
                     <td class="num"><input type="text" inputmode="decimal" name="added[<?php echo (int) $j; ?>][amount]" value="<?php echo esc_attr($a['amount'] ?? ''); ?>" aria-label="<?php esc_attr_e('Importe', 'mad-oficina'); ?>"></td>
+                    <td><button type="button" class="madof-link" data-drop-line><?php esc_html_e('Quitar', 'mad-oficina'); ?></button></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -134,5 +137,23 @@ document.querySelector('[data-add-line]')?.addEventListener('click', function(){
     var body = document.querySelector('[data-added]'), row = body.lastElementChild.cloneNode(true), n = body.children.length;
     row.querySelectorAll('textarea,input').forEach(function(el){ el.value = ''; el.name = el.name.replace(/added\[\d+\]/, 'added[' + n + ']'); });
     body.appendChild(row);
+});
+// «Quitar» an invoiced concept: it goes out of the corrected invoice (back with «Devolver»).
+document.querySelectorAll('[data-toggle-line]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+        var tr = btn.closest('[data-line]'), on = !tr.classList.contains('is-removed');
+        tr.classList.toggle('is-removed', on);
+        tr.querySelector('[data-remove]').value = on ? '1' : '';
+        tr.querySelectorAll('input[type=text],textarea').forEach(function(el){ el.disabled = on && el.tagName === 'INPUT'; });
+        btn.textContent = on ? <?php echo wp_json_encode(__('Devolver', 'mad-oficina')); ?> : <?php echo wp_json_encode(__('Quitar', 'mad-oficina')); ?>;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+});
+// A missing concept added by mistake: out (the last one is only emptied).
+document.querySelector('[data-added]')?.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-drop-line]');
+    if (!btn) return;
+    var body = this, tr = btn.closest('tr');
+    if (body.children.length > 1) tr.remove(); else tr.querySelectorAll('textarea,input').forEach(function(el){ el.value = ''; });
 });
 </script>

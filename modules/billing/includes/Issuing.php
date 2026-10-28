@@ -137,10 +137,29 @@ final class Issuing {
             if ( ! empty($data['rectifies_id']) ) $row['rectifies_id'] = (int) $data['rectifies_id'];
             return Invoices::insert($row, $clean);
         }
+        // Concepts she took out of a draft (an agreement's month, a re-billed expense) are not put back in by the calendar.
+        $key = fn($l) => ! empty($l['item_id']) ? 'i' . (int) $l['item_id'] . '|' . $l['item_month'] : ( ! empty($l['expense_id']) ? 'e' . (int) $l['expense_id'] : null );
+        $gone = array_diff(array_filter(array_map($key, $inv['lines'])), array_filter(array_map($key, $clean)));
+        if ( $gone ) {
+            $rm = get_option(self::REMOVED, []);
+            $rm = is_array($rm) ? $rm : [];
+            $rm[(int) $id] = array_values(array_unique(array_merge($rm[(int) $id] ?? [], $gone)));
+            update_option(self::REMOVED, $rm, false);
+        }
         $wpdb->update(Invoices::table(), $row + ['updated_at' => Time::now()], ['id' => $id, 'status' => 'draft']);
         $wpdb->delete(Schema::table('invoice_lines'), ['invoice_id' => $id]);
         foreach ( $clean as $i => $l ) $wpdb->insert(Schema::table('invoice_lines'), ['invoice_id' => $id, 'position' => $i] + $l);
         return (int) $id;
+    }
+
+    /** Concepts taken out of a draft by hand: draft id => ['i<agreement>|<month>', 'e<expense>'…]. */
+    const REMOVED = 'madoficina_draft_removed_lines';
+
+    /** Whether this concept was taken out of this draft by hand. */
+    public static function removed_from($draft_id, array $line){
+        $rm = get_option(self::REMOVED, []);
+        $k = ! empty($line['item_id']) ? 'i' . (int) $line['item_id'] . '|' . $line['item_month'] : ( ! empty($line['expense_id']) ? 'e' . (int) $line['expense_id'] : null );
+        return $k && is_array($rm) && in_array($k, $rm[(int) $draft_id] ?? [], true);
     }
 
     /** Drafts can go (they never had a number); issued invoices are kept forever. */
@@ -329,7 +348,7 @@ final class Issuing {
         foreach ( self::lines_of($inv) as $i => $l ) {
             $c = (array) ($changes[$i] ?? []);
             $was = Money::round($l['quantity'] * $l['unit_price']);
-            $now = isset($c['amount']) && trim((string) $c['amount']) !== '' ? Money::round((float) Money::parse((string) $c['amount'])) : $was;
+            $now = ! empty($c['remove']) ? 0.0 : ( isset($c['amount']) && trim((string) $c['amount']) !== '' ? Money::round((float) Money::parse((string) $c['amount'])) : $was );
             $desc = trim(sanitize_textarea_field((string) ($c['description'] ?? ''))) ?: $l['description'];
             if ( ! $now && $desc === '' ) continue;
             $out[] = $now === $was ? ['description' => $desc, 'quantity' => $l['quantity'], 'unit_price' => $l['unit_price']] : ['description' => $desc, 'quantity' => 1, 'unit_price' => $now];
@@ -542,9 +561,11 @@ final class Issuing {
         foreach ( $old as $i => $l ) {
             $was = Money::round($l['quantity'] * $l['unit_price']);
             $c = (array) ($changes[$i] ?? []);
-            $now = isset($c['amount']) && trim((string) $c['amount']) !== '' ? Money::round((float) Money::parse((string) $c['amount'])) : $was;
+            $now = ! empty($c['remove']) ? 0.0 : ( isset($c['amount']) && trim((string) $c['amount']) !== '' ? Money::round((float) Money::parse((string) $c['amount'])) : $was );
             $desc = trim(sanitize_textarea_field((string) ($c['description'] ?? ''))) ?: $l['description'];
-            if ( $desc !== $l['description'] ) {
+            if ( ! empty($c['remove']) ) {
+                $lines[] = ['description' => sprintf(__('Anula %1$s: %2$s', 'mad-oficina'), $n, $l['description']), 'quantity' => 1, 'unit_price' => -$was];
+            } elseif ( $desc !== $l['description'] ) {
                 // A different concept: the old one out, the right one in.
                 $lines[] = ['description' => sprintf(__('Anula %1$s: %2$s', 'mad-oficina'), $n, $l['description']), 'quantity' => 1, 'unit_price' => -$was];
                 if ( $now ) $lines[] = ['description' => $desc, 'quantity' => 1, 'unit_price' => $now];

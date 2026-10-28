@@ -386,6 +386,23 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame([-478.06, 584.06, '2026-10-30', 'B11111111'], [(float) Invoices::get($n['rectify'])['total'], (float) Invoices::get($n['new'])['total'], Invoices::get($n['new'])['issue_date'], Invoices::get($n['new'])['client_tax_id']]);
     }
 
+    public function test_concepts_can_be_taken_out_when_rectifying_and_stay_out_of_calendar_drafts(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $i = $this->issuing();
+        $r = $i->rectify_lines($id, [1 => ['remove' => '1']], [], 'El banner no se hizo');
+        $this->assertSame([-51.0], array_map(fn($l) => (float) $l['amount'], Invoices::get($r)['lines']));
+        $this->assertStringStartsWith('Anula 26-008', Invoices::get($r)['lines'][0]['description']);
+        $lines = Issuing::corrected_lines(Invoices::get($id), [1 => ['remove' => '1']], []);
+        $this->assertSame(['Gestión de redes · octubre'], array_column($lines, 'description'), 'the corrected invoice without it');
+
+        // A concept taken out of a draft by hand is remembered for that draft.
+        $d = $i->save_draft(['profile_id' => $this->profile, 'issue_date' => '2026-11-28'], [['description' => 'Fee', 'unit_price' => '100', 'item_id' => 99, 'item_month' => '2026-11'], ['description' => 'Otro', 'unit_price' => '5']]);
+        $i->save_draft(['profile_id' => $this->profile, 'issue_date' => '2026-11-28'], [['description' => 'Otro', 'unit_price' => '5']], $d);
+        $this->assertTrue(Issuing::removed_from($d, ['item_id' => 99, 'item_month' => '2026-11']));
+        $this->assertFalse(Issuing::removed_from($d, ['item_id' => 99, 'item_month' => '2026-12']));
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,

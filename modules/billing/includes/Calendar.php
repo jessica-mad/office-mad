@@ -180,6 +180,8 @@ final class Calendar {
         $draft = $this->draft_for($profile['id'], $month);
         if ( $draft ) {
             $inv = Invoices::get((int) $draft);
+            $lines = array_values(array_filter($lines, fn($l) => ! Issuing::removed_from((int) $draft, $l)));
+            if ( ! $lines ) return (int) $draft;
             $keep = array_map(fn($l) => ['description' => $l['description'], 'quantity' => (string) $l['quantity'], 'unit_price' => number_format((float) $l['unit_price'], 2, ',', ''), 'item_id' => $l['item_id'], 'item_month' => $l['item_month'], 'expense_id' => $l['expense_id']], $inv['lines']);
             return $this->issuing->save_draft(['profile_id' => $profile['id'], 'issue_date' => $inv['issue_date'], 'due_date' => $inv['due_date'], 'vat_rate' => $inv['vat_rate'], 'irpf_rate' => $inv['irpf_rate'], 'notes' => $inv['notes']], array_merge($keep, $lines), $inv['id']);
         }
