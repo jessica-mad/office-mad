@@ -18,6 +18,7 @@ $tabs = [
     'review' => sprintf(__('Por revisar (%d)', 'mad-oficina'), $count('review')),
     'reading' => sprintf(__('Leyendo (%d)', 'mad-oficina'), $count('queued')),
     'aside' => sprintf(__('No son mías (%d)', 'mad-oficina'), $count('not_mine')),
+    'duplicates' => sprintf(__('Duplicados (%d)', 'mad-oficina'), count(\MAD_Oficina\Suppliers\Duplicates::open())),
     'payments' => sprintf(__('Pagos (%d sin factura)', 'mad-oficina'), (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . Expenses::table() . " WHERE status = 'payment' AND payment_for IS NULL")),
     'suppliers' => __('Proveedores', 'mad-oficina'),
     'upload' => __('Subir o importar', 'mad-oficina'),
@@ -167,6 +168,41 @@ $table = function(array $list, $show_reason = false, $pick = false, $review = fa
     <?php $table(Expenses::all(['status' => 'queued']), false, true); ?>
     <?php endif; ?>
 
+<?php elseif ( $tab === 'duplicates' ) :
+    $dups = \MAD_Oficina\Suppliers\Duplicates::groups();
+    $open = array_filter($dups, fn($g) => $g['state'] === 'open');
+    $done = array_slice(array_filter($dups, fn($g) => $g['state'] === 'done'), -15, null, true); ?>
+    <section class="madof-card">
+        <p><?php esc_html_e('Busco facturas de proveedor repetidas: mismo proveedor, importe, fecha y número de factura. Si es el mismo documento, la copia se descarta sola. Si son documentos distintos, solo cuenta una y las dos se ponen juntas en una carpeta «Duplicados/…» de tu archivo para que las compares y elijas aquí. No se borra nada de Drive.', 'mad-oficina'); ?></p>
+        <?php echo AdminUi::form_open('expense_dup_scan', 'madof-inline'); ?><button class="madof-btn is-small is-ghost"><?php esc_html_e('Buscar ahora', 'mad-oficina'); ?></button></form>
+    </section>
+    <?php if ( ! $open ) echo '<p class="madof-empty">' . esc_html__('No hay duplicadas por decidir.', 'mad-oficina') . '</p>'; ?>
+    <?php foreach ( $open as $gk => $g ) : $items = array_filter(array_map([Expenses::class, 'get'], $g['ids'])); ?>
+    <section class="madof-card madof-dup">
+        <span class="madof-kicker"><?php esc_html_e('¿Duplicadas?', 'mad-oficina'); ?></span>
+        <h3><?php echo esc_html('Duplicados / ' . $g['folder']); ?></h3>
+        <table class="madof-table">
+            <thead><tr><th><?php esc_html_e('Gasto', 'mad-oficina'); ?></th><th><?php esc_html_e('Cómo llegó', 'mad-oficina'); ?></th><th><?php esc_html_e('Documento', 'mad-oficina'); ?></th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ( $items as $e ) : ?>
+                <tr>
+                    <td><a href="<?php echo esc_url($base . '&expense=' . $e['id']); ?>">#<?php echo (int) $e['id']; ?></a> · <?php echo esc_html(($e['supplier_name'] ?: '—') . ' · ' . ($e['number'] ?: __('sin número', 'mad-oficina')) . ' · ' . date_i18n('j M Y', strtotime($e['issue_date'])) . ' · ' . Suppliers::money($e['total'], $e['currency'])); ?>
+                        <?php if ( (int) $e['id'] === (int) $g['keep'] ) echo ' <span class="madof-pill is-on">' . esc_html__('cuenta ahora', 'mad-oficina') . '</span>'; ?></td>
+                    <td><?php echo esc_html(trim(($e['source'] === 'gmail' ? 'Gmail' : ($e['source'] === 'drive' ? 'Drive' : __('Subida', 'mad-oficina'))) . ' · ' . ($e['sender'] ?: '') . ' · ' . ($e['received_at'] ? date_i18n('j M Y', strtotime($e['received_at'])) : ''), ' ·')); ?><br><small class="madof-muted"><?php echo esc_html((string) $e['filename']); ?></small></td>
+                    <td><?php if ( $e['drive_url'] ) : ?><a href="<?php echo esc_url($e['drive_url']); ?>" target="_blank" rel="noopener"><?php esc_html_e('Abrir', 'mad-oficina'); ?></a><?php else : ?><small class="madof-muted"><?php esc_html_e('moviéndolo…', 'mad-oficina'); ?></small><?php endif; ?></td>
+                    <td><?php echo AdminUi::form_open('expense_dup_keep', 'madof-inline'); ?><input type="hidden" name="group" value="<?php echo esc_attr($gk); ?>"><input type="hidden" name="expense_id" value="<?php echo (int) $e['id']; ?>"><button class="madof-btn is-small"><?php esc_html_e('Quedarme con esta', 'mad-oficina'); ?></button></form></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php echo AdminUi::form_open('expense_dup_dismiss', 'madof-inline'); ?><input type="hidden" name="group" value="<?php echo esc_attr($gk); ?>"><button class="madof-btn is-small is-ghost"><?php esc_html_e('No son duplicadas (cuentan las dos)', 'mad-oficina'); ?></button></form>
+    </section>
+    <?php endforeach; ?>
+    <?php if ( $done ) : ?>
+    <details class="madof-more"><summary><?php esc_html_e('Resueltas hace poco', 'mad-oficina'); ?></summary><ul>
+        <?php foreach ( array_reverse($done, true) as $g ) echo '<li>' . esc_html($g['folder'] . ' · ' . ($g['identical'] ? __('el mismo documento: copia descartada', 'mad-oficina') : sprintf(__('te quedaste con la #%d', 'mad-oficina'), $g['keep']))) . '</li>'; ?>
+    </ul></details>
+    <?php endif; ?>
 <?php elseif ( $tab === 'aside' ) : ?>
     <p class="description"><?php esc_html_e('Facturas a nombre de tus clientes u otras personas: no cuentan como gasto tuyo. Están en la carpeta «No son mías» del archivo por si alguna fuera tuya: ábrela y pulsa «Es mía».', 'mad-oficina'); ?></p>
     <?php $table(Expenses::all(['status' => 'not_mine']), true); ?>

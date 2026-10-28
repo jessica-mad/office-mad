@@ -43,6 +43,7 @@ return new class($core) implements MAD_Oficina_Module {
 
     public function intake(){ return new \MAD_Oficina\Suppliers\Intake($this->settings()); }
     public function watch(){ return new \MAD_Oficina\Suppliers\Watch($this->settings()); }
+    public function duplicates(){ return new \MAD_Oficina\Suppliers\Duplicates($this->intake()->archive_root()); }
 
     /* ==== Hooks ==== */
     public function init(){
@@ -50,10 +51,15 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('madoficina_order_done', ['MAD_Oficina\\Suppliers\\Intake', 'order_done'], 10, 4);
         add_action('madoficina_expense_registered', ['MAD_Oficina\\Suppliers\\Watch', 'on_registered']);
         add_action('madoficina_expense_registered', fn($id) => $this->intake()->payments_waiting((int) $id)); // a waiting proof of payment finds its invoice
+        add_action('madoficina_expense_registered', fn() => $this->duplicates()->scan(), 20);
 
         // Daily watch and leftovers to read (the cartero's tick every 10 min is the reliable clock).
         add_action(\MAD_Oficina\Suppliers\Intake::READ_HOOK, fn($id) => $this->intake()->process((int) $id));
-        $tick = function(){ $this->intake()->process_queued(); $this->watch()->run(); };
+        $tick = function(){
+            $this->intake()->process_queued(); $this->watch()->run();
+            // Duplicated invoices: looked for once an hour, and right after one is registered.
+            if ( ! get_transient('madof_dup_scan') ) { set_transient('madof_dup_scan', 1, HOUR_IN_SECONDS); $this->duplicates()->scan(); }
+        };
         add_action(self::CRON_HOOK, $tick);
         add_action('madoficina_tick', $tick);
         if ( ! wp_next_scheduled(self::CRON_HOOK) ) wp_schedule_event(time() + 600, 'hourly', self::CRON_HOOK);
@@ -88,7 +94,7 @@ return new class($core) implements MAD_Oficina_Module {
 
         add_action('wp_ajax_madof_expense_panel', [$this, 'ajax_expense_panel']);
         add_action('wp_ajax_madof_expense_decide', [$this, 'ajax_expense_decide']);
-        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice', 'expense_file'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
+        foreach ( ['supplier_save', 'supplier_merge', 'expense_bulk', 'expense_read_now', 'expense_save', 'expense_mine', 'expense_upload', 'suppliers_settings', 'expense_import', 'expense_reorganize', 'expense_link', 'expense_as_invoice', 'expense_file', 'expense_dup_keep', 'expense_dup_dismiss', 'expense_dup_scan'] as $a ) add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
     }
 
     public function admin_init(){}
@@ -217,6 +223,24 @@ return new class($core) implements MAD_Oficina_Module {
         \MAD_Oficina\Core\AdminUi::flash($notice, $type);
         wp_safe_redirect(add_query_arg(['page' => $this->menu_slug()] + $args, admin_url('admin.php')));
         exit;
+    }
+
+    public function handle_expense_dup_keep(){
+        $this->guard('expense_dup_keep');
+        $r = $this->duplicates()->keep(sanitize_key($_POST['group'] ?? ''), absint($_POST['expense_id'] ?? 0), $this->intake());
+        $this->back(['tab' => 'duplicates'], is_wp_error($r) ? $r->get_error_message() : __('Hecho: cuenta la que has elegido y vuelve a su trimestre; la otra queda en Duplicados como repetida.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+    }
+
+    public function handle_expense_dup_dismiss(){
+        $this->guard('expense_dup_dismiss');
+        $r = $this->duplicates()->dismiss(sanitize_key($_POST['group'] ?? ''), $this->intake());
+        $this->back(['tab' => 'duplicates'], is_wp_error($r) ? $r->get_error_message() : __('Entendido: no son duplicadas. Cuentan las dos y cada una vuelve a su sitio.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+    }
+
+    public function handle_expense_dup_scan(){
+        $this->guard('expense_dup_scan');
+        $r = $this->duplicates()->scan();
+        $this->back(['tab' => 'duplicates'], sprintf(__('Revisado: %1$d repetidas eliminadas (el mismo documento) y %2$d posibles duplicadas para que elijas.', 'mad-oficina'), $r['identical'], $r['grouped']));
     }
 
     public function handle_supplier_save(){
