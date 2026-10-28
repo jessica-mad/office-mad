@@ -268,3 +268,20 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-new-date{display:block;max-width:280px;margin:8px 0 0 28px}
 .madof-search input[type=search]{flex:1 1 320px;min-width:0;max-width:560px}
 .madof-rectify-lines tr.is-removed td:not(:last-child){opacity:.45;text-decoration:line-through}
+
+/* Invoice states: one colour each (text contrast AA on every background) */
+.madof-pill.madof-st{border-width:1px;border-style:solid}
+.madof-pill.madof-st-draft{background:#EDEDED;color:#3A3A3A;border-style:dashed;border-color:#8A8A8A}
+.madof-pill.madof-st-issued{background:#fff;color:var(--k);border-color:var(--k)}
+.madof-pill.madof-st-sent{background:var(--k);color:var(--y);border-color:var(--k)}
+.madof-pill.madof-st-cancelled{background:#EDEDED;color:#555;border-color:#BDBDBD;text-decoration:line-through}
+.madof-pill.madof-st-paid{background:#DDF3E4;color:#14532D;border-color:#2F855A}
+.madof-pill.madof-st-unpaid{background:var(--y);color:var(--k);border-color:#B07A0A}
+.madof-pill.madof-st-late{background:#FDE2E1;color:#8B1A1A;border-color:#C53030}
+.madof-pill.madof-st-rect{background:#ECE6F7;color:#3F2A70;border-color:#6B4FA8}
+.madof-pill.madof-st-fixed{background:var(--g);color:var(--k);border-color:#8A8A6A}
+.madof-peek{white-space:nowrap;display:inline-flex;gap:4px;align-items:center}
+.madof-peek-dialog{width:min(860px,calc(100vw - 32px));max-height:calc(100vh - 32px);padding:16px;border:2px solid var(--k);border-radius:22px;background:var(--c)}
+.madof-peek-dialog::backdrop{background:rgba(11,11,11,.55)}
+.madof-peek-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.madof-peek-head span{display:flex;gap:8px}

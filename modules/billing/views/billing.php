@@ -25,12 +25,20 @@ $heads = [
 $years = Invoices::years();
 $year = isset($_GET['year']) ? absint($_GET['year']) : ($years[0] ?? (int) current_time('Y'));
 $money = fn($n) => Money::format($n);
+// One colour per state, so a glance is enough: draft grey, issued white, sent black,
+// collected green, to collect amber, overdue red, cancelled struck through.
 $status_pill = function($inv){
     $label = Invoices::STATUSES[$inv['status']] ?? $inv['status'];
-    $cls = $inv['status'] === 'draft' ? '' : 'is-on';
-    $out = '<span class="madof-pill ' . $cls . '">' . esc_html__($label, 'mad-oficina') . '</span>';
-    if ( in_array($inv['status'], ['issued', 'sent'], true) ) $out .= ' <span class="madof-pill ' . ($inv['paid'] ? 'is-on' : '') . '">' . ($inv['paid'] ? esc_html__('Cobrada', 'mad-oficina') : esc_html__('Sin cobrar', 'mad-oficina')) . '</span>';
-    if ( ! $inv['paid'] && in_array($inv['status'], ['issued', 'sent'], true) && $inv['series'] !== 'AR' && ! empty($inv['due_date']) && $inv['due_date'] < current_time('Y-m-d') ) $out .= ' <span class="madof-pill is-alert">' . esc_html__('Vencida', 'mad-oficina') . '</span>';
+    $pill = fn($cls, $text) => '<span class="madof-pill madof-st madof-st-' . $cls . '">' . esc_html($text) . '</span>';
+    $out = $pill($inv['status'], __($label, 'mad-oficina'));
+    $issued = in_array($inv['status'], ['issued', 'sent'], true);
+    $zero = (float) $inv['total'] <= 0;
+    if ( $issued && ! $zero ) {
+        $late = ! $inv['paid'] && $inv['series'] !== 'AR' && ! empty($inv['due_date']) && $inv['due_date'] < current_time('Y-m-d');
+        $out .= ' ' . ($inv['paid'] ? $pill('paid', __('Cobrada', 'mad-oficina')) : ($late ? $pill('late', __('Vencida', 'mad-oficina')) : $pill('unpaid', __('Sin cobrar', 'mad-oficina'))));
+    }
+    if ( $inv['series'] === 'R' ) $out .= ' ' . $pill('rect', __('Rectificativa', 'mad-oficina'));
+    elseif ( $issued && ( \MAD_Oficina\Billing\Issuing::corrected_of((int) $inv['id']) ) ) $out .= ' ' . $pill('fixed', __('Corregida', 'mad-oficina'));
     return $out;
 };
 ?>
@@ -389,7 +397,7 @@ $status_pill = function($inv){
     </form>
     <?php endif; ?>
     <table class="madof-table">
-        <thead><tr><?php if ( $drafts_here ) echo '<th><span class="screen-reader-text">' . esc_html__('Marcar', 'mad-oficina') . '</span></th>'; ?><th><?php esc_html_e('Número', 'mad-oficina'); ?></th><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Estado', 'mad-oficina'); ?></th></tr></thead>
+        <thead><tr><?php if ( $drafts_here ) echo '<th><span class="screen-reader-text">' . esc_html__('Marcar', 'mad-oficina') . '</span></th>'; ?><th><?php esc_html_e('Número', 'mad-oficina'); ?></th><th><?php esc_html_e('Fecha', 'mad-oficina'); ?></th><th><?php esc_html_e('Cliente', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Estado', 'mad-oficina'); ?></th><th><span class="screen-reader-text"><?php esc_html_e('Vista previa', 'mad-oficina'); ?></span></th></tr></thead>
         <tbody>
         <?php foreach ( $list as $inv ) : ?>
             <tr>
@@ -401,10 +409,44 @@ $status_pill = function($inv){
                 <td><?php echo esc_html($money($inv['base'])); ?></td>
                 <td><?php echo esc_html($money($inv['total'])); ?></td>
                 <td><?php echo $status_pill($inv); ?></td>
+                <td><button type="button" class="madof-link madof-peek" data-invoice="<?php echo (int) $inv['id']; ?>" data-open="<?php echo esc_url($base . ($inv['status'] === 'draft' && $inv['series'] !== 'AR' ? '&edit=' : '&invoice=') . $inv['id']); ?>" title="<?php esc_attr_e('Vista previa', 'mad-oficina'); ?>"><?php echo AdminUi::icon('eye'); ?> <?php esc_html_e('Ver', 'mad-oficina'); ?></button></td>
             </tr>
         <?php endforeach; ?>
         </tbody>
     </table>
+    <dialog class="madof-peek-dialog" aria-labelledby="madof-peek-title">
+        <div class="madof-peek-head">
+            <strong id="madof-peek-title"><?php esc_html_e('Vista previa', 'mad-oficina'); ?></strong>
+            <span><a class="madof-btn is-small" data-peek-open href="#"><?php esc_html_e('Abrir', 'mad-oficina'); ?></a>
+            <button type="button" class="madof-btn is-small is-ghost" data-peek-close><?php esc_html_e('Cerrar', 'mad-oficina'); ?></button></span>
+        </div>
+        <div class="madof-a4-frame" data-a4><iframe class="madof-a4" title="<?php esc_attr_e('Vista previa de la factura', 'mad-oficina'); ?>"></iframe></div>
+    </dialog>
+    <script>
+    (function(){
+        var dlg = document.querySelector('.madof-peek-dialog');
+        if (!dlg) return;
+        var frame = dlg.querySelector('iframe'), box = dlg.querySelector('[data-a4]'), title = dlg.querySelector('#madof-peek-title'), open = dlg.querySelector('[data-peek-open]');
+        var fit = function(){ var s = Math.min(1, box.clientWidth / 794), h = 1123; try { h = Math.max(h, frame.contentDocument.documentElement.scrollHeight); } catch(e){} frame.style.height = h + 'px'; frame.style.transform = 'scale(' + s + ')'; box.style.height = Math.ceil(h * s) + 'px'; };
+        frame.addEventListener('load', function(){ fit(); setTimeout(fit, 600); });
+        document.addEventListener('click', function(e){
+            var b = e.target.closest('.madof-peek');
+            if (!b) return;
+            open.href = b.dataset.open;
+            title.textContent = <?php echo wp_json_encode(__('Cargando…', 'mad-oficina')); ?>;
+            frame.srcdoc = '';
+            dlg.showModal(); fit();
+            var data = new FormData();
+            data.set('action', 'madof_billing_peek'); data.set('invoice', b.dataset.invoice); data.set('_wpnonce', <?php echo wp_json_encode(wp_create_nonce('madof_billing_peek')); ?>);
+            fetch(<?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>, { method: 'POST', body: data, credentials: 'same-origin' })
+                .then(function(r){ return r.json(); })
+                .then(function(r){ if (!r.success) { title.textContent = (r.data && r.data.message) || '—'; return; } title.textContent = r.data.title; frame.srcdoc = r.data.html; });
+        });
+        dlg.querySelector('[data-peek-close]').addEventListener('click', function(){ dlg.close(); });
+        dlg.addEventListener('click', function(e){ if (e.target === dlg) dlg.close(); });
+        window.addEventListener('resize', function(){ if (dlg.open) fit(); });
+    })();
+    </script>
     <?php endif; ?>
 <?php endif; ?>
 </div>

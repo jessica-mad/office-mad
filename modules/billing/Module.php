@@ -52,6 +52,7 @@ return new class($core) implements MAD_Oficina_Module {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('wp_ajax_madof_billing_preview', [$this, 'ajax_billing_preview']);
+        add_action('wp_ajax_madof_billing_peek', [$this, 'ajax_billing_peek']);
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
         add_action('rest_api_init', [$this, 'register_hooks']);
 
@@ -355,6 +356,19 @@ return new class($core) implements MAD_Oficina_Module {
         wp_send_json_success([
             'html' => \MAD_Oficina\Billing\InvoicePdf::preview_html($inv, \MAD_Oficina\Billing\Issuing::issuer_snapshot($this->settings())),
             'number' => $number, 'total' => \MAD_Oficina\Billing\Money::format($inv['total']),
+        ]);
+    }
+
+    /** «Ver» in the invoice list: the invoice drawn as it is (or will go out), without opening it. */
+    public function ajax_billing_peek(){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_send_json_error(null, 403);
+        check_ajax_referer('madof_billing_peek');
+        $inv = \MAD_Oficina\Billing\Invoices::get(absint($_POST['invoice'] ?? 0));
+        if ( ! $inv ) wp_send_json_error(['message' => __('Esa factura no existe.', 'mad-oficina')]);
+        $number = \MAD_Oficina\Billing\Invoices::preview_number($inv);
+        wp_send_json_success([
+            'html' => \MAD_Oficina\Billing\InvoicePdf::preview_html($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings())),
+            'title' => trim(($inv['number'] ?: ($number ? sprintf(__('Borrador · será la %s', 'mad-oficina'), $number) : __('Borrador', 'mad-oficina'))) . ' · ' . $inv['client_name'] . ' · ' . \MAD_Oficina\Billing\Money::format($inv['total'])),
         ]);
     }
 
