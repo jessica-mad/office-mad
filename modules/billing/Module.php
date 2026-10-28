@@ -357,8 +357,15 @@ return new class($core) implements MAD_Oficina_Module {
             $inv = \MAD_Oficina\Billing\Invoices::get($saved);
             if ( $inv['series'] === 'AR' ) $this->back(['edit' => $saved], __('Las facturas de Argentina se emiten en la plataforma argentina. Márcala como emitida allí.', 'mad-oficina'), 'error');
             $pair = \MAD_Oficina\Billing\Issuing::replacement_of($saved);
-            $ids = $pair && $pair['rectify'] && $pair['new'] ? array_filter([$pair['rectify']['status'] === 'draft' ? $pair['rectify']['id'] : 0, $pair['new']['status'] === 'draft' ? $pair['new']['id'] : 0]) : [$saved];
-            $this->back(['review' => implode(',', $ids)], __('Borrador guardado. Así es como saldrá: revísalo y pulsa «Emitir y enviar».', 'mad-oficina'));
+            if ( $pair && $pair['rectify'] ) {
+                $ids = array_filter([$pair['rectify']['status'] === 'draft' ? $pair['rectify']['id'] : 0, $pair['new'] && $pair['new']['status'] === 'draft' ? $pair['new']['id'] : 0]);
+                $this->back(['review' => implode(',', $ids)], __('Borrador guardado. Así es como saldrán: revísalas y pulsa «Emitir y enviar».', 'mad-oficina'));
+            }
+            if ( $inv['rectifies_id'] ) $this->back(['review' => $saved], __('Borrador guardado. Así es como saldrá: revísala y pulsa «Emitir y enviar».', 'mad-oficina'));
+            // An ordinary invoice: drawn under the editor, on the same screen.
+            \MAD_Oficina\Core\AdminUi::flash(__('Borrador guardado. Abajo la tienes tal como saldrá: revísala y pulsa «Emitir y enviar».', 'mad-oficina'));
+            wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'edit' => $saved], admin_url('admin.php')) . '#enviar');
+            exit;
         }
         if ( $do === 'schedule' ) {
             $r = \MAD_Oficina\Billing\Calendar::schedule($saved, sanitize_text_field($p['send_on'] ?? ''), ! empty($p['send_alone']));

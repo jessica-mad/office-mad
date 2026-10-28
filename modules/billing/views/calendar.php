@@ -76,6 +76,7 @@ $done = array_sum(array_map(fn($r) => in_array($r['state'], ['issued', 'sent'], 
                 <?php endif; ?>
                 <?php if ( $inv && $inv['status'] === 'draft' ) : ?>
                     <a class="madof-btn is-small is-ghost" href="<?php echo esc_url($base . '&edit=' . $inv['id']); ?>"><?php esc_html_e('Abrir', 'mad-oficina'); ?></a>
+                    <?php if ( $inv['series'] !== 'AR' && $inv['status'] === 'draft' ) : ?><a class="madof-btn is-small" href="<?php echo esc_url($base . '&edit=' . $inv['id'] . '#enviar'); ?>"><?php esc_html_e('Ver y enviar', 'mad-oficina'); ?></a><?php endif; ?>
                     <?php echo AdminUi::form_open('billing_postpone', 'madof-inline'); ?>
                         <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>"><input type="hidden" name="days" value="7">
                         <button class="madof-link"><?php esc_html_e('Posponer 7 días', 'mad-oficina'); ?></button></form>

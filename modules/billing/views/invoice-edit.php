@@ -126,11 +126,11 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
                 <span class="description"><?php esc_html_e('Serie Argentina: la factura se emite en la plataforma argentina. Guárdala y, desde su ficha, márcala como emitida allí.', 'mad-oficina'); ?></span>
             <?php else : ?>
                 <button class="madof-btn is-ghost" name="do" value="test"><?php esc_html_e('Enviarme una prueba', 'mad-oficina'); ?></button>
-                <button class="madof-btn" name="do" value="issue"><?php esc_html_e('Enviar ahora', 'mad-oficina'); ?></button>
+                <button class="madof-btn" name="do" value="issue"><?php esc_html_e('Guardar y ver cómo queda', 'mad-oficina'); ?></button>
             <?php endif; ?>
             <?php if ( $draft ) : ?><a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $draft['id']), 'madof_billing_pdf_' . $draft['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver PDF (último guardado)', 'mad-oficina'); ?></a><?php endif; ?>
         </div>
-        <p class="description"><?php esc_html_e('«Enviar ahora» guarda el borrador y te enseña cómo saldrá, con su número y el email. Desde ahí la emites y sale desde tu Gmail.', 'mad-oficina'); ?></p>
+        <p class="description"><?php esc_html_e('Abajo la ves tal como saldrá, con su número y el email: «Emitir y enviar» la manda desde tu Gmail, o «Solo emitir» si la envías tú.', 'mad-oficina'); ?></p>
         <?php if ( ! $is_ar ) : $when = $draft ? \MAD_Oficina\Billing\Calendar::scheduled_for($draft) : null; ?>
         <section class="madof-card madof-schedule">
             <span class="madof-kicker"><?php esc_html_e('O programar el envío', 'mad-oficina'); ?></span>
@@ -157,6 +157,13 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <input type="hidden" name="invoice_id" value="<?php echo (int) $draft['id']; ?>">
         <button class="madof-btn is-small is-ghost" onclick="return confirm('<?php echo esc_js(__('¿Borrar este borrador? Si lo preparó el calendario, no vuelve solo.', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar borrador', 'mad-oficina'); ?></button>
     </form>
+    <?php endif; ?>
+
+    <?php if ( $draft && ! $is_ar && empty($draft['rectifies_id']) ) : // as it will go out, and sent from here ?>
+    <div id="enviar" class="madof-edit-send">
+        <p class="madof-warn" data-stale hidden role="status"><?php esc_html_e('Has cambiado algo arriba: pulsa «Guardar y ver cómo queda» para ver la factura con los cambios antes de enviarla.', 'mad-oficina'); ?></p>
+        <?php $send_ids = [(int) $draft['id']]; $settings = $settings ?? []; include __DIR__ . '/invoice-send.php'; ?>
+    </div>
     <?php endif; ?>
 
     <script>
@@ -199,6 +206,15 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         form.querySelector('[data-total=total]').textContent = fmt.format(round(base + vat - irpf));
       };
       form.addEventListener('input', update);
+      // The drawing below is of the last save: changes here must be saved before sending it.
+      var stale = function () {
+        var w = document.querySelector('[data-stale]');
+        if (!w) return;
+        w.hidden = false;
+        document.querySelectorAll('.madof-edit-send .madof-send button[name=mode]').forEach(function (b) { b.disabled = true; });
+      };
+      form.addEventListener('input', stale);
+      form.addEventListener('change', stale);
       form.querySelector('.madof-add-line').addEventListener('click', function () {
         var row = body.rows[body.rows.length - 1].cloneNode(true);
         [].forEach.call(row.querySelectorAll('input[type=hidden], small'), function (el) { el.remove(); }); // a new line is not an agreement's
