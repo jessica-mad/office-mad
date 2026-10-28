@@ -120,7 +120,7 @@ final class InvoicePdf {
         ob_start(); ?>
 <!doctype html><html lang="es"><head><meta charset="utf-8"><style>
 <?php echo $font(400, 'Montserrat_400Regular.ttf') . $font(500, 'Montserrat_500Medium.ttf') . $font(600, 'Montserrat_600SemiBold.ttf') . $font(700, 'Montserrat_700Bold.ttf') . $font(800, 'Montserrat_800ExtraBold.ttf'); ?>
-@page{margin:14mm 16mm 30mm 16mm}
+@page{margin:14mm 16mm <?php echo $is_r ? 16 : 30; ?>mm 16mm} /* a rectifying one carries its contact in the content, not in the foot */
 body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-height:1.35}
 .header{width:100%;margin:0 0 9mm}
 .meta{margin:0 0 4mm;font-size:12pt}
@@ -141,7 +141,7 @@ body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-heig
 .concepts td{padding:4mm 2mm;border-bottom:1px solid #0B0B0B;vertical-align:top}
 .concepts td.amt{text-align:right;white-space:nowrap;width:35mm}
 .concepts tr:last-child td{border-bottom:3px solid #0B0B0B}
-.bottom{width:100%;border-collapse:collapse;margin-top:0}
+.bottom{width:100%;border-collapse:collapse;margin-top:0;page-break-inside:avoid}
 .bottom td{vertical-align:top;padding:0}
 .pay h3{font-weight:700;font-size:12pt;margin:4mm 0 2mm}
 .pay p{margin:0 0 .6mm;font-size:8.8pt}
@@ -154,7 +154,9 @@ body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-heig
 .contact strong{display:block;font-weight:800}
 .contact.in-flow{position:static;margin-top:4mm;text-align:left;font-size:8.6pt}
 body.is-r .concepts{margin-top:6mm}
-body.is-r .header{margin-bottom:6mm}
+body.is-r .header{margin-bottom:6mm;width:88%}
+body.is-r .meta{font-size:10.5pt}
+body.is-r .parties{margin:3mm 0}
 .rect-band{background:#FFC400;color:#0B0B0B;font-weight:800;font-size:11pt;text-transform:uppercase;letter-spacing:.12em;padding:2.2mm 4mm;margin:-5mm 0 5mm}
 .rect-box{width:100%;border-collapse:collapse;margin:0 0 4mm;border:2px solid #0B0B0B}
 .rect-box th{width:38mm;text-align:left;font-weight:800;font-size:9pt;padding:1.6mm 3mm;background:#F2F2DC;vertical-align:top;border-bottom:1px solid #BDBDBD}
