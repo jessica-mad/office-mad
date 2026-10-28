@@ -82,14 +82,12 @@ $status_pill = function($inv){
                 <button class="madof-btn is-ghost" onclick="return confirm('<?php echo esc_js(__('¿Borrar este borrador?', 'mad-oficina')); ?>')"><?php esc_html_e('Borrar borrador', 'mad-oficina'); ?></button>
             </form>
         <?php endif; ?>
-        <?php if ( $inv['number'] && $inv['series'] === 'F' ) : echo AdminUi::form_open('billing_rectify', 'madof-inline'); ?>
-            <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
-            <button class="madof-btn is-ghost"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></button>
-        </form>
+        <?php if ( $inv['number'] && $inv['series'] === 'F' ) : ?>
+        <a class="madof-btn is-ghost" href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-facturacion&rectify=' . (int) $inv['id'])); ?>"><?php esc_html_e('Rectificar', 'mad-oficina'); ?></a>
         <?php echo AdminUi::form_open('billing_new_details', 'madof-inline'); ?>
             <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
             <button class="madof-btn is-ghost" title="<?php esc_attr_e('Prepara una rectificativa que anula esta factura y una factura nueva con los mismos conceptos y los datos fiscales actuales del cliente. No se emite ni se envía nada hasta que pulses «Emitir».', 'mad-oficina'); ?>"
-                onclick="return confirm('<?php echo esc_js(__('¿Preparo la rectificativa que anula esta factura y una nueva con los datos fiscales actuales del cliente? Quedan como borradores.', 'mad-oficina')); ?>')"><?php esc_html_e('Rehacer con los datos fiscales nuevos', 'mad-oficina'); ?></button>
+                onclick="return confirm('<?php echo esc_js(__('¿Preparo la rectificativa que anula esta factura y una nueva con los datos fiscales actuales del cliente? Antes de emitir nada te enseño cómo quedan las dos.', 'mad-oficina')); ?>')"><?php esc_html_e('Rehacer con los datos fiscales nuevos', 'mad-oficina'); ?></button>
         </form><?php endif; ?>
         </div>
         <?php if ( $err = get_transient('madof_new_details_error_' . $inv['id']) ) : ?><p class="madof-warn" role="alert"><strong><?php esc_html_e('«Rehacer con los datos fiscales nuevos» no se ha hecho:', 'mad-oficina'); ?></strong> <?php echo esc_html($err); ?></p><?php endif; ?>

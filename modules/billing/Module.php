@@ -46,7 +46,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -353,11 +353,12 @@ return new class($core) implements MAD_Oficina_Module {
         }
         $do = sanitize_key($p['do'] ?? 'save');
         if ( $do === 'issue' ) {
-            $approval = $this->issuing()->request($saved);
-            if ( is_wp_error($approval) ) $this->back(['edit' => $saved], $approval->get_error_message(), 'error');
-            \MAD_Oficina\Core\AdminUi::flash(__('Aquí la tienes: pulsa «Aprobar» y se numera, se guarda en Drive y sale desde tu Gmail. También te ha llegado a Chat.', 'mad-oficina'));
-            wp_safe_redirect(admin_url('admin.php?page=mad-oficina-bandeja#approval-' . (int) $approval));
-            exit;
+            // Seen as it will go out, with its number, and sent from there.
+            $inv = \MAD_Oficina\Billing\Invoices::get($saved);
+            if ( $inv['series'] === 'AR' ) $this->back(['edit' => $saved], __('Las facturas de Argentina se emiten en la plataforma argentina. Márcala como emitida allí.', 'mad-oficina'), 'error');
+            $pair = \MAD_Oficina\Billing\Issuing::replacement_of($saved);
+            $ids = $pair && $pair['rectify'] && $pair['new'] ? array_filter([$pair['rectify']['status'] === 'draft' ? $pair['rectify']['id'] : 0, $pair['new']['status'] === 'draft' ? $pair['new']['id'] : 0]) : [$saved];
+            $this->back(['review' => implode(',', $ids)], __('Borrador guardado. Así es como saldrá: revísalo y pulsa «Emitir y enviar».', 'mad-oficina'));
         }
         if ( $do === 'schedule' ) {
             $r = \MAD_Oficina\Billing\Calendar::schedule($saved, sanitize_text_field($p['send_on'] ?? ''), ! empty($p['send_alone']));
@@ -391,9 +392,54 @@ return new class($core) implements MAD_Oficina_Module {
             $this->back(['invoice' => $id], sprintf(__('No he podido rehacer la factura: %s', 'mad-oficina'), $r->get_error_message()), 'error');
         }
         delete_transient('madof_new_details_error_' . $id);
-        $this->back(['edit' => $r['new']], ! empty($r['existing'])
-            ? __('Ya estaban preparados: esta es la factura nueva. Arriba tienes el enlace a la rectificativa.', 'mad-oficina')
-            : __('Preparados dos borradores, sin número hasta que los emitas: esta factura nueva con los datos nuevos y la rectificativa que anula la original (enlace arriba). La factura original no cambia nunca: queda anulada cuando emitas la rectificativa.', 'mad-oficina'));
+        $ids = array_filter([$r['rectify'], $r['new']], fn($i) => ($x = \MAD_Oficina\Billing\Invoices::get($i)) && $x['status'] === 'draft' && ! $x['number']);
+        if ( ! $ids ) $this->back(['invoice' => $id], __('Ya estaban emitidas las dos: la rectificativa y la nueva.', 'mad-oficina'));
+        $this->back(['review' => implode(',', $ids)], __('Así quedan la rectificativa que anula la original y la factura nueva con los datos actuales. Todavía no se ha emitido nada: revísalas y pulsa «Emitir y enviar las dos». La original no cambia nunca.', 'mad-oficina'));
+    }
+
+    /** «Rectificar»: the differences she wrote become a rectifying draft, shown right below. */
+    public function handle_billing_rectify_lines(){
+        $this->guard('billing_rectify_lines');
+        $p = wp_unslash($_POST);
+        $id = absint($p['invoice_id'] ?? 0);
+        $draft = absint($p['draft_id'] ?? 0);
+        $state = ['lines' => (array) ($p['lines'] ?? []), 'added' => array_values(array_filter((array) ($p['added'] ?? []), 'is_array')), 'reason' => sanitize_text_field($p['reason'] ?? '')];
+        $r = ! empty($p['whole'])
+            ? ( trim($state['reason']) === '' ? new \WP_Error('madof_inv_reason', __('Escribe el motivo de la rectificación: va impreso en la factura.', 'mad-oficina'))
+                : $this->issuing()->rectify($id, '', sanitize_text_field($p['date'] ?? '') ?: null, 0, $state['reason'], $draft) )
+            : $this->issuing()->rectify_lines($id, $state['lines'], $state['added'], $state['reason'], sanitize_text_field($p['date'] ?? ''), $draft);
+        if ( is_wp_error($r) ) $this->back(['rectify' => $id] + ($draft ? ['draft' => $draft] : []), $r->get_error_message(), 'error');
+        if ( empty($p['whole']) ) set_transient('madof_rectify_form_' . (int) $r, $state, DAY_IN_SECONDS);
+        else delete_transient('madof_rectify_form_' . (int) $r);
+        \MAD_Oficina\Core\AdminUi::flash(__('Así queda la rectificativa. Todavía no se ha emitido: si está bien, pulsa «Emitir y enviar».', 'mad-oficina'));
+        wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r], admin_url('admin.php')) . '#rectificar');
+        exit;
+    }
+
+    /** «Emitir y enviar» from the review: numbered, archived and sent, no inbox in between. */
+    public function handle_billing_send(){
+        $this->guard('billing_send');
+        $p = wp_unslash($_POST);
+        $send = ($p['mode'] ?? '') === 'send';
+        $items = [];
+        foreach ( (array) ($p['docs'] ?? []) as $id => $d ) {
+            if ( ! is_array($d) ) continue;
+            $inv = \MAD_Oficina\Billing\Invoices::get(absint($id));
+            $to = sanitize_text_field($d['to'] ?? '');
+            if ( $inv && ! empty($d['save_email']) && is_email(trim($to)) ) \MAD_Oficina\Billing\Profiles::set_email((int) $inv['profile_id'], trim($to));
+            $items[absint($id)] = ['expected' => sanitize_text_field($d['expected'] ?? ''), 'issue_date' => sanitize_text_field($d['issue_date'] ?? ''), 'send' => $send,
+                'to' => $to, 'subject' => sanitize_text_field($d['subject'] ?? ''), 'body' => sanitize_textarea_field($d['body'] ?? '')];
+        }
+        $back = wp_get_referer() ?: add_query_arg(['page' => $this->menu_slug(), 'review' => implode(',', array_keys($items))], admin_url('admin.php'));
+        if ( ! $items ) { \MAD_Oficina\Core\AdminUi::flash(__('No hay nada que enviar.', 'mad-oficina'), 'error'); wp_safe_redirect($back); exit; }
+        $r = $this->issuing()->send_now($items, get_current_user_id());
+        if ( $r['error'] ) {
+            \MAD_Oficina\Core\AdminUi::flash(trim(implode(' ', $r['done']) . ' ' . sprintf(__('No se ha podido seguir: %s', 'mad-oficina'), $r['error'])), 'error');
+            wp_safe_redirect($r['done'] ? add_query_arg(['page' => $this->menu_slug()], admin_url('admin.php')) : $back);
+            exit;
+        }
+        $last = array_key_last($items);
+        $this->back(['invoice' => $last], implode(' ', $r['done']));
     }
 
     public function handle_billing_rectify(){
@@ -660,6 +706,21 @@ return new class($core) implements MAD_Oficina_Module {
     public function render_settings_page(){
         if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_die(esc_html__('No tienes permisos suficientes.', 'mad-oficina'));
         $settings = $this->settings();
+        if ( isset($_GET['review']) ) {
+            $issuing = $this->issuing();
+            $send_ids = array_filter(array_map('absint', explode(',', (string) $_GET['review'])));
+            include __DIR__ . '/views/invoice-review.php';
+            return;
+        }
+        if ( isset($_GET['rectify']) ) {
+            $issuing = $this->issuing();
+            $original = \MAD_Oficina\Billing\Invoices::get(absint($_GET['rectify']));
+            if ( ! $original || ! $original['number'] || $original['series'] !== 'F' ) wp_die(esc_html__('Solo se rectifican facturas emitidas de la serie F.', 'mad-oficina'));
+            $rect_draft = isset($_GET['draft']) ? \MAD_Oficina\Billing\Invoices::get(absint($_GET['draft'])) : null;
+            if ( $rect_draft && ((int) $rect_draft['rectifies_id'] !== (int) $original['id'] || $rect_draft['status'] !== 'draft' || $rect_draft['number']) ) $rect_draft = null;
+            include __DIR__ . '/views/invoice-rectify.php';
+            return;
+        }
         if ( isset($_GET['edit']) ) {
             $issuing = $this->issuing();
             $draft = $_GET['edit'] === 'new' ? null : \MAD_Oficina\Billing\Invoices::get(absint($_GET['edit']));

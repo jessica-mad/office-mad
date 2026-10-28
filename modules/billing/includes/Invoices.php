@@ -61,6 +61,17 @@ final class Invoices {
         return $series === 'R' ? sprintf('R-%s-%02d', $yy, $seq) : sprintf('%s-%03d', $yy, $seq);
     }
 
+    /**
+     * The number a draft will take if it is issued now (on its date): shown wherever it is
+     * about to be sent, so what goes out is never a surprise. Issuing checks it again.
+     */
+    public static function preview_number(array $inv, $issue_date = null){
+        if ( $inv['number'] ) return $inv['number'];
+        if ( ! in_array($inv['series'], self::FISCAL, true) ) return '';
+        $year = (int) substr($issue_date ?: $inv['issue_date'] ?: current_time('Y-m-d'), 0, 4);
+        return self::format_number($inv['series'], $year, self::next_seq($inv['series'], $year));
+    }
+
     /** Next free sequence (no gaps, never reused). */
     public static function next_seq($series, $year){
         global $wpdb;

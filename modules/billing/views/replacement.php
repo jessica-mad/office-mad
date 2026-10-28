@@ -23,7 +23,9 @@ $rep_drafts = array_filter([$rep['rectify'], $rep['new']], fn($i) => $i && $i['s
         <?php echo $rep_item($rep['rectify'], __('Rectificativa que la anula (con los datos antiguos)', 'mad-oficina')); ?>
         <?php echo $rep_item($rep['new'], __('Factura nueva (con los datos nuevos)', 'mad-oficina')); ?>
     </ul>
-    <p class="madof-muted"><?php echo $rep_drafts
-        ? esc_html__('Falta emitir lo que está en borrador: abre cada uno y pulsa «Enviar ahora» (te pide aprobar en la bandeja, donde eliges si se envía al cliente). Al emitirse, cada una recibe su número.', 'mad-oficina')
-        : esc_html__('Las dos están emitidas: la original queda anulada por la rectificativa.', 'mad-oficina'); ?></p>
+    <?php if ( $rep_drafts && $here ) : ?>
+        <p><a class="madof-btn" href="<?php echo esc_url($rep_base . '&review=' . implode(',', array_map(fn($i) => (int) $i['id'], $rep_drafts))); ?>"><?php echo esc_html(count($rep_drafts) > 1 ? __('Ver cómo quedan y enviar las dos', 'mad-oficina') : __('Ver cómo queda y enviar', 'mad-oficina')); ?></a></p>
+    <?php elseif ( ! $rep_drafts ) : ?>
+        <p class="madof-muted"><?php esc_html_e('Las dos están emitidas: la original queda anulada por la rectificativa.', 'mad-oficina'); ?></p>
+    <?php endif; ?>
 </section>

@@ -60,6 +60,9 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <input type="hidden" name="profile_id" value="<?php echo (int) $profile['id']; ?>">
         <?php endif; ?>
         <?php if ( ! empty($draft['series']) && $draft['series'] === 'R' ) : ?><input type="hidden" name="series" value="R"><?php endif; ?>
+        <?php if ( ! $is_ar && ($will = $draft ? Invoices::preview_number($draft) : Invoices::preview_number(['number' => null, 'series' => 'F', 'issue_date' => $issue])) ) : ?>
+            <p class="madof-next-number"><span class="madof-kicker"><?php esc_html_e('Número', 'mad-oficina'); ?></span> <?php echo esc_html(sprintf(__('Si la emites ahora será la %1$s %2$s.', 'mad-oficina'), ($draft['series'] ?? '') === 'R' ? __('rectificativa', 'mad-oficina') : __('factura', 'mad-oficina'), $will)); ?></p>
+        <?php endif; ?>
         <section class="madof-card">
             <span class="madof-kicker"><?php esc_html_e('Para', 'mad-oficina'); ?></span>
             <?php if ( $draft && ! empty($draft['rectifies_id']) ) : // a rectifying invoice goes to the details the original was issued with ?>
@@ -111,6 +114,9 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
                 <tr><th><?php esc_html_e('IRPF', 'mad-oficina'); ?></th><td data-total="irpf">—</td></tr>
                 <tr class="is-total"><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><td data-total="total">—</td></tr>
             </table>
+            <?php if ( ($draft['series'] ?? '') === 'R' ) : ?>
+            <label><?php esc_html_e('Motivo de la rectificación (va impreso en la factura)', 'mad-oficina'); ?><input type="text" name="rectify_reason" maxlength="500" value="<?php echo esc_attr((string) ($draft['rectify_reason'] ?? '')); ?>"></label>
+            <?php endif; ?>
             <label><?php esc_html_e('Notas internas (no salen en la factura)', 'mad-oficina'); ?><textarea name="notes" rows="2"><?php echo esc_textarea((string) ($draft['notes'] ?? '')); ?></textarea></label>
         </section>
 
@@ -124,7 +130,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
             <?php endif; ?>
             <?php if ( $draft ) : ?><a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $draft['id']), 'madof_billing_pdf_' . $draft['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver PDF (último guardado)', 'mad-oficina'); ?></a><?php endif; ?>
         </div>
-        <p class="description"><?php esc_html_e('«Enviar ahora» te lleva a la bandeja con la factura lista: al pulsar «Aprobar» se le da el número (así nunca quedan huecos), se guarda en Drive y sale desde tu Gmail. Antes de aprobar puedes cambiar el texto del email.', 'mad-oficina'); ?></p>
+        <p class="description"><?php esc_html_e('«Enviar ahora» guarda el borrador y te enseña cómo saldrá, con su número y el email. Desde ahí la emites y sale desde tu Gmail.', 'mad-oficina'); ?></p>
         <?php if ( ! $is_ar ) : $when = $draft ? \MAD_Oficina\Billing\Calendar::scheduled_for($draft) : null; ?>
         <section class="madof-card madof-schedule">
             <span class="madof-kicker"><?php esc_html_e('O programar el envío', 'mad-oficina'); ?></span>

@@ -108,6 +108,10 @@ final class Issuing {
             'client_address' => $profile['address'], 'client_city' => $profile['city'], 'client_email' => $profile['email'],
             'vat_rate' => $vat, 'irpf_rate' => $irpf, 'status' => 'draft', 'source' => 'plugin',
             'notes' => sanitize_textarea_field($data['notes'] ?? '') ?: null,
+            // Why a rectifying invoice exists: printed on it.
+            'rectify_reason' => $series !== 'R' ? null : (array_key_exists('rectify_reason', $data)
+                ? (mb_substr(sanitize_text_field((string) $data['rectify_reason']), 0, 500) ?: null)
+                : ($id ? $inv['rectify_reason'] : null)),
         ] + $t;
         // A rectifying invoice goes to whoever the original went to, even if the client's details changed since.
         $original = ! empty($data['rectifies_id']) ? Invoices::get((int) $data['rectifies_id']) : ( $id && ! empty($inv['rectifies_id']) ? Invoices::get((int) $inv['rectifies_id']) : null );
@@ -224,7 +228,8 @@ final class Issuing {
             $last = $this->last_issued($series, (int) current_time('Y'));
             return max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
         };
-        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']), $date_for('R'), ($original ?: $profile)['id']);
+        $r = $this->rectify($id, sprintf(__('Anula la factura %s por cambio de los datos fiscales del cliente. La sustituye una factura nueva con los datos correctos.', 'mad-oficina'), $inv['number']), $date_for('R'), ($original ?: $profile)['id'],
+            __('Cambio de los datos fiscales del destinatario. Se sustituye por una factura nueva con los datos correctos.', 'mad-oficina'));
         if ( is_wp_error($r) ) return $r;
         $new = $this->save_draft([
             'profile_id' => $profile['id'], 'issue_date' => $date_for('F'), 'vat_rate' => $vat, 'irpf_rate' => $irpf,
@@ -310,7 +315,7 @@ final class Issuing {
     }
 
     /** A rectifying draft (series R) that cancels the original: same lines, negative. */
-    public function rectify($id, $notes = '', $date = null, $profile_id = 0){
+    public function rectify($id, $notes = '', $date = null, $profile_id = 0, $reason = '', $draft_id = 0){
         $inv = Invoices::get($id);
         if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se rectifican facturas emitidas de la serie F.', 'mad-oficina'));
         $lines = array_map(fn($l) => ['description' => sprintf(__('Rectifica %1$s: %2$s', 'mad-oficina'), $inv['number'], $l['description']), 'quantity' => $l['quantity'], 'unit_price' => -1 * $l['unit_price']], self::lines_of($inv));
@@ -319,8 +324,87 @@ final class Issuing {
         [$vat, $irpf] = self::rates_of($inv);
         return $this->save_draft([
             'profile_id' => $profile_id, 'series' => 'R', 'rectifies_id' => $inv['id'],
-            'issue_date' => $date ?: current_time('Y-m-d'), 'vat_rate' => $vat, 'irpf_rate' => $irpf, 'notes' => $notes,
-        ], $lines);
+            'issue_date' => $date ?: current_time('Y-m-d'), 'vat_rate' => $vat, 'irpf_rate' => $irpf, 'notes' => $notes, 'rectify_reason' => $reason,
+        ], $lines, $draft_id && (int) (Invoices::get($draft_id)['rectifies_id'] ?? 0) === (int) $id ? (int) $draft_id : 0);
+    }
+
+    /**
+     * A rectifying draft for part of an invoice: Jessica writes what each concept should have
+     * been (amount and text) and what was missing; the draft carries only the differences.
+     * @param array $changes [index => {description, amount}] for the original lines, in order
+     * @param array $added   [{description, amount}] concepts that were missing
+     * @return int|\WP_Error draft id
+     */
+    public function rectify_lines($id, array $changes, array $added, $reason, $date = null, $draft_id = 0){
+        $inv = Invoices::get($id);
+        if ( ! $inv || ! $inv['number'] || $inv['series'] !== 'F' ) return new \WP_Error('madof_inv_rect', __('Solo se rectifican facturas emitidas de la serie F.', 'mad-oficina'));
+        $reason = trim(sanitize_text_field((string) $reason));
+        if ( $reason === '' ) return new \WP_Error('madof_inv_reason', __('Escribe el motivo de la rectificación: va impreso en la factura.', 'mad-oficina'));
+        $old = self::lines_of($inv);
+        if ( ! $old ) return new \WP_Error('madof_inv_lines', __('Esta factura no tiene conceptos ni base imponible guardados: no sé qué rectificar.', 'mad-oficina'));
+        $n = $inv['number'];
+        $lines = [];
+        foreach ( $old as $i => $l ) {
+            $was = Money::round($l['quantity'] * $l['unit_price']);
+            $c = (array) ($changes[$i] ?? []);
+            $now = isset($c['amount']) && trim((string) $c['amount']) !== '' ? Money::round((float) Money::parse((string) $c['amount'])) : $was;
+            $desc = trim(sanitize_textarea_field((string) ($c['description'] ?? ''))) ?: $l['description'];
+            if ( $desc !== $l['description'] ) {
+                // A different concept: the old one out, the right one in.
+                $lines[] = ['description' => sprintf(__('Anula %1$s: %2$s', 'mad-oficina'), $n, $l['description']), 'quantity' => 1, 'unit_price' => -$was];
+                if ( $now ) $lines[] = ['description' => $desc, 'quantity' => 1, 'unit_price' => $now];
+            } elseif ( $now !== $was ) {
+                $lines[] = ['description' => sprintf(__('Rectifica %1$s: %2$s (antes %3$s, ahora %4$s)', 'mad-oficina'), $n, $desc, Money::format($was), Money::format($now)), 'quantity' => 1, 'unit_price' => Money::round($now - $was)];
+            }
+        }
+        foreach ( $added as $a ) {
+            $desc = trim(sanitize_textarea_field((string) ($a['description'] ?? '')));
+            $amt = Money::parse((string) ($a['amount'] ?? ''));
+            if ( $desc !== '' && $amt ) $lines[] = ['description' => $desc, 'quantity' => 1, 'unit_price' => Money::round((float) $amt)];
+        }
+        if ( ! $lines ) return new \WP_Error('madof_inv_same', __('No has cambiado nada: escribe el importe o el texto correcto de algún concepto, o añade uno.', 'mad-oficina'));
+        [$vat, $irpf] = self::rates_of($inv);
+        $last = $this->last_issued('R', (int) current_time('Y'));
+        $date = self::valid_date((string) $date) ?: max(current_time('Y-m-d'), (string) $inv['issue_date'], $last ? (string) $last['issue_date'] : '');
+        return $this->save_draft([
+            'profile_id' => (int) $inv['profile_id'] ?: (int) (self::profiles_for_new_details($inv)[0]['id'] ?? 0), 'series' => 'R', 'rectifies_id' => $inv['id'],
+            'issue_date' => $date, 'vat_rate' => $vat, 'irpf_rate' => $irpf, 'rectify_reason' => $reason,
+        ], $lines, $draft_id && (int) (Invoices::get($draft_id)['rectifies_id'] ?? 0) === (int) $id ? (int) $draft_id : 0);
+    }
+
+    /**
+     * «Emitir y enviar» from the review page, without the inbox: each draft is checked against
+     * the number she saw (if another invoice took it meanwhile, nothing goes out), then approved
+     * as she would in the inbox. A rectifying one goes before the invoice that replaces it.
+     * @param array $items [invoice id => {expected, send, to, subject, body, issue_date}]
+     * @return array{done: string[], error: ?string}
+     */
+    public function send_now(array $items, $user_id = 0){
+        $invs = [];
+        foreach ( $items as $id => $in ) {
+            $inv = Invoices::get((int) $id);
+            if ( ! $inv || $inv['status'] !== 'draft' || $inv['number'] ) return ['done' => [], 'error' => __('Una de las facturas ya no es un borrador: vuelve a abrirla para ver cómo ha quedado.', 'mad-oficina')];
+            $invs[] = [$inv, (array) $in];
+        }
+        usort($invs, fn($a, $b) => ($b[0]['series'] === 'R') <=> ($a[0]['series'] === 'R'));
+        // All numbers checked before anything is issued.
+        foreach ( $invs as [$inv, $in] ) {
+            $date = self::valid_date($in['issue_date'] ?? '') ?: $inv['issue_date'];
+            $will = Invoices::preview_number($inv, $date);
+            if ( $will !== (string) ($in['expected'] ?? '') ) {
+                return ['done' => [], 'error' => sprintf(__('El número ha cambiado: ahora le tocaría %1$s (antes te enseñaba %2$s). Revísalo y vuelve a pulsar.', 'mad-oficina'), $will ?: '—', $in['expected'] ?? '—')];
+            }
+        }
+        $done = [];
+        foreach ( $invs as [$inv, $in] ) {
+            $approval = $this->request($inv['id']);
+            if ( is_wp_error($approval) ) return ['done' => $done, 'error' => $approval->get_error_message()];
+            $input = ['send' => ! empty($in['send']) ? '1' : '', 'to' => (string) ($in['to'] ?? ''), 'subject' => (string) ($in['subject'] ?? ''), 'body' => (string) ($in['body'] ?? ''), 'issue_date' => (string) ($in['issue_date'] ?? '')];
+            $r = Approvals::resolve((int) $approval, 'approve', $input, $user_id, 'web');
+            if ( is_wp_error($r) ) return ['done' => $done, 'error' => $r->get_error_message()];
+            $done[] = (string) $r['message'];
+        }
+        return ['done' => $done, 'error' => null];
     }
 
     /* ==== Approval ==== */
@@ -330,7 +414,8 @@ final class Issuing {
         $inv = Invoices::get($id);
         if ( ! $inv || $inv['status'] !== 'draft' ) return new \WP_Error('madof_inv', __('Solo se pueden emitir borradores.', 'mad-oficina'));
         if ( $inv['series'] === 'AR' ) return new \WP_Error('madof_inv_series', __('Las facturas de Argentina se emiten en la plataforma argentina. Márcala como emitida allí.', 'mad-oficina'));
-        if ( ! $inv['lines'] || (float) $inv['total'] == 0.0 ) return new \WP_Error('madof_inv_lines', __('La factura no tiene importe.', 'mad-oficina'));
+        // (a rectifying one may come to zero when it only swaps a concept for another)
+        if ( ! $inv['lines'] || ( (float) $inv['total'] == 0.0 && $inv['series'] !== 'R' ) ) return new \WP_Error('madof_inv_lines', __('La factura no tiene importe.', 'mad-oficina'));
         if ( ! $inv['client_tax_id'] ) return new \WP_Error('madof_inv_tax', __('Falta el NIF del cliente. Complétalo en sus datos fiscales y vuelve a guardar el borrador.', 'mad-oficina'));
         foreach ( Approvals::for_object('invoice', $id) as $a ) {
             if ( in_array($a['status'], [Approvals::PENDING, Approvals::PROCESSING], true) ) return (int) $a['id'];
@@ -534,7 +619,10 @@ final class Issuing {
         $d = $this->default_input($approval);
         $mail = $this->email_for($inv, $inv['issue_date'], '{numero}');
         $pdf = wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $inv['id']), 'madof_billing_pdf_' . $inv['id']);
+        $will = Invoices::preview_number($inv);
         ob_start(); ?>
+        <?php if ( $will ) : ?><p class="madof-next-number"><span class="madof-kicker"><?php esc_html_e('Número', 'mad-oficina'); ?></span> <?php echo esc_html(sprintf(__('Si la apruebas ahora será la %1$s %2$s.', 'mad-oficina'), $inv['series'] === 'R' ? __('rectificativa', 'mad-oficina') : __('factura', 'mad-oficina'), $will)); ?></p><?php endif; ?>
+        <details class="madof-more" open><summary><?php esc_html_e('Cómo queda', 'mad-oficina'); ?></summary><?php echo InvoicePdf::preview_frame($inv, self::issuer_for($inv, $this->settings)); // escaped inside ?></details>
         <p><strong><?php echo esc_html($inv['client_name']); ?></strong> · <?php echo esc_html((string) $inv['client_tax_id']); ?> · <?php esc_html_e('Total', 'mad-oficina'); ?> <strong><?php echo esc_html(Money::format($inv['total'])); ?></strong>
             · <a href="<?php echo esc_url($pdf); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver el PDF', 'mad-oficina'); ?></a>
             · <a href="<?php echo esc_url(admin_url('admin.php?page=mad-oficina-facturacion&edit=' . $inv['id'])); ?>"><?php esc_html_e('Editar el borrador', 'mad-oficina'); ?></a></p>

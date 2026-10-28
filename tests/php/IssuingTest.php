@@ -171,6 +171,83 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame('B11111111', Invoices::get($r['rectify'])['client_tax_id']);
     }
 
+    public function test_the_number_it_will_take_is_shown_before_issuing_and_the_preview_has_no_draft_mark(){
+        $id = $this->draft();
+        $inv = Invoices::get($id);
+        $this->assertSame('26-008', Invoices::preview_number($inv));
+        $html = InvoicePdf::preview_html($inv, Issuing::issuer_for($inv, get_option(MAD_Oficina_Core::option_key('billing'))));
+        $this->assertStringContainsString('26-008', $html);
+        $this->assertStringNotContainsString('BORRADOR', $html);
+        $this->assertStringContainsString(MAD_OFICINA_URL, $html, 'fonts and header by URL for the browser');
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $this->assertSame('26-008', Invoices::get($id)['number'], 'what she saw is what it took');
+    }
+
+    public function test_rectifying_some_concepts_carries_only_the_differences_and_its_reason(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $i = $this->issuing();
+        $this->assertWPError($i->rectify_lines($id, [], [], 'Error de importe'), 'nothing changed');
+        $this->assertWPError($i->rectify_lines($id, [0 => ['amount' => '350']], [], ''), 'the reason is required');
+
+        $r = $i->rectify_lines($id, [0 => ['amount' => '350,00'], 1 => ['description' => 'Banner animado', 'amount' => '51']], [['description' => 'Cartel', 'amount' => '20'], ['description' => '', 'amount' => '']], 'Error en el importe de redes');
+        $this->assertIsInt($r);
+        $rect = Invoices::get($r);
+        $this->assertSame(['R', $id, 'Error en el importe de redes'], [$rect['series'], $rect['rectifies_id'], $rect['rectify_reason']]);
+        $this->assertSame([-50.0, -51.0, 51.0, 20.0], array_map(fn($l) => (float) $l['amount'], $rect['lines']));
+        $this->assertSame(-30.0, (float) $rect['base']);
+        $this->assertSame('B11111111', $rect['client_tax_id']);
+
+        $html = InvoicePdf::preview_html($rect, Issuing::issuer_for($rect, []));
+        $this->assertStringContainsString('Factura rectificativa', $html);
+        $this->assertStringContainsString('Rectifica la factura 26-008', $html);
+        $this->assertStringContainsString('Error en el importe de redes', $html);
+        $this->assertStringContainsString('R-26-01', $html);
+
+        // «Ver cómo queda» again: the same draft is rewritten, not a second one.
+        $this->assertSame($r, $i->rectify_lines($id, [0 => ['amount' => '300']], [], 'Otro motivo', null, $r));
+        $this->assertSame(-100.0, (float) Invoices::get($r)['base']);
+        // Only a concept swapped for another at the same price: a zero rectifying invoice can still go out.
+        $z = $i->rectify_lines($id, [1 => ['description' => 'Banner fijo']], [], 'Concepto equivocado');
+        $this->assertSame(0.0, (float) Invoices::get($z)['total']);
+        $this->assertIsInt($i->request($z));
+    }
+
+    public function test_send_now_issues_the_rectifying_and_the_new_one_without_the_inbox_and_checks_the_numbers(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        Profiles::save(['legal_name' => 'Taller Azul Nuevo SL', 'tax_id' => 'B22222222', 'email' => 'pagos@taz.example', 'client_id' => $this->client], $this->profile);
+        $pair = $this->issuing()->replace_for_new_details($id);
+        $this->assertSame('Cambio de los datos fiscales del destinatario. Se sustituye por una factura nueva con los datos correctos.', Invoices::get($pair['rectify'])['rectify_reason']);
+        $before = count($this->orders('invoice_archive'));
+
+        $wrong = $this->issuing()->send_now([$pair['new'] => ['expected' => '26-099', 'send' => true, 'to' => 'pagos@taz.example'], $pair['rectify'] => ['expected' => 'R-26-01', 'send' => true, 'to' => 'pagos@taz.example']]);
+        $this->assertNotNull($wrong['error']);
+        $this->assertNull(Invoices::get($pair['rectify'])['number'], 'a number that changed stops everything, even the other one');
+
+        $ok = $this->issuing()->send_now([
+            $pair['new'] => ['expected' => Invoices::preview_number(Invoices::get($pair['new'])), 'send' => true, 'to' => 'pagos@taz.example', 'subject' => 'Factura {numero}'],
+            $pair['rectify'] => ['expected' => 'R-26-01', 'send' => true, 'to' => 'pagos@taz.example'],
+        ], get_current_user_id());
+        $this->assertNull($ok['error']);
+        $this->assertSame(['R-26-01', '26-009'], [Invoices::get($pair['rectify'])['number'], Invoices::get($pair['new'])['number']]);
+        $orders = array_slice($this->orders('invoice_archive'), $before);
+        $this->assertCount(2, $orders, 'two emails, one each');
+        $this->assertSame('R-26-01', $orders[0]['payload']['number'], 'the rectifying one goes first');
+        $this->assertSame('Factura 26-009', $orders[1]['payload']['email']['subject']);
+        $this->assertSame([], array_filter(Approvals::for_object('invoice', $pair['new']), fn($a) => $a['status'] === Approvals::PENDING), 'nothing left in the inbox');
+    }
+
+    public function test_an_email_typed_at_sending_is_kept_in_the_fiscal_details(){
+        $p = Profiles::save(['legal_name' => 'Fuera de la oficina SL', 'tax_id' => 'B44444444']);
+        $d = $this->issuing()->save_draft(['profile_id' => $p, 'issue_date' => '2026-10-28'], [['description' => 'Diseño', 'unit_price' => '100']]);
+        $this->assertSame('', $this->issuing()->email_for(Invoices::get($d), '2026-10-28', 'x')['to']);
+        $this->assertTrue(Profiles::set_email($p, 'Admin@Fuera.example'));
+        $this->assertSame('admin@fuera.example', Profiles::get($p)['email']);
+        $this->assertSame('admin@fuera.example', Invoices::get($d)['client_email'], 'and on its pending drafts');
+        $this->assertFalse(Profiles::set_email($p, 'no-es-un-email'));
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,

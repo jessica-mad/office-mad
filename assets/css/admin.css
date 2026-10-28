@@ -242,3 +242,19 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 @media (max-width:782px){.madof-agent-head{grid-template-columns:64px 1fr}.madof-agent-spent{grid-column:1/-1;text-align:left}.madof-portrait{width:64px}}
 .madof-agent-who label{display:flex;flex-direction:column;gap:4px;margin:0 0 10px}
 .madof-agent-who input,.madof-agent-who textarea{width:100%;max-width:520px}
+
+/* Invoices: as they will go out, before they go */
+.madof-next-number{margin:8px 0 12px;font-weight:500}
+.madof-next-number .madof-kicker{margin-right:8px}
+.madof-send-doc{margin:16px 0}
+.madof-send-head{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+.madof-send-head h2{margin:4px 0;font-family:Silkscreen,monospace;font-size:20px;letter-spacing:.04em}
+.madof-send-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(260px,2fr);gap:24px;align-items:start;margin-top:12px}
+.madof-a4-frame{position:relative;overflow:hidden;aspect-ratio:794/1123;max-width:794px;width:100%;border-radius:6px;box-shadow:0 2px 14px rgba(0,0,0,.14);background:#fff}
+.madof-a4{position:absolute;top:0;left:0;width:794px;height:1123px;border:0;transform-origin:0 0;background:#fff}
+.madof-send-mail label{display:block;margin:0 0 10px}
+.madof-send-mail input[type=text],.madof-send-mail textarea{width:100%}
+.madof-rectify-lines textarea{width:100%;min-width:180px}
+.madof-rectify-lines td.num,.madof-rectify-lines th.num{text-align:right;white-space:nowrap}
+.madof-rectify-lines td.num input{width:110px;text-align:right}
+@media (max-width:900px){.madof-send-grid{grid-template-columns:1fr}}

@@ -74,6 +74,15 @@ final class Profiles {
         return (int) $wpdb->insert_id;
     }
 
+    /** The address its invoices go to, typed where it was missing (and on its pending drafts). */
+    public static function set_email($profile_id, $email){
+        global $wpdb;
+        if ( ! is_email($email) ) return false;
+        $wpdb->update(self::table(), ['email' => strtolower($email), 'updated_at' => Time::now()], ['id' => (int) $profile_id]);
+        $wpdb->query($wpdb->prepare('UPDATE ' . Invoices::table() . " SET client_email = %s WHERE profile_id = %d AND status = 'draft' AND number IS NULL AND (client_email IS NULL OR client_email = '')", strtolower($email), (int) $profile_id));
+        return true;
+    }
+
     /** Fiscal profiles of an office client (usually one; a client may invoice through several companies). */
     public static function for_client($client_id){
         global $wpdb;
