@@ -69,7 +69,7 @@ final class InvoicePdf {
         if ( ! $script ) {
             $script = true;
             $html .= "<script>(function(){function fit(){document.querySelectorAll('[data-a4]').forEach(function(box){var f=box.querySelector('iframe'),s=Math.min(1,box.clientWidth/794),h=1123;try{h=Math.max(h,f.contentDocument.documentElement.scrollHeight);}catch(e){}f.style.height=h+'px';f.style.transform='scale('+s+')';box.style.height=Math.ceil(h*s)+'px';});}"
-                . "document.addEventListener('load',function(e){if(e.target.tagName==='IFRAME')fit();},true);window.addEventListener('resize',fit);document.addEventListener('DOMContentLoaded',fit);fit();})();</script>";
+                . "document.addEventListener('load',function(e){if(e.target.tagName==='IFRAME'){fit();setTimeout(fit,700);}},true);window.addEventListener('resize',fit);document.addEventListener('DOMContentLoaded',fit);fit();})();</script>";
         }
         return $html;
     }
@@ -102,7 +102,7 @@ final class InvoicePdf {
             ! empty($issuer['issuer_city']) ? __('Localidad:', 'mad-oficina') . ' ' . $issuer['issuer_city'] : '',
             ! empty($issuer['issuer_tax_id']) ? ($issuer['issuer_tax_label'] ?? 'N.I.F.') . ': ' . $issuer['issuer_tax_id'] : '',
         ]);
-        $pay = $inv['series'] === 'R' && (float) $inv['total'] <= 0 ? [] : array_filter([$issuer['issuer_bank'] ?? '', ! empty($issuer['issuer_iban']) ? 'IBAN ' . $issuer['issuer_iban'] : '', $issuer['payment_terms'] ?? '']);
+        $pay = array_filter([$issuer['issuer_bank'] ?? '', ! empty($issuer['issuer_iban']) ? 'IBAN ' . $issuer['issuer_iban'] : '', $issuer['payment_terms'] ?? '']);
         $contact = implode(' / ', array_filter([$issuer['issuer_phone'] ?? '', $issuer['issuer_email'] ?? '']));
         $draft = $inv['number'] ? '' : '<div class="draft">' . $e(__('BORRADOR', 'mad-oficina')) . '</div>';
         // A rectifying invoice (RD 1619/2012, arts. 6 and 15): says so, identifies the invoice it
@@ -120,7 +120,7 @@ final class InvoicePdf {
         ob_start(); ?>
 <!doctype html><html lang="es"><head><meta charset="utf-8"><style>
 <?php echo $font(400, 'Montserrat_400Regular.ttf') . $font(500, 'Montserrat_500Medium.ttf') . $font(600, 'Montserrat_600SemiBold.ttf') . $font(700, 'Montserrat_700Bold.ttf') . $font(800, 'Montserrat_800ExtraBold.ttf'); ?>
-@page{margin:14mm 16mm 16mm 16mm}
+@page{margin:14mm 16mm 30mm 16mm}
 body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-height:1.35}
 .header{width:100%;margin:0 0 9mm}
 .meta{margin:0 0 4mm;font-size:12pt}
@@ -150,7 +150,7 @@ body{font-family:'Montserrat',sans-serif;font-size:9.5pt;color:#0B0B0B;line-heig
 .totals th{font-weight:700;font-size:11pt;text-align:center;padding:2mm 2mm;border-bottom:1px solid #BDBDBD}
 .totals td{text-align:right;padding:2mm 2mm;border-bottom:1px solid #BDBDBD;white-space:nowrap}
 .totals tr.total th,.totals tr.total td{color:#FFC400;font-weight:800;font-size:13pt;border-bottom:3px solid #0B0B0B}
-.contact{position:fixed;bottom:0;right:0;text-align:right;font-size:9pt}
+.contact{position:fixed;bottom:-18mm;right:0;text-align:right;font-size:9pt}
 .contact strong{display:block;font-weight:800}
 .contact.in-flow{position:static;margin-top:4mm;text-align:left;font-size:8.6pt}
 body.is-r .concepts{margin-top:6mm}
@@ -166,8 +166,11 @@ body.is-r .header{margin-bottom:6mm}
 .draft{position:fixed;top:95mm;left:0;right:0;text-align:center;font-size:80pt;font-weight:800;color:#FFC400;opacity:.18}
 <?php if ( $web ) : // a sheet of A4 on screen, with the PDF's margins ?>
 html{background:#fff}
-body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 16mm;box-sizing:border-box}
-.contact{position:absolute;bottom:16mm;right:16mm}
+body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 16mm;box-sizing:border-box;display:flex;flex-direction:column}
+.contact{position:static;margin-top:auto;padding-top:8mm;align-self:flex-end}
+.contact.in-flow{padding-top:0;align-self:auto}
+.meta,.client{align-self:flex-start}
+.draft{position:absolute}
 <?php endif; ?>
 </style></head><body<?php echo $is_r ? ' class="is-r"' : ''; ?>>
 <?php echo $draft; ?>

@@ -555,7 +555,8 @@ final class Issuing {
     /** Issuer for a PDF: the frozen copy for issued invoices, the current settings for drafts. */
     public static function issuer_for(array $inv, array $settings){
         $frozen = $inv['issuer'] ? json_decode($inv['issuer'], true) : null;
-        return is_array($frozen) ? $frozen : self::issuer_snapshot($settings);
+        // (a copy frozen without the issuer's name is no copy: the current details instead)
+        return is_array($frozen) && ! empty($frozen['issuer_name']) ? $frozen : self::issuer_snapshot($settings);
     }
 
     /* ==== Cartero orders ==== */
