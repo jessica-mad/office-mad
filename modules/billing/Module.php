@@ -46,7 +46,7 @@ return new class($core) implements MAD_Oficina_Module {
     /* ==== Hooks ==== */
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_undo_issue', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -419,6 +419,17 @@ return new class($core) implements MAD_Oficina_Module {
         \MAD_Oficina\Core\AdminUi::flash(__('Así queda la rectificativa. Todavía no se ha emitido: si está bien, pulsa «Emitir y enviar».', 'mad-oficina'));
         wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r], admin_url('admin.php')) . '#rectificar');
         exit;
+    }
+
+    public function handle_billing_undo_issue(){
+        $this->guard('billing_undo_issue');
+        $id = absint($_POST['invoice_id'] ?? 0);
+        if ( empty($_POST['understood']) ) $this->back(['invoice' => $id], __('Marca la casilla para confirmar que quieres deshacer la emisión.', 'mad-oficina'), 'error');
+        $r = \MAD_Oficina\Billing\Issuing::undo_issue($id);
+        if ( is_wp_error($r) ) $this->back(['invoice' => $id], $r->get_error_message(), 'error');
+        $inv = \MAD_Oficina\Billing\Invoices::get($id);
+        // A rectifying one goes back to where it is made; any other to its editor.
+        $this->back($inv['rectifies_id'] ? ['rectify' => (int) $inv['rectifies_id'], 'draft' => $id] : ['edit' => $id], $r['message']);
     }
 
     public function handle_billing_resend(){

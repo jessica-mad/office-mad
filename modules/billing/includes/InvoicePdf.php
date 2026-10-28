@@ -42,7 +42,9 @@ final class InvoicePdf {
 
     public static function filename(array $inv){
         $name = sanitize_file_name(remove_accents($inv['client_name']));
-        return ($inv['number'] ?: 'borrador-' . $inv['id']) . ' ' . $name . '.pdf';
+        // Issued again after «Deshacer la emisión»: a new file, never the wrong one already in Drive.
+        $v = $inv['number'] ? \MAD_Oficina\Billing\Issuing::times_undone((int) $inv['id']) : 0;
+        return ($inv['number'] ?: 'borrador-' . $inv['id']) . ' ' . $name . ($v ? ' (v' . ($v + 1) . ')' : '') . '.pdf';
     }
 
     private static function money($n){

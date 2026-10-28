@@ -567,6 +567,13 @@ final class Issuing {
 
     public function queue_archive(array $inv, ?array $email){
         if ( $email && ($copy = \MAD_Oficina\Core\ClientCopy::for_invoice($inv)) && stripos($email['to'], $copy) === false ) $email['bcc'] = $copy;
+        if ( $email && self::times_undone((int) $inv['id']) ) {
+            // The cartero sends each invoice once: an invoice issued again goes as a resend, after the archive.
+            $archived = Orders::queue('invoice_archive', ['invoice_id' => (int) $inv['id'], 'number' => $inv['number'], 'filename' => InvoicePdf::filename($inv),
+                'folder' => [(string) $inv['year'], self::quarter($inv['issue_date'])], 'email' => null, 'row' => self::libro_row($inv)], $inv['client_id']);
+            Orders::queue(Collections::ACTION, ['key' => 'reissue-' . (int) $inv['id'] . '-' . wp_generate_password(8, false), 'invoice_id' => (int) $inv['id'], 'resend' => true, 'email' => $email], $inv['client_id']);
+            return $archived;
+        }
         return Orders::queue('invoice_archive', [
             'invoice_id' => (int) $inv['id'],
             'number' => $inv['number'],
@@ -595,6 +602,52 @@ final class Issuing {
         ];
         if ( ($copy = \MAD_Oficina\Core\ClientCopy::for_invoice($inv)) && stripos($email['to'], $copy) === false ) $email['bcc'] = $copy;
         return Orders::queue(Collections::ACTION, ['key' => 'resend-' . (int) $id . '-' . wp_generate_password(8, false), 'invoice_id' => (int) $id, 'resend' => true, 'email' => $email], $inv['client_id']);
+    }
+
+    /** How many times an invoice's issue was undone (its later PDFs carry «(v2)», «(v3)»…). */
+    const UNDONE = 'madoficina_invoice_undone';
+
+    public static function times_undone($id){
+        $m = get_option(self::UNDONE, []);
+        return is_array($m) ? (int) ($m[(int) $id] ?? 0) : 0;
+    }
+
+    /**
+     * «Deshacer la emisión»: an invoice issued by mistake back to draft, only while it is the
+     * last one of its series (so no number is ever left missing) and not collected. The same
+     * number goes to the corrected one. What the cartero had not done yet is cancelled; what
+     * it did (the PDF in Drive, an email) stays, and Jessica is told.
+     * @return array{message:string, draft:int}|\WP_Error
+     */
+    public static function undo_issue($id){
+        global $wpdb;
+        $inv = Invoices::get($id);
+        if ( ! $inv || ! $inv['number'] || ! in_array($inv['series'], Invoices::FISCAL, true) ) return new \WP_Error('madof_inv', __('Solo se deshace la emisión de facturas emitidas de las series F y R.', 'mad-oficina'));
+        if ( $inv['paid'] ) return new \WP_Error('madof_inv_paid', __('Está marcada como cobrada: desmárcala primero o haz una rectificativa.', 'mad-oficina'));
+        $last = (int) $wpdb->get_var($wpdb->prepare('SELECT MAX(seq) FROM ' . Invoices::table() . ' WHERE series = %s AND year = %d AND number IS NOT NULL', $inv['series'], $inv['year']));
+        if ( (int) $inv['seq'] !== $last ) return new \WP_Error('madof_inv_not_last', sprintf(__('Ya hay facturas posteriores en la serie %s: deshacerla dejaría un hueco en la numeración. Corrígela con una rectificativa.', 'mad-oficina'), $inv['series']));
+        if ( $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . Invoices::table() . ' WHERE rectifies_id = %d AND number IS NOT NULL', $id)) ) return new \WP_Error('madof_inv_rectified', __('Ya tiene una rectificativa: corrígela desde ahí.', 'mad-oficina'));
+        $was_sent = $inv['status'] === 'sent' || $inv['sent_at'];
+        $number = $inv['number'];
+        $wpdb->update(Invoices::table(), [
+            'number' => null, 'seq' => null, 'status' => 'draft', 'issued_at' => null, 'sent_at' => null, 'issuer' => null,
+            'pdf_url' => null, 'pdf_file_id' => null, 'updated_at' => Time::now(),
+        ], ['id' => (int) $id, 'number' => $number]);
+        // Orders the cartero has not picked up yet: not any more.
+        $wpdb->query($wpdb->prepare('UPDATE ' . Schema::table('tasks') . " SET status = 'cancelled', updated_at = %s WHERE agent = %s AND status = 'queued' AND type IN ('invoice_archive', %s) AND payload LIKE %s",
+            Time::now(), Orders::AGENT, Collections::ACTION, '%"invoice_id":' . (int) $id . ',%'));
+        $m = get_option(self::UNDONE, []);
+        $m = is_array($m) ? $m : [];
+        $m[(int) $id] = ($m[(int) $id] ?? 0) + 1;
+        update_option(self::UNDONE, $m, false);
+        // Its row in «Libro MAD» says so until it is issued again.
+        $row = self::libro_row(Invoices::get($id));
+        $row['Estado'] = sprintf(__('Emisión deshecha (era %s)', 'mad-oficina'), $number);
+        Orders::queue('libro_upsert', ['rows' => [$row]]);
+        $wpdb->insert(Schema::table('agent_log'), ['agent' => 'accountant', 'event' => 'invoice_undo', 'client_id' => $inv['client_id'], 'data' => wp_json_encode(['invoice_id' => (int) $id, 'number' => $number, 'was_sent' => (bool) $was_sent, 'user' => get_current_user_id()]), 'created_at' => Time::now()]);
+        return ['draft' => (int) $id, 'message' => sprintf(__('Emisión deshecha: vuelve a ser un borrador y, al emitirla otra vez, tomará el mismo número %s.', 'mad-oficina'), $number)
+            . ' ' . ($was_sent ? __('Ya se había enviado: avisa al cliente de que descarte la que le llegó.', 'mad-oficina') : '')
+            . ' ' . __('Si el cartero ya la había guardado en Drive, borra ese PDF de Emitidas; la nueva se guarda como «(v2)».', 'mad-oficina')];
     }
 
     /** «Enviar prueba a mí»: the draft PDF (with its watermark) to Jessica only. */

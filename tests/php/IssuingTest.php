@@ -272,6 +272,37 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame('sent', Invoices::get($id)['status'], 'only issued before: now it counts as sent');
     }
 
+    public function test_an_invoice_issued_by_mistake_goes_back_to_draft_only_while_it_is_the_last(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $r = $this->issuing()->rectify_lines($id, [0 => ['amount' => '350']], [], 'Importe equivocado');
+        Approvals::resolve($this->issuing()->request($r), 'approve', ['send' => '1', 'to' => 'pagos@taz.example', 'issue_date' => current_time('Y-m-d')], get_current_user_id());
+        $this->assertSame('R-26-01', Invoices::get($r)['number']);
+        $this->assertWPError(Issuing::undo_issue($id), 'the original already has a rectifying invoice');
+
+        $u = Issuing::undo_issue($r);
+        $this->assertIsArray($u);
+        $back = Invoices::get($r);
+        $this->assertSame(['draft', null, null], [$back['status'], $back['number'], $back['seq']]);
+        $this->assertSame([], array_filter($this->orders('invoice_archive'), fn($o) => (int) $o['payload']['invoice_id'] === $r), 'the cartero will not send the wrong one');
+        $this->assertSame('R-26-01', Invoices::preview_number($back), 'the same number for the corrected one');
+
+        // Corrected and issued again: a new file name, and the email goes as a resend (the cartero sends each invoice once).
+        $this->issuing()->rectify_lines($id, [0 => ['amount' => '300']], [], 'Importe equivocado', null, $r);
+        Approvals::resolve($this->issuing()->request($r), 'approve', ['send' => '1', 'to' => 'pagos@taz.example', 'issue_date' => current_time('Y-m-d')], get_current_user_id());
+        $again = Invoices::get($r);
+        $this->assertSame(['R-26-01', -100.0], [$again['number'], (float) $again['base']]);
+        $archive = array_values(array_filter($this->orders('invoice_archive'), fn($o) => (int) $o['payload']['invoice_id'] === $r));
+        $this->assertStringContainsString('(v2)', $archive[0]['payload']['filename']);
+        $this->assertNull($archive[0]['payload']['email']);
+        $this->assertCount(1, array_filter($this->orders('payment_reminder'), fn($o) => (int) $o['payload']['invoice_id'] === $r && ! empty($o['payload']['resend'])));
+
+        // Not the last of its series any more: never a gap.
+        $next = $this->issuing()->rectify_lines($id, [1 => ['amount' => '40']], [], 'Otro error');
+        Approvals::resolve($this->issuing()->request($next), 'approve', ['send' => '', 'issue_date' => current_time('Y-m-d')], get_current_user_id());
+        $this->assertWPError(Issuing::undo_issue($r));
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,

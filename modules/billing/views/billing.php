@@ -98,6 +98,17 @@ $status_pill = function($inv){
             </form>
         </details>
         <?php endif; ?>
+        <?php if ( $inv['number'] && in_array($inv['series'], ['F', 'R'], true) && ! $inv['paid'] ) : ?>
+        <details class="madof-more madof-undo"><summary><?php esc_html_e('Deshacer la emisión', 'mad-oficina'); ?></summary>
+            <?php echo AdminUi::form_open('billing_undo_issue', 'madof-form'); ?>
+                <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+                <p><?php echo esc_html(sprintf(__('Solo si la emitiste por error y es la última de su serie: vuelve a ser un borrador, la corriges y al emitirla otra vez toma el mismo número (%s). Si hay facturas posteriores, no se puede: hay que corregirla con una rectificativa.', 'mad-oficina'), $inv['number'])); ?></p>
+                <?php if ( $inv['status'] === 'sent' ) : ?><p class="madof-warn"><?php esc_html_e('Ya se envió al cliente: avísale de que descarte la que le llegó antes de mandarle la buena.', 'mad-oficina'); ?></p><?php endif; ?>
+                <label class="madof-check"><input type="checkbox" name="understood" value="1" required> <?php esc_html_e('Entiendo: la quito como emitida para corregirla', 'mad-oficina'); ?></label>
+                <button class="madof-btn is-ghost"><?php esc_html_e('Deshacer la emisión', 'mad-oficina'); ?></button>
+            </form>
+        </details>
+        <?php endif; ?>
         <?php if ( $err = get_transient('madof_new_details_error_' . $inv['id']) ) : ?><p class="madof-warn" role="alert"><strong><?php esc_html_e('«Corregir los datos del cliente» no se ha hecho:', 'mad-oficina'); ?></strong> <?php echo esc_html($err); ?></p><?php endif; ?>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) ) : // Argentina too: its due date is asked like any other ?>
             <?php echo AdminUi::form_open('billing_paid', 'madof-inline'); ?>
