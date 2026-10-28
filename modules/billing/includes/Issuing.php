@@ -65,7 +65,7 @@ final class Issuing {
      * @param array $lines [{description, quantity, unit_price}]
      * @return int|\WP_Error invoice id
      */
-    public function save_draft(array $data, array $lines, $id = 0){
+    public function save_draft(array $data, array $lines, $id = 0, $dry = false){
         global $wpdb;
         if ( $id ) {
             $inv = Invoices::get($id);
@@ -132,6 +132,8 @@ final class Issuing {
         // By differences it goes to whoever the original went to; by substitution, to the corrected details.
         $keep = array_key_exists('keep_recipient', $data) ? ! empty($data['keep_recipient']) : ( $id && $mode === 'substitution' ? self::kept_recipient($inv, $original) : true );
         if ( $original && ($mode !== 'substitution' || $keep) ) foreach ( self::RECIPIENT as $k ) $row[$k] = $original[$k];
+        // «Cómo queda» while she types: the invoice as it would be saved, nothing written.
+        if ( $dry ) return $row + ['id' => (int) $id, 'number' => null, 'seq' => null, 'rectifies_id' => $original ? (int) $original['id'] : null, 'lines' => $clean, 'issuer' => null, 'paid' => 0];
 
         if ( ! $id ) {
             if ( ! empty($data['rectifies_id']) ) $row['rectifies_id'] = (int) $data['rectifies_id'];

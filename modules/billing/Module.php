@@ -51,6 +51,7 @@ return new class($core) implements MAD_Oficina_Module {
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
+        add_action('wp_ajax_madof_billing_preview', [$this, 'ajax_billing_preview']);
         add_action('rest_api_init', fn() => (new \MAD_Oficina\Billing\PortalRest(fn() => $this->settings()))->register());
         add_action('rest_api_init', [$this, 'register_hooks']);
 
@@ -341,6 +342,22 @@ return new class($core) implements MAD_Oficina_Module {
     }
 
     /** Editor: save the draft, and optionally ask to issue it or send a test to Jessica. */
+    /** The editor's form drawn as the invoice it would be (nothing saved), for «Cómo queda». */
+    public function ajax_billing_preview(){
+        if ( ! \MAD_Oficina\Core\FinanceAccess::can() ) wp_send_json_error(null, 403);
+        check_ajax_referer('madof_billing_draft_save');
+        $p = wp_unslash($_POST);
+        $lines = [];
+        foreach ( (array) ($p['lines'] ?? []) as $l ) if ( is_array($l) ) $lines[] = $l;
+        $inv = $this->issuing()->save_draft($p, $lines, absint($p['invoice_id'] ?? 0), true);
+        if ( is_wp_error($inv) ) wp_send_json_error(['message' => $inv->get_error_message()]);
+        $number = \MAD_Oficina\Billing\Invoices::preview_number($inv);
+        wp_send_json_success([
+            'html' => \MAD_Oficina\Billing\InvoicePdf::preview_html($inv, \MAD_Oficina\Billing\Issuing::issuer_snapshot($this->settings())),
+            'number' => $number, 'total' => \MAD_Oficina\Billing\Money::format($inv['total']),
+        ]);
+    }
+
     public function handle_billing_draft_save(){
         $this->guard('billing_draft_save');
         $p = wp_unslash($_POST);

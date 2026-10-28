@@ -3,6 +3,7 @@
  * Draft editor: who, dates, as many concept lines as needed, live totals.
  * @var array|null $draft @var array|null $profile @var \MAD_Oficina\Billing\Issuing $issuing
  */
+use MAD_Oficina\Billing\InvoicePdf;
 use MAD_Oficina\Billing\Invoices;
 use MAD_Oficina\Billing\Money;
 use MAD_Oficina\Billing\Months;
@@ -159,9 +160,18 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
     </form>
     <?php endif; ?>
 
+    <?php if ( ! $draft ) : // a new one: drawn as it is being written
+        $first = $issuing->save_draft(['profile_id' => $profile['id'], 'issue_date' => $issue, 'due_date' => $due], array_map(fn($l) => $l + ['quantity' => 1, 'unit_price' => ''], $lines), 0, true); ?>
+    <section class="madof-card madof-live" id="como-queda">
+        <span class="madof-kicker"><?php esc_html_e('Cómo queda', 'mad-oficina'); ?></span>
+        <p data-live-note><?php echo esc_html(is_wp_error($first) ? __('Escribe un concepto con su importe y aquí la verás tal como saldrá.', 'mad-oficina') : sprintf(__('Si la emites hoy será la %s. Se actualiza mientras escribes; para enviarla, pulsa «Guardar y ver cómo queda».', 'mad-oficina'), Invoices::preview_number($first) ?: '—')); ?></p>
+        <?php echo InvoicePdf::preview_frame(is_wp_error($first) ? ['number' => null, 'series' => $is_ar ? 'AR' : 'F', 'issue_date' => $issue, 'lines' => [], 'client_name' => $profile['legal_name'], 'client_tax_id' => $profile['tax_id'], 'client_address' => $profile['address'], 'client_city' => $profile['city'], 'base' => 0, 'vat' => 0, 'irpf' => 0, 'total' => 0, 'vat_rate' => $profile['vat_rate'], 'irpf_rate' => $profile['irpf_rate']] : $first, \MAD_Oficina\Billing\Issuing::issuer_snapshot($settings)); ?>
+    </section>
+    <?php endif; ?>
+
     <?php if ( $draft && ! $is_ar && empty($draft['rectifies_id']) ) : // as it will go out, and sent from here ?>
     <div id="enviar" class="madof-edit-send">
-        <p class="madof-warn" data-stale hidden role="status"><?php esc_html_e('Has cambiado algo arriba: pulsa «Guardar y ver cómo queda» para ver la factura con los cambios antes de enviarla.', 'mad-oficina'); ?></p>
+        <p class="madof-warn" data-stale hidden role="status"><?php esc_html_e('Has cambiado algo arriba: abajo ya lo ves, pero pulsa «Guardar y ver cómo queda» antes de enviarla.', 'mad-oficina'); ?></p>
         <?php $send_ids = [(int) $draft['id']]; $settings = $settings ?? []; include __DIR__ . '/invoice-send.php'; ?>
     </div>
     <?php endif; ?>
@@ -215,6 +225,25 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
       };
       form.addEventListener('input', stale);
       form.addEventListener('change', stale);
+      // «Cómo queda» redrawn from the form as she types (nothing is saved).
+      var live = document.querySelector('#como-queda iframe') || document.querySelector('.madof-edit-send iframe');
+      var timer = null, note = document.querySelector('[data-live-note]');
+      var redraw = function () {
+        if (!live) return;
+        var data = new FormData(form);
+        data.set('action', 'madof_billing_preview');
+        fetch(<?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>, { method: 'POST', body: data, credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (r) {
+            if (!r || !r.success) { if (note && r && r.data && r.data.message) note.textContent = r.data.message; return; }
+            live.srcdoc = r.data.html;
+            if (note) note.textContent = <?php echo wp_json_encode(__('Si la emites hoy será la %s. Se actualiza mientras escribes; para enviarla, pulsa «Guardar y ver cómo queda».', 'mad-oficina')); ?>.replace('%s', r.data.number || '—');
+          }).catch(function () {});
+      };
+      var soon = function () { clearTimeout(timer); timer = setTimeout(redraw, 600); };
+      form.addEventListener('input', soon);
+      form.addEventListener('change', soon);
+      body.addEventListener('click', function (e) { if (e.target.closest('.madof-remove-line')) soon(); });
       form.querySelector('.madof-add-line').addEventListener('click', function () {
         var row = body.rows[body.rows.length - 1].cloneNode(true);
         [].forEach.call(row.querySelectorAll('input[type=hidden], small'), function (el) { el.remove(); }); // a new line is not an agreement's

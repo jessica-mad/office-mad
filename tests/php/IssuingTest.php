@@ -403,6 +403,15 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertFalse(Issuing::removed_from($d, ['item_id' => 99, 'item_month' => '2026-12']));
     }
 
+    public function test_the_editor_preview_draws_the_form_without_saving_anything(){
+        global $wpdb;
+        $before = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . Invoices::table());
+        $inv = $this->issuing()->save_draft(['profile_id' => $this->profile, 'issue_date' => '2026-10-28'], [['description' => 'Cartel', 'quantity' => '1', 'unit_price' => '350']], 0, true);
+        $this->assertSame([350.0, 'Taller Azul SL', '26-008'], [(float) $inv['base'], $inv['client_name'], Invoices::preview_number($inv)]);
+        $this->assertStringContainsString('Cartel', InvoicePdf::preview_html($inv, []));
+        $this->assertSame($before, (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . Invoices::table()), 'nothing saved');
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,
