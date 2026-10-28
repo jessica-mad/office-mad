@@ -117,8 +117,16 @@ final class InvoicePdf {
         if ( ! $corr && ! $is_r && ! empty($inv['id']) && ($c = Issuing::corrected_of((int) $inv['id'])) ) $corr = Invoices::get((int) $c['by']);
         $cmp = null;
         if ( $is_r && $original ) {
-            $o = ['base' => (float) $original['base'], 'vat' => (float) $original['vat'], 'irpf' => (float) $original['irpf'], 'total' => (float) $original['total']];
-            $d = ['base' => (float) $inv['base'], 'vat' => (float) $inv['vat'], 'irpf' => (float) $inv['irpf'], 'total' => (float) $inv['total']];
+            $k4 = ['base', 'vat', 'irpf', 'total'];
+            $c = ! empty($inv['id']) ? Issuing::corrected_of((int) $original['id']) : null;
+            if ( $c && (int) $c['by'] === (int) $inv['id'] && isset($c['totals'], $c['diff']) ) {
+                // Its original was corrected in place: before and difference as they were when it was issued.
+                $o = array_map('floatval', array_intersect_key($c['totals'], array_flip($k4)));
+                $d = array_map('floatval', array_intersect_key($c['diff'], array_flip($k4)));
+            } else {
+                $o = array_map(fn($k) => (float) $original[$k], array_combine($k4, $k4));
+                $d = array_map(fn($k) => (float) $inv[$k], array_combine($k4, $k4));
+            }
             $cmp = [$o, array_map(fn($k) => round($o[$k] + $d[$k], 2), array_combine(array_keys($o), array_keys($o))), $d];
         }
 
@@ -187,12 +195,12 @@ body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 1
 <table class="meta"><tr><th><?php echo $e($is_r ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($inv['number'] ?: '—'); ?></td></tr>
 <tr><th><?php echo $e($is_r ? __('Fecha de expedición:', 'mad-oficina') : __('Fecha:', 'mad-oficina')); ?></th><td><?php echo $e($date); ?></td></tr>
 <?php if ( $is_r && $original && $original['issue_date'] !== $inv['issue_date'] ) : ?><tr><th><?php echo $e(__('Fecha de la operación:', 'mad-oficina')); ?></th><td><?php echo $e($fmt($original['issue_date'])); ?></td></tr><?php endif; ?></table>
-<?php if ( $corr ) : ?><p class="corrected"><?php echo $e(sprintf(__('Factura corregida: los datos del destinatario se sustituyeron por los correctos mediante la factura rectificativa %1$s del %2$s.', 'mad-oficina'), $corr['number'] ?: Invoices::preview_number($corr), $fmt($corr['issue_date']))); ?></p><?php endif; ?>
+<?php if ( $corr ) : ?><p class="corrected"><?php echo $e(sprintf(__('Factura corregida mediante la factura rectificativa %1$s del %2$s, que detalla lo que cambia y el motivo.', 'mad-oficina'), $corr['number'] ?: Invoices::preview_number($corr), $fmt($corr['issue_date']))); ?></p><?php endif; ?>
 <?php if ( $is_r ) : ?>
 <table class="rect-box">
   <?php if ( $original ) : ?><tr><th><?php echo $e(__('Factura rectificada', 'mad-oficina')); ?></th><td><?php echo $e(sprintf(__('Serie %1$s · Nº %2$s · expedida el %3$s', 'mad-oficina'), $original['series'], $original['number'], $fmt($original['issue_date']))); ?></td></tr><?php endif; ?>
   <tr><th><?php echo $e(__('Motivo', 'mad-oficina')); ?></th><td><?php echo $e($inv['rectify_reason'] ?: '—'); ?></td></tr>
-  <?php if ( $sub && $original ) : ?><tr><th><?php echo $e(__('Datos que se sustituyen', 'mad-oficina')); ?></th><td><?php echo $e(implode(' · ', array_filter([$original['client_name'], $original['client_tax_id'], $original['client_address'], $original['client_city']]))); ?></td></tr><?php endif; ?>
+  <?php if ( $sub && $original && Issuing::details_differ($inv, ['legal_name' => $original['client_name'], 'tax_id' => $original['client_tax_id'], 'address' => $original['client_address'], 'city' => $original['client_city']]) ) : ?><tr><th><?php echo $e(__('Datos que se sustituyen', 'mad-oficina')); ?></th><td><?php echo $e(implode(' · ', array_filter([$original['client_name'], $original['client_tax_id'], $original['client_address'], $original['client_city']]))); ?></td></tr><?php endif; ?>
 </table>
 <?php endif; ?>
 <hr class="rule">

@@ -14,7 +14,8 @@ $base = admin_url('admin.php?page=mad-oficina-facturacion');
 $old = Issuing::lines_of($original);
 // A draft of «Datos del cliente equivocados» (either way) or of «Importes o conceptos».
 $data_rep = $rect_draft ? Issuing::replacement_of((int) $rect_draft['id']) : null;
-$is_sub = (bool) $data_rep;
+$is_sub = $data_rep && $data_rep['details'];
+$concept_rep = $data_rep && ! $data_rep['details'] ? $data_rep : null;
 $next_f = Invoices::preview_number(['number' => null, 'series' => 'F', 'issue_date' => current_time('Y-m-d')]);
 [, $now_profile] = Issuing::profiles_for_new_details($original);
 $data_changed = $now_profile && Issuing::details_differ($original, $now_profile);
@@ -26,7 +27,7 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
 <div class="wrap madof-wrap">
     <p><a href="<?php echo esc_url(add_query_arg('invoice', (int) $original['id'], $base)); ?>">← <?php echo esc_html(sprintf(__('Factura %s', 'mad-oficina'), $original['number'])); ?></a></p>
     <?php AdminUi::header(__('Facturación', 'mad-oficina'), sprintf(__('Rectificar la factura %s', 'mad-oficina'), $original['number']),
-        sprintf(__('%1$s · serie F · expedida el %2$s · total %3$s. La factura original no se toca nunca: la rectificativa (serie R) la identifica, dice el motivo y corrige lo que haga falta.', 'mad-oficina'), $original['client_name'], date_i18n('j/m/Y', strtotime($original['issue_date'])), Money::format($original['total']))); ?>
+        sprintf(__('%1$s · serie F · expedida el %2$s · total %3$s. La rectificativa (serie R) la identifica, dice el motivo y corrige lo que haga falta; tú eliges si la factura conserva su número y fecha o sale una nueva.', 'mad-oficina'), $original['client_name'], date_i18n('j/m/Y', strtotime($original['issue_date'])), Money::format($original['total']))); ?>
 
     <?php echo AdminUi::form_open('billing_new_details', 'madof-form madof-card madof-rectify'); ?>
         <span class="madof-kicker" id="datos"><?php esc_html_e('1 · Datos del cliente equivocados', 'mad-oficina'); ?></span>
@@ -47,7 +48,7 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
         <?php else : ?>
             <label><?php esc_html_e('Motivo (va impreso en la factura)', 'mad-oficina'); ?>
                 <textarea name="reason" rows="2" required maxlength="500"><?php echo esc_textarea($is_sub ? (string) $rect_draft['rectify_reason'] : Issuing::DEFAULT_DETAILS_REASON); ?></textarea></label>
-            <?php $same = ! $data_rep || $data_rep['same']; ?>
+            <?php $same = ! $is_sub || $data_rep['same']; ?>
             <fieldset class="madof-choice">
                 <legend><?php esc_html_e('La factura con los datos buenos', 'mad-oficina'); ?></legend>
                 <label class="madof-check"><input type="radio" name="target" value="same" <?php checked($same); ?>>
@@ -57,7 +58,7 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
                     <span><strong><?php echo esc_html(sprintf(__('Como factura nueva de la serie F (será la %s)', 'mad-oficina'), $next_f)); ?></strong><br>
                     <small><?php esc_html_e('La rectificativa anula la original entera y sale una factura nueva con su propio número y la fecha que elijas.', 'mad-oficina'); ?></small></span></label>
                 <label class="madof-new-date"><?php esc_html_e('Fecha de la factura nueva', 'mad-oficina'); ?>
-                    <input type="date" name="new_date" value="<?php echo esc_attr($data_rep && $data_rep['new'] ? $data_rep['new']['issue_date'] : current_time('Y-m-d')); ?>">
+                    <input type="date" name="new_date" value="<?php echo esc_attr($is_sub && $data_rep['new'] ? $data_rep['new']['issue_date'] : current_time('Y-m-d')); ?>">
                     <small><?php esc_html_e('Solo si es factura nueva. No puede ser anterior a la última de la serie.', 'mad-oficina'); ?></small></label>
             </fieldset>
             <p><button class="madof-btn"><?php esc_html_e('Ver cómo queda', 'mad-oficina'); ?></button></p>
@@ -65,8 +66,8 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
     </form>
 
     <?php echo AdminUi::form_open('billing_rectify_lines', 'madof-form madof-card madof-rectify'); ?>
-        <span class="madof-kicker" id="importes"><?php esc_html_e('2 · Importes o conceptos · por diferencias', 'mad-oficina'); ?></span>
-        <p><?php esc_html_e('Escribe lo que debería haber puesto: la rectificativa lleva solo la diferencia (en positivo o en negativo).', 'mad-oficina'); ?></p>
+        <span class="madof-kicker" id="importes"><?php esc_html_e('2 · Importes o conceptos', 'mad-oficina'); ?></span>
+        <p><?php esc_html_e('Escribe lo que debería haber puesto en cada concepto (texto o importe) y añade lo que faltaba.', 'mad-oficina'); ?></p>
         <input type="hidden" name="invoice_id" value="<?php echo (int) $original['id']; ?>">
         <input type="hidden" name="draft_id" value="<?php echo (int) ($rect_draft && ! $is_sub ? $rect_draft['id'] : 0); ?>">
         <?php if ( ! $old ) : ?>
@@ -101,6 +102,21 @@ while ( count($added) < 2 ) $added[] = ['description' => '', 'amount' => ''];
                 <input type="date" name="date" value="<?php echo esc_attr($rect_draft['issue_date'] ?? ''); ?>">
                 <small><?php esc_html_e('Vacía: hoy (o la de la última rectificativa, si es posterior).', 'mad-oficina'); ?></small></label>
         </div>
+        <?php $t2 = $state['target'] ?? ($concept_rep ? ($concept_rep['same'] ? 'same' : 'new') : ($rect_draft && ! $is_sub ? 'diff' : 'same')); ?>
+        <fieldset class="madof-choice">
+            <legend><?php esc_html_e('Cómo queda', 'mad-oficina'); ?></legend>
+            <label class="madof-check"><input type="radio" name="target" value="same" <?php checked($t2, 'same'); ?>>
+                <span><strong><?php echo esc_html(sprintf(__('La factura con su mismo número y fecha: %1$s del %2$s', 'mad-oficina'), $original['number'], date_i18n('d/m/Y', strtotime($original['issue_date'])))); ?></strong><br>
+                <small><?php esc_html_e('La rectificativa (por sustitución) deja constancia de lo que cambia y la factura se corrige con los conceptos buenos.', 'mad-oficina'); ?></small></span></label>
+            <label class="madof-check"><input type="radio" name="target" value="new" <?php checked($t2, 'new'); ?>>
+                <span><strong><?php echo esc_html(sprintf(__('Una factura nueva de la serie F (será la %s)', 'mad-oficina'), $next_f)); ?></strong><br>
+                <small><?php esc_html_e('La rectificativa anula la original entera y sale una nueva con los conceptos buenos, su propio número y la fecha que elijas.', 'mad-oficina'); ?></small></span></label>
+            <label class="madof-new-date"><?php esc_html_e('Fecha de la factura nueva', 'mad-oficina'); ?>
+                <input type="date" name="new_date" value="<?php echo esc_attr($state['new_date'] ?? ($concept_rep && $concept_rep['new'] ? $concept_rep['new']['issue_date'] : current_time('Y-m-d'))); ?>"></label>
+            <label class="madof-check"><input type="radio" name="target" value="diff" <?php checked($t2, 'diff'); ?>>
+                <span><strong><?php esc_html_e('Solo la rectificativa, por diferencias', 'mad-oficina'); ?></strong><br>
+                <small><?php esc_html_e('La factura no se toca: la rectificativa lleva solo la diferencia (en positivo o en negativo).', 'mad-oficina'); ?></small></span></label>
+        </fieldset>
         <p>
             <button class="madof-btn" name="whole" value=""><?php esc_html_e('Ver cómo queda', 'mad-oficina'); ?></button>
             <button class="madof-btn is-ghost" name="whole" value="1" formnovalidate onclick="var r=this.form.reason; if(!r.value.trim()){ r.reportValidity(); return false; }"><?php esc_html_e('Anularla entera', 'mad-oficina'); ?></button>

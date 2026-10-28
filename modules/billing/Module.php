@@ -409,7 +409,27 @@ return new class($core) implements MAD_Oficina_Module {
         $p = wp_unslash($_POST);
         $id = absint($p['invoice_id'] ?? 0);
         $draft = absint($p['draft_id'] ?? 0);
-        $state = ['lines' => (array) ($p['lines'] ?? []), 'added' => array_values(array_filter((array) ($p['added'] ?? []), 'is_array')), 'reason' => sanitize_text_field($p['reason'] ?? '')];
+        $state = ['lines' => (array) ($p['lines'] ?? []), 'added' => array_values(array_filter((array) ($p['added'] ?? []), 'is_array')), 'reason' => sanitize_text_field($p['reason'] ?? ''),
+            'target' => in_array($p['target'] ?? '', ['same', 'new', 'diff'], true) ? $p['target'] : 'same', 'new_date' => sanitize_text_field($p['new_date'] ?? '')];
+        if ( empty($p['whole']) && $state['target'] !== 'diff' ) {
+            // The invoice itself corrected (same number and date) or replaced by a new one.
+            $orig = \MAD_Oficina\Billing\Invoices::get($id);
+            if ( $draft && ($d = \MAD_Oficina\Billing\Invoices::get($draft)) && $d['status'] === 'draft' && ! \MAD_Oficina\Billing\Issuing::replacement_of($draft) ) \MAD_Oficina\Billing\Issuing::delete_draft($draft);
+            $r = $orig ? $this->issuing()->correct($id, \MAD_Oficina\Billing\Issuing::corrected_lines($orig, $state['lines'], $state['added']), $state['reason'], $state['target'], $state['new_date'], false) : new \WP_Error('madof_inv', __('Esa factura no existe.', 'mad-oficina'));
+            if ( is_wp_error($r) ) $this->back(['rectify' => $id], $r->get_error_message(), 'error');
+            set_transient('madof_rectify_form_' . (int) $r['rectify'], $state, DAY_IN_SECONDS);
+            \MAD_Oficina\Core\AdminUi::flash($r['new']
+                ? __('Así quedan la rectificativa que anula la original y la factura nueva. Todavía no se ha emitido nada: revísalas abajo.', 'mad-oficina')
+                : __('Así quedan la rectificativa y la factura corregida con su mismo número y fecha. Todavía no se ha emitido nada: revísalas abajo.', 'mad-oficina'));
+            wp_safe_redirect(add_query_arg(['page' => $this->menu_slug(), 'rectify' => $id, 'draft' => (int) $r['rectify']], admin_url('admin.php')) . '#rectificar');
+            exit;
+        }
+        // Only the rectifying one, by differences: the invoice is not touched.
+        if ( $draft && ($rep = \MAD_Oficina\Billing\Issuing::replacement_of($draft)) && ! $rep['details'] ) {
+            foreach ( array_filter([$rep['rectify'], $rep['new']]) as $x ) if ( $x['status'] === 'draft' && ! $x['number'] ) \MAD_Oficina\Billing\Issuing::delete_draft((int) $x['id']);
+            \MAD_Oficina\Billing\Issuing::forget((int) $id);
+            $draft = 0;
+        }
         $r = ! empty($p['whole'])
             ? ( trim($state['reason']) === '' ? new \WP_Error('madof_inv_reason', __('Escribe el motivo de la rectificación: va impreso en la factura.', 'mad-oficina'))
                 : $this->issuing()->rectify($id, '', sanitize_text_field($p['date'] ?? '') ?: null, 0, $state['reason'], $draft) )

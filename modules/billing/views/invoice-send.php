@@ -62,8 +62,8 @@ $extra = 0;
     <section class="madof-card madof-send-doc">
         <div class="madof-send-head"><div>
             <span class="madof-kicker"><?php esc_html_e('Factura corregida', 'mad-oficina'); ?></span>
-            <h2><?php echo esc_html(sprintf(__('La factura %1$s del %2$s, con los datos buenos', 'mad-oficina'), $fixed['number'], date_i18n('d/m/Y', strtotime($fixed['issue_date'])))); ?></h2>
-            <p><?php echo esc_html($fixed['client_name'] . ' · ' . $fixed['client_tax_id'] . ' · ' . __('Total', 'mad-oficina') . ' ' . Money::format($fixed['total'])); ?> · <?php esc_html_e('Mismo número, fecha e importes. Se corrige al emitir la rectificativa.', 'mad-oficina'); ?></p>
+            <h2><?php echo esc_html(sprintf(__('La factura %1$s del %2$s, corregida', 'mad-oficina'), $fixed['number'], date_i18n('d/m/Y', strtotime($fixed['issue_date'])))); ?></h2>
+            <p><?php echo esc_html($fixed['client_name'] . ' · ' . $fixed['client_tax_id'] . ' · ' . __('Total', 'mad-oficina') . ' ' . Money::format($fixed['total'])); ?> · <?php esc_html_e('Mismo número y fecha. Se corrige al emitir la rectificativa.', 'mad-oficina'); ?></p>
         </div></div>
         <div class="madof-send-grid">
             <?php echo InvoicePdf::preview_frame($fixed, Issuing::issuer_for($crep['original'], $settings)); ?>
@@ -71,7 +71,7 @@ $extra = 0;
                 <span class="madof-kicker"><?php esc_html_e('El email', 'mad-oficina'); ?></span>
                 <label><?php esc_html_e('Para', 'mad-oficina'); ?><input type="text" name="<?php echo esc_attr($ckey); ?>[to]" value="<?php echo esc_attr($cmail['to'] ?: $mail['to']); ?>" placeholder="email@cliente.com"></label>
                 <label><?php esc_html_e('Asunto', 'mad-oficina'); ?><input type="text" name="<?php echo esc_attr($ckey); ?>[subject]" value="<?php echo esc_attr(sprintf(__('Factura %s corregida · MAD', 'mad-oficina'), $fixed['number'])); ?>"></label>
-                <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="<?php echo esc_attr($ckey); ?>[body]" rows="8"><?php echo esc_textarea(sprintf(__("Hola,\n\nTe adjunto la factura %1\$s corregida con vuestros datos fiscales correctos (mismo número, fecha e importe). La rectificativa que te acabo de enviar deja constancia del cambio.\n\nCualquier cosa, me dices.\n\nUn abrazo,\nJessica\nMAD · Marketing & Ads", 'mad-oficina'), $fixed['number'])); ?></textarea></label>
+                <label><?php esc_html_e('Mensaje', 'mad-oficina'); ?><textarea name="<?php echo esc_attr($ckey); ?>[body]" rows="8"><?php echo esc_textarea(sprintf(__("Hola,\n\nTe adjunto la factura %1\$s corregida (mantiene su número y su fecha). La rectificativa que te acabo de enviar deja constancia del cambio.\n\nCualquier cosa, me dices.\n\nUn abrazo,\nJessica\nMAD · Marketing & Ads", 'mad-oficina'), $fixed['number'])); ?></textarea></label>
                 <p class="description"><?php esc_html_e('Sale después de la rectificativa, en otro email, con el PDF corregido.', 'mad-oficina'); ?></p>
             </div>
         </div>

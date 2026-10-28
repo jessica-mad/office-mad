@@ -351,6 +351,41 @@ class IssuingTest extends MADOF_TestCase {
         $this->assertSame('B11111111', Invoices::get($id)['client_tax_id'], 'the original is not corrected in this way');
     }
 
+    public function test_a_concept_corrected_with_the_same_number_and_date_or_as_a_new_invoice(){
+        $id = $this->draft();
+        Approvals::resolve($this->issuing()->request($id), 'approve', ['send' => '', 'issue_date' => '2026-10-28'], get_current_user_id());
+        $orig = Invoices::get($id);
+        $lines = Issuing::corrected_lines($orig, [0 => ['description' => 'Gestión de redes · octubre (Instagram y TikTok)']], [['description' => 'Fotos', 'amount' => '100']]);
+        $this->assertCount(3, $lines);
+        $this->assertWPError($this->issuing()->correct($id, Issuing::lines_of($orig), 'x', 'same'), 'nothing changed');
+        $this->assertWPError($this->issuing()->correct($id, $lines, '', 'same'), 'the reason is required');
+
+        $r = $this->issuing()->correct($id, $lines, 'Faltaba detallar el concepto y las fotos', 'same');
+        $rect = Invoices::get($r['rectify']);
+        $this->assertSame(['substitution', 'B11111111'], [$rect['rectify_mode'], $rect['client_tax_id']], 'same client details');
+        $this->assertSame(106.0, (float) $rect['total'], 'before issuing it carries the difference: 100 + 21 % VAT − 15 % IRPF');
+        $preview = Issuing::corrected_preview($orig, $rect);
+        $this->assertSame([584.06, 3], [(float) $preview['total'], count($preview['lines'])]);
+        $html = InvoicePdf::preview_html($rect, []);
+        $this->assertStringNotContainsString('Datos que se sustituyen', $html, 'the client details did not change');
+
+        Approvals::resolve($this->issuing()->request($r['rectify']), 'approve', ['send' => '', 'issue_date' => current_time('Y-m-d')], get_current_user_id());
+        $fixed = Invoices::get($id); $rect = Invoices::get($r['rectify']);
+        $this->assertSame(['26-008', '2026-10-28', 584.06, 'Gestión de redes · octubre (Instagram y TikTok)'], [$fixed['number'], $fixed['issue_date'], (float) $fixed['total'], $fixed['lines'][0]['description']]);
+        $this->assertSame(0.0, (float) $rect['total'], 'from now on the invoice carries the amounts: never twice in the books');
+        $this->assertStringContainsString('106,00', InvoicePdf::html($rect, []), 'the rectifying one still shows the difference');
+        $this->assertStringContainsString('478,06', InvoicePdf::html($rect, []), 'and what it was');
+
+        $this->assertIsArray(Issuing::undo_issue($r['rectify']));
+        $this->assertSame([478.06, 2], [(float) Invoices::get($id)['total'], count(Invoices::get($id)['lines'])], 'undone: back as it was');
+        $this->assertSame(106.0, (float) Invoices::get($r['rectify'])['total']);
+
+        // Or a new invoice: the rectifying one cancels it whole, the new one has the good concepts.
+        $n = $this->issuing()->correct($id, $lines, 'Faltaba detallar el concepto', 'new', '2026-10-30');
+        $this->assertNull(Invoices::get($r['rectify']), 'the earlier draft is replaced');
+        $this->assertSame([-478.06, 584.06, '2026-10-30', 'B11111111'], [(float) Invoices::get($n['rectify'])['total'], (float) Invoices::get($n['new'])['total'], Invoices::get($n['new'])['issue_date'], Invoices::get($n['new'])['client_tax_id']]);
+    }
+
     private function legacy_invoice(array $over = []){
         return Invoices::insert($over + ['series' => 'F', 'number' => '26-019', 'year' => 2026, 'seq' => 19, 'issue_date' => '2026-02-10', 'profile_id' => $this->profile,
             'client_name' => 'Taller Azul SL', 'client_tax_id' => 'B11111111', 'base' => 300, 'vat' => 63, 'irpf' => 45, 'total' => 318, 'vat_rate' => 0, 'irpf_rate' => 0,
