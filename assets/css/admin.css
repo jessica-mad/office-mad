@@ -296,3 +296,4 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-attach-item .madof-link{font-size:16px;line-height:1;padding:0 4px}
 .madof-attach-add{flex-basis:100%}
 .madof-plan{border-width:2px}
+.madof-next-bills div{white-space:nowrap;margin:2px 0;font-size:13px}

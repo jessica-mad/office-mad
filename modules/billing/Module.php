@@ -48,7 +48,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         add_action('admin_post_madof_billing_quote_file', [$this, 'handle_billing_quote_file']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_undo_issue', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
-            'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept', 'billing_quote_attach', 'billing_quote_detach', 'billing_quote_autosend',
+            'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept', 'billing_quote_attach', 'billing_quote_detach', 'billing_item_autosend',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
@@ -701,8 +701,8 @@ return new class($core) implements MAD_Oficina_Module {
         $r = \MAD_Oficina\Billing\Quotes::accept(absint($p['quote_id'] ?? 0), $profile_id, sanitize_text_field($p['start_month'] ?? ''), $picks, ($p['rest'] ?? '') === 'new' ? 'new' : 'reject', ($p['auto_send'] ?? '') === '1');
         if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message() . $made, 'error');
         $n = count($r['agreements']);
-        // Straight to its payment plan: every payment, its date and how it goes out.
-        $this->back(['tab' => 'quotes', 'plan' => absint($p['quote_id'] ?? 0)], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', $n, 'mad-oficina'), $n)
+        // Its agreements, where every payment to come and how it goes out are.
+        $this->back(['tab' => 'agreements', 'from_quote' => absint($p['quote_id'] ?? 0)], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', $n, 'mad-oficina'), $n)
             . ( $r['left'] ? ' ' . ($r['new_quote'] ? __('Lo no aceptado está en un presupuesto nuevo para replantearlo.', 'mad-oficina') : sprintf(_n('%d línea queda como no aceptada.', '%d líneas quedan como no aceptadas.', $r['left'], 'mad-oficina'), $r['left'])) : '' ) . $made);
     }
 
@@ -714,7 +714,7 @@ return new class($core) implements MAD_Oficina_Module {
         $r = ! empty($_FILES['file']['tmp_name'])
             ? \MAD_Oficina\Billing\QuoteFiles::add_file($id, $_FILES['file'], $name)
             : \MAD_Oficina\Billing\QuoteFiles::add_link($id, wp_unslash($_POST['url'] ?? ''), $name);
-        $this->back(['tab' => 'quotes'] + ( ! empty($_POST['plan']) ? ['plan' => $id] : [] ), is_wp_error($r) ? $r->get_error_message() : __('Adjuntado al presupuesto.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
+        $this->back(['tab' => 'quotes'], is_wp_error($r) ? $r->get_error_message() : __('Adjuntado al presupuesto.', 'mad-oficina'), is_wp_error($r) ? 'error' : 'success');
     }
 
     public function handle_billing_quote_detach(){
@@ -737,15 +737,15 @@ return new class($core) implements MAD_Oficina_Module {
         exit;
     }
 
-    /** The payments of an accepted quote: sent alone on their day, or asked first. */
-    public function handle_billing_quote_autosend(){
-        $this->guard('billing_quote_autosend');
-        $id = absint($_POST['quote_id'] ?? 0);
+    /** An agreement's invoices: sent alone on their date, or asked first. */
+    public function handle_billing_item_autosend(){
+        $this->guard('billing_item_autosend');
+        $id = absint($_POST['item_id'] ?? 0);
         $on = ! empty($_POST['on']);
-        \MAD_Oficina\Billing\Agreements::set_auto_send(array_column(\MAD_Oficina\Billing\Agreements::of_quote($id), 'id'), $on);
-        $this->back(['tab' => 'quotes', 'plan' => $id], $on
-            ? __('Hecho: cada factura de este plan se emitirá y se enviará sola en su fecha, y te aviso por Chat. Las que ya estaban preparadas como borrador, prográmalas desde el borrador.', 'mad-oficina')
-            : __('Hecho: en la fecha de cada pago te pregunto en la bandeja y en Chat antes de enviar.', 'mad-oficina'));
+        \MAD_Oficina\Billing\Agreements::set_auto_send([$id], $on);
+        $this->back_to('agreements', $on
+            ? __('Hecho: sus facturas se emitirán y se enviarán solas en su fecha, y te aviso por Chat. Si ya hay un borrador preparado, prográmalo desde el borrador.', 'mad-oficina')
+            : __('Hecho: en la fecha de cada factura te pregunto en la bandeja y en Chat antes de enviar.', 'mad-oficina'), 'success', ! empty($_POST['from_quote']) ? ['from_quote' => absint($_POST['from_quote'])] : []);
     }
 
     /* ==== Billing calendar ==== */

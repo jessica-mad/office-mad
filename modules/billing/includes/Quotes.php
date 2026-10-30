@@ -165,38 +165,6 @@ final class Quotes {
         return ['agreements' => $ids, 'left' => count($left), 'new_quote' => (int) $new];
     }
 
-    /**
-     * The payments of an accepted quote, one per billing date (agreements of the same client
-     * and month go on one invoice): date, concepts, base, total with VAT and IRPF, and what
-     * happened to it (invoiced, a draft, still to come). Open-ended fees: the next 12 months.
-     * @return array<int,array{month:string, date:string, lines:array, base:float, total:float, invoice:?array, auto:bool}>
-     */
-    public static function payment_plan(array $q, Issuing $issuing){
-        global $wpdb;
-        $profile = Profiles::get((int) $q['profile_id']);
-        if ( ! $profile ) return [];
-        $by = [];
-        foreach ( Agreements::of_quote($q['id']) as $a ) {
-            $last = $a['end_month'] ?: Months::add(max($a['start_month'], Months::current()), 11);
-            for ( $m = $a['start_month']; $m <= $last; $m = Months::add($m, 1) ) {
-                if ( Calendar::skipped($a['id'], $m) ) continue;
-                $by[$m]['lines'][] = ['concept' => $a['concept'], 'amount' => $a['amount'], 'item_id' => $a['id']];
-                $by[$m]['auto'] = ($by[$m]['auto'] ?? true) && $a['auto_send'];
-                if ( ! $a['end_month'] && $m === $last ) $by[$m]['open_ended'] = true;
-            }
-        }
-        ksort($by);
-        $out = [];
-        foreach ( $by as $m => $p ) {
-            $base = Money::round(array_sum(array_column($p['lines'], 'amount')));
-            $t = Invoices::totals([['amount' => $base]], $profile['vat_rate'], $profile['irpf_rate']);
-            $inv = null;
-            foreach ( $p['lines'] as $l ) if ( ($b = Calendar::billed_in($l['item_id'], $m)) ) { $inv = $b; break; }
-            $out[] = ['month' => $m, 'date' => $issuing->default_issue_date($profile, $m . '-01'), 'lines' => $p['lines'], 'base' => $base, 'total' => $t['total'], 'invoice' => $inv, 'auto' => (bool) $p['auto'], 'open_ended' => ! empty($p['open_ended'])];
-        }
-        return $out;
-    }
-
     /** Base amount of a quote line in a month (0 outside its months). */
     public static function line_in(array $l, $month){
         if ( $month < $l['start_month'] ) return 0.0;

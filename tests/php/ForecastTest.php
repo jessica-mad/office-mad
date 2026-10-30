@@ -98,11 +98,9 @@ class ForecastTest extends MADOF_TestCase {
         $this->assertSame(['Vídeo'], array_column($rest['lines'], 'concept'), 'what was not accepted, to rethink');
         $this->assertStringContainsString('Aceptado en parte', Quotes::get($q)['notes']);
 
-        // Its payment plan: one invoice per month, with VAT, and how it goes out.
-        $plan = Quotes::payment_plan(Quotes::get($q), new MAD_Oficina\Billing\Issuing(['billing_day' => 28]));
-        $this->assertSame(['2026-11', '2026-12', '2027-01', '2027-02', '2027-03'], array_column($plan, 'month'));
-        $this->assertSame(['2026-11-28', 500.0, false], [$plan[0]['date'], $plan[0]['base'], $plan[0]['auto']]);
-        $this->assertSame(1500.0, $plan[2]['base'], 'January: Redes and the first instalment of the web');
+        // What was accepted is ordinary agreements, linked to the quote, with how their invoices go out.
+        $this->assertSame([$q, $q], array_column(Agreements::of_quote($q), 'quote_id'));
+        $this->assertSame([0, 0], array_column(Agreements::of_quote($q), 'auto_send'), 'asked first unless she chose otherwise');
     }
 
     public function test_links_and_documents_go_with_the_quote(){

@@ -21,7 +21,7 @@ $profile_options = function($selected = 0) use ($profiles, $codes){
     return $out;
 };
 // Links and documents of a quote, and a small form to add more.
-$attachments = function(array $q, $plan = false){
+$attachments = function(array $q){
     $list = \MAD_Oficina\Billing\QuoteFiles::of($q); ?>
     <div class="madof-attach">
         <?php foreach ( $list as $a ) : ?>
@@ -31,7 +31,7 @@ $attachments = function(array $q, $plan = false){
         <details class="madof-more madof-attach-add"><summary><?php esc_html_e('Adjuntar enlace o PDF', 'mad-oficina'); ?></summary>
             <form method="post" enctype="multipart/form-data" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form madof-mini">
                 <input type="hidden" name="action" value="madof_billing_quote_attach"><?php wp_nonce_field('madof_billing_quote_attach'); ?>
-                <input type="hidden" name="quote_id" value="<?php echo (int) $q['id']; ?>"><?php if ( $plan ) : ?><input type="hidden" name="plan" value="1"><?php endif; ?>
+                <input type="hidden" name="quote_id" value="<?php echo (int) $q['id']; ?>">
                 <div class="madof-cols">
                     <label><?php esc_html_e('Enlace', 'mad-oficina'); ?><input type="url" name="url" placeholder="https://"></label>
                     <label><?php esc_html_e('…o el documento (PDF o imagen)', 'mad-oficina'); ?><input type="file" name="file" accept="application/pdf,image/png,image/jpeg,image/webp"></label>
@@ -119,43 +119,9 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
 <?php else :
     $open = Quotes::all(Quotes::OPEN);
     $closed = Quotes::all(['accepted', 'rejected', 'expired']);
-    $plan_q = isset($_GET['plan']) ? Quotes::get(absint($_GET['plan'])) : null;
-    if ( $plan_q && $plan_q['status'] === 'accepted' ) :
-        $plan = Quotes::payment_plan($plan_q, new \MAD_Oficina\Billing\Issuing(get_option(MAD_Oficina_Core::option_key('billing'), []) ?: []));
-        $all_auto = $plan && ! array_filter($plan, fn($p) => ! $p['auto']); ?>
-    <section class="madof-card madof-plan" id="plan">
-        <span class="madof-kicker"><?php echo esc_html(sprintf(__('Plan de cobros · %s', 'mad-oficina'), $plan_q['number'])); ?></span>
-        <h3><?php echo esc_html($plan_q['prospect_name'] . ' · ' . $plan_q['title']); ?></h3>
-        <?php $attachments($plan_q, true); ?>
-        <?php if ( ! $plan ) : ?><p class="madof-empty"><?php esc_html_e('No tiene pagos pendientes.', 'mad-oficina'); ?></p><?php else : ?>
-        <table class="madof-table">
-            <thead><tr><th><?php esc_html_e('Fecha de factura', 'mad-oficina'); ?></th><th><?php esc_html_e('Qué se cobra', 'mad-oficina'); ?></th><th><?php esc_html_e('Base', 'mad-oficina'); ?></th><th><?php esc_html_e('Total', 'mad-oficina'); ?></th><th><?php esc_html_e('Cómo sale', 'mad-oficina'); ?></th></tr></thead>
-            <tbody>
-            <?php foreach ( $plan as $p ) : ?>
-                <tr>
-                    <td class="madof-nowrap"><strong><?php echo esc_html(date_i18n('j M Y', strtotime($p['date']))); ?></strong></td>
-                    <td><?php echo esc_html(implode(' + ', array_column($p['lines'], 'concept'))); ?><?php if ( $p['open_ended'] ) echo '<br><small class="madof-muted">' . esc_html__('…y sigue cada mes, sin fecha de fin', 'mad-oficina') . '</small>'; ?></td>
-                    <td class="madof-nowrap"><?php echo esc_html(Money::format($p['base'])); ?></td>
-                    <td class="madof-nowrap"><strong><?php echo esc_html(Money::format($p['total'])); ?></strong></td>
-                    <td><?php if ( $p['invoice'] ) : ?>
-                            <a class="madof-pill madof-st madof-st-<?php echo esc_attr($p['invoice']['status']); ?>" href="<?php echo esc_url($base . ($p['invoice']['number'] ? '&invoice=' : '&edit=') . (int) $p['invoice']['invoice_id']); ?>"><?php echo esc_html($p['invoice']['number'] ?: __('Borrador', 'mad-oficina')); ?></a>
-                        <?php else : ?>
-                            <span class="madof-pill <?php echo $p['auto'] ? 'madof-st madof-st-sent' : ''; ?>"><?php echo esc_html($p['auto'] ? __('Sale sola', 'mad-oficina') : __('Te pregunto ese día', 'mad-oficina')); ?></span>
-                        <?php endif; ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-        <p class="description"><?php esc_html_e('Cada factura se prepara como borrador unos días antes de su fecha (el día de facturación del cliente) y, ese día, sale sola o te la pregunto en la bandeja y en Chat.', 'mad-oficina'); ?></p>
-        <?php echo AdminUi::form_open('billing_quote_autosend', 'madof-inline'); ?>
-            <input type="hidden" name="quote_id" value="<?php echo (int) $plan_q['id']; ?>"><input type="hidden" name="on" value="<?php echo $all_auto ? '' : '1'; ?>">
-            <button class="madof-btn is-small <?php echo $all_auto ? 'is-ghost' : ''; ?>"><?php echo esc_html($all_auto ? __('Prefiero que me preguntes antes de cada una', 'mad-oficina') : __('Que salgan solas en su fecha', 'mad-oficina')); ?></button>
-        </form>
-        <?php endif; ?>
-    </section>
-    <?php endif; ?>
+    ?>
     <p><a class="madof-btn" href="<?php echo esc_url($base . '&tab=quotes&quote=new'); ?>"><?php esc_html_e('Nuevo presupuesto', 'mad-oficina'); ?></a></p>
-    <p class="description"><?php esc_html_e('De momento los presupuestos se apuntan aquí para la previsión: el documento A4 y el envío llegan con el bloque de presupuestos. Al aceptar uno, sus líneas pasan a Acuerdos.', 'mad-oficina'); ?></p>
+    <p class="description"><?php esc_html_e('Los presupuestos enviados cuentan como «posible» en la previsión. Al aceptar uno (todo o una parte), sus líneas pasan a Acuerdos: desde ahí se preparan sus facturas en cada fecha, como cualquier otro acuerdo.', 'mad-oficina'); ?></p>
     <?php if ( ! $open ) : ?><p class="madof-empty"><?php esc_html_e('No hay presupuestos abiertos.', 'mad-oficina'); ?></p><?php endif; ?>
     <?php foreach ( $open as $o ) :
         $expired = $o['valid_until'] && $o['valid_until'] < current_time('Y-m-d'); ?>
@@ -242,7 +208,7 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
             <tbody><?php foreach ( $closed as $c ) : ?>
                 <tr><td><?php echo esc_html($c['number']); ?></td><td><?php echo esc_html($c['prospect_name']); ?></td><td><?php echo esc_html($c['title'] . ' · ' . Quotes::describe($c)); ?></td>
                     <td><span class="madof-pill <?php echo $c['status'] === 'accepted' ? 'is-on' : ''; ?>"><?php echo esc_html__(Quotes::STATUSES[$c['status']], 'mad-oficina'); ?></span>
-                        <?php if ( $c['status'] === 'accepted' ) : ?><br><a href="<?php echo esc_url($base . '&tab=quotes&plan=' . (int) $c['id'] . '#plan'); ?>"><?php esc_html_e('Plan de cobros', 'mad-oficina'); ?></a><?php endif; ?></td>
+                        <?php if ( $c['status'] === 'accepted' ) : ?><br><a href="<?php echo esc_url($base . '&tab=agreements&from_quote=' . (int) $c['id']); ?>"><?php esc_html_e('Sus acuerdos y cobros', 'mad-oficina'); ?></a><?php endif; ?></td>
                     <td><?php $attachments($c); ?></td></tr>
             <?php endforeach; ?></tbody>
         </table>
