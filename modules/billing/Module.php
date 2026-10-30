@@ -678,9 +678,30 @@ return new class($core) implements MAD_Oficina_Module {
 
     public function handle_billing_quote_accept(){
         $this->guard('billing_quote_accept');
-        $r = \MAD_Oficina\Billing\Quotes::accept(absint($_POST['quote_id'] ?? 0), absint($_POST['profile_id'] ?? 0), sanitize_text_field(wp_unslash($_POST['start_month'] ?? '')));
-        if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message(), 'error');
-        $this->back(['tab' => 'agreements'], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', count($r), 'mad-oficina'), count($r)));
+        $p = wp_unslash($_POST);
+        $profile_id = absint($p['profile_id'] ?? 0);
+        $made = '';
+        if ( ($p['profile_id'] ?? '') === 'new' ) {
+            // A new client, right from the quote: fiscal profile, and the office client if asked.
+            $n = (array) ($p['new'] ?? []);
+            if ( trim((string) ($n['legal_name'] ?? '')) === '' ) $this->back_to('quotes', __('Escribe el nombre fiscal del cliente nuevo.', 'mad-oficina'), 'error');
+            $client_id = null;
+            if ( ! empty($n['office']) ) {
+                $c = \MAD_Oficina\Core\Repo\Clients::save(['name' => ($n['name'] ?? '') ?: $n['legal_name'], 'code' => $n['code'] ?? '']); // domains and contacts: on its card, where they are checked
+                if ( is_wp_error($c) ) $this->back_to('quotes', $c->get_error_message(), 'error');
+                $client_id = (int) $c;
+            }
+            $profile_id = \MAD_Oficina\Billing\Profiles::save(['legal_name' => $n['legal_name'], 'tax_id' => $n['tax_id'] ?? '', 'address' => $n['address'] ?? '', 'city' => $n['city'] ?? '', 'email' => $n['email'] ?? '',
+                'vat_rate' => str_replace(',', '.', (string) ($n['vat_rate'] ?? '21')), 'irpf_rate' => str_replace(',', '.', (string) ($n['irpf_rate'] ?? '15')), 'client_id' => $client_id]);
+            if ( $client_id ) \MAD_Oficina\Billing\Profiles::link($profile_id, $client_id);
+            $made = ' ' . ($client_id ? __('Cliente nuevo creado (en la oficina y en facturación).', 'mad-oficina') : __('Cliente de facturación nuevo creado.', 'mad-oficina'));
+        }
+        $picks = isset($p['pick']) ? array_map(fn($x) => is_array($x) ? $x : [], (array) $p['pick']) : null;
+        $r = \MAD_Oficina\Billing\Quotes::accept(absint($p['quote_id'] ?? 0), $profile_id, sanitize_text_field($p['start_month'] ?? ''), $picks, ($p['rest'] ?? '') === 'new' ? 'new' : 'reject');
+        if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message() . $made, 'error');
+        $n = count($r['agreements']);
+        $this->back(['tab' => 'agreements'], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', $n, 'mad-oficina'), $n)
+            . ( $r['left'] ? ' ' . ($r['new_quote'] ? __('Lo no aceptado está en un presupuesto nuevo para replantearlo.', 'mad-oficina') : sprintf(_n('%d línea queda como no aceptada.', '%d líneas quedan como no aceptadas.', $r['left'], 'mad-oficina'), $r['left'])) : '' ) . $made);
     }
 
     /* ==== Billing calendar ==== */

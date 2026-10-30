@@ -285,3 +285,9 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-peek-dialog::backdrop{background:rgba(11,11,11,.55)}
 .madof-peek-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .madof-peek-head span{display:flex;gap:8px}
+.madof-new-client{border:1px dashed var(--k);border-radius:14px;padding:12px 14px;margin:10px 0}
+.madof-new-client legend{font-weight:600;padding:0 6px}
+.madof-accept-lines input[type=text]{min-width:120px;width:100%}
+.madof-accept-lines .madof-price{max-width:110px}
+.madof-accept-lines tr.is-removed td:not(:first-child){opacity:.45;text-decoration:line-through}
+@media (max-width:900px){.madof-accept-lines{display:block;overflow-x:auto}}

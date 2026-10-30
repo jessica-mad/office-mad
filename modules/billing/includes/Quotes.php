@@ -109,32 +109,60 @@ final class Quotes {
     }
 
     /**
-     * Accepted: every line becomes an agreement for the chosen fiscal profile.
-     * $start shifts the whole quote when the work starts later (or earlier) than planned.
-     * @return int[]|\WP_Error agreement ids
+     * Accepted, all of it or the part agreed: each chosen line becomes an agreement for the
+     * chosen fiscal profile, with the amount, kind (monthly or once), months and start agreed
+     * (they may differ from the quote). $start shifts the whole quote when the work starts
+     * later (or earlier) than planned; a line's own start wins over it.
+     * @param array|null $picks [line index => {on, concept, amount, kind, months, start_month}]; null = all as quoted
+     * @param string     $rest  what is not accepted: 'reject' (noted) or 'new' (a new quote with it, to rethink)
+     * @return array{agreements:int[], left:int, new_quote:int}|\WP_Error
      */
-    public static function accept($id, $profile_id, $start = null){
+    public static function accept($id, $profile_id, $start = null, ?array $picks = null, $rest = 'reject'){
         global $wpdb;
         $q = self::get($id);
         if ( ! $q || ! in_array($q['status'], self::OPEN, true) ) return new \WP_Error('madof_quote', __('Solo se aceptan presupuestos en borrador o enviados.', 'mad-oficina'));
         $profile = Profiles::get((int) ($profile_id ?: $q['profile_id']));
-        if ( ! $profile ) return new \WP_Error('madof_quote_profile', __('Para aceptarlo, elige a quién se facturará (sus datos fiscales). Si aún no es cliente, créalo primero.', 'mad-oficina'));
+        if ( ! $profile ) return new \WP_Error('madof_quote_profile', __('Para aceptarlo, elige a quién se facturará (sus datos fiscales) o crea el cliente aquí mismo.', 'mad-oficina'));
         $first = min(array_column($q['lines'], 'start_month'));
         $shift = ($start = Months::valid($start)) ? Months::diff($first, $start) : 0;
 
+        $agreed = []; $left = [];
+        foreach ( array_values($q['lines']) as $i => $l ) {
+            $p = $picks === null ? ['on' => 1] : (array) ($picks[$i] ?? []);
+            if ( empty($p['on']) ) { $left[] = $l; continue; }
+            $kind = ($p['kind'] ?? $l['kind']) === 'once' ? 'once' : 'monthly';
+            $amount = isset($p['amount']) && trim((string) $p['amount']) !== '' ? Money::parse((string) $p['amount']) : $l['amount'];
+            if ( ! $amount ) return new \WP_Error('madof_quote_line', sprintf(__('Falta el importe acordado de «%s».', 'mad-oficina'), $l['concept']));
+            $from = Months::valid($p['start_month'] ?? '') ?: Months::add($l['start_month'], $shift);
+            $months = $kind === 'monthly' ? ( array_key_exists('months', $p) ? ((int) $p['months'] ?: null) : $l['months'] ) : 1;
+            $agreed[] = ['kind' => $kind, 'concept' => mb_substr(sanitize_text_field($p['concept'] ?? '') ?: $l['concept'], 0, 255), 'amount' => (float) $amount, 'start_month' => $from, 'months' => $months, 'was' => $l];
+        }
+        if ( ! $agreed ) return new \WP_Error('madof_quote_none', __('Marca al menos una línea aceptada. Si no aceptan nada, márcalo como rechazado.', 'mad-oficina'));
+
         $ids = [];
-        foreach ( $q['lines'] as $l ) {
-            $from = Months::add($l['start_month'], $shift);
+        foreach ( $agreed as $l ) {
             $r = Agreements::create([
                 'profile_id' => $profile['id'], 'kind' => $l['kind'], 'concept' => $l['concept'], 'amount' => $l['amount'],
-                'start_month' => $from, 'end_month' => $l['kind'] === 'monthly' && $l['months'] ? Months::add($from, $l['months'] - 1) : null,
+                'start_month' => $l['start_month'], 'end_month' => $l['kind'] === 'monthly' && $l['months'] ? Months::add($l['start_month'], $l['months'] - 1) : null,
                 'quote_id' => $q['id'], 'notes' => sprintf(__('Del presupuesto %s', 'mad-oficina'), $q['number']),
             ]);
             if ( is_wp_error($r) ) return $r;
             $ids[] = $r;
         }
-        $wpdb->update(self::table(), ['status' => 'accepted', 'decided_at' => Time::now(), 'profile_id' => $profile['id'], 'client_id' => $profile['client_id'], 'updated_at' => Time::now()], ['id' => $id]);
-        return $ids;
+        // What was agreed, against what was quoted, stays on the quote.
+        $note = $left || array_filter($agreed, fn($l) => (float) $l['amount'] !== (float) $l['was']['amount'] || $l['kind'] !== $l['was']['kind'] || $l['months'] !== $l['was']['months'])
+            ? sprintf(__('Aceptado en parte (%1$s): %2$s.', 'mad-oficina'), current_time('d/m/Y'), self::describe(['lines' => $agreed])) . ( $left ? ' ' . sprintf(__('No aceptado: %s.', 'mad-oficina'), implode(', ', array_column($left, 'concept'))) : '' )
+            : '';
+        $new = 0;
+        if ( $left && $rest === 'new' ) {
+            $new = self::save(['title' => $q['title'] . ' ' . __('(por replantear)', 'mad-oficina'), 'profile_id' => $profile['id'], 'probability' => $q['probability'], 'notes' => sprintf(__('Lo que no se aceptó del presupuesto %s.', 'mad-oficina'), $q['number'])],
+                array_map(fn($l) => ['kind' => $l['kind'], 'concept' => $l['concept'], 'amount' => number_format((float) $l['amount'], 2, ',', ''), 'start_month' => $l['start_month'], 'months' => $l['months']], $left));
+            if ( is_wp_error($new) ) $new = 0;
+            elseif ( $new ) $note .= ' ' . sprintf(__('Lo demás pasa al presupuesto %s.', 'mad-oficina'), self::get($new)['number']);
+        }
+        $wpdb->update(self::table(), ['status' => 'accepted', 'decided_at' => Time::now(), 'profile_id' => $profile['id'], 'client_id' => $profile['client_id'],
+            'notes' => trim((string) $q['notes'] . "\n" . $note) ?: null, 'updated_at' => Time::now()], ['id' => $id]);
+        return ['agreements' => $ids, 'left' => count($left), 'new_quote' => (int) $new];
     }
 
     /** Base amount of a quote line in a month (0 outside its months). */

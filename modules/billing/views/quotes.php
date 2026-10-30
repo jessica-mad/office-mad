@@ -118,16 +118,55 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                 <button class="madof-link"><?php echo esc_html($label); ?></button></form>
             <?php endforeach; ?>
         </div>
-        <details class="madof-more"><summary><?php esc_html_e('¡Aceptado!', 'mad-oficina'); ?></summary>
-            <?php echo AdminUi::form_open('billing_quote_accept', 'madof-form madof-mini'); ?>
+        <details class="madof-more madof-accept"><summary><?php esc_html_e('¡Aceptado! (todo o una parte)', 'mad-oficina'); ?></summary>
+            <?php echo AdminUi::form_open('billing_quote_accept', 'madof-form madof-mini'); $lead = ! empty($o['lead_id']) && class_exists('\\MAD_Oficina\\Visitors\\Leads') ? \MAD_Oficina\Visitors\Leads::get((int) $o['lead_id']) : null; ?>
                 <input type="hidden" name="quote_id" value="<?php echo (int) $o['id']; ?>">
-                <div class="madof-cols">
-                    <label><?php esc_html_e('Se factura a', 'mad-oficina'); ?><select name="profile_id" required><?php echo $profile_options($o['profile_id']); ?></select>
-                        <?php if ( ! $o['profile_id'] ) : ?><small><?php esc_html_e('Si aún no es cliente, créalo y añade sus datos fiscales primero.', 'mad-oficina'); ?></small><?php endif; ?></label>
-                    <label><?php esc_html_e('Empieza en', 'mad-oficina'); ?><input type="month" name="start_month" value="<?php echo esc_attr(min(array_column($o['lines'], 'start_month'))); ?>">
-                        <small><?php esc_html_e('Si arranca más tarde, todo el presupuesto se mueve.', 'mad-oficina'); ?></small></label>
-                </div>
-                <button class="madof-btn is-small"><?php esc_html_e('Aceptar y crear los acuerdos', 'mad-oficina'); ?></button>
+                <label><?php esc_html_e('Se factura a', 'mad-oficina'); ?>
+                    <select name="profile_id" data-who required><?php echo $profile_options($o['profile_id']); ?><option value="new" <?php selected(! $o['profile_id']); ?>><?php esc_html_e('+ Cliente nuevo (lo creo ahora)', 'mad-oficina'); ?></option></select></label>
+                <fieldset class="madof-new-client" data-new-client <?php echo $o['profile_id'] ? 'hidden' : ''; ?>>
+                    <legend><?php esc_html_e('Cliente nuevo: sus datos fiscales', 'mad-oficina'); ?></legend>
+                    <div class="madof-cols">
+                        <label><?php esc_html_e('Nombre fiscal', 'mad-oficina'); ?><input type="text" name="new[legal_name]" value="<?php echo esc_attr($o['prospect_name']); ?>"></label>
+                        <label><?php esc_html_e('NIF / CIF', 'mad-oficina'); ?><input type="text" name="new[tax_id]"></label>
+                        <label><?php esc_html_e('Email para facturas', 'mad-oficina'); ?><input type="email" name="new[email]" value="<?php echo esc_attr($lead['email'] ?? ''); ?>"></label>
+                    </div>
+                    <div class="madof-cols">
+                        <label><?php esc_html_e('Domicilio', 'mad-oficina'); ?><input type="text" name="new[address]"></label>
+                        <label><?php esc_html_e('Localidad', 'mad-oficina'); ?><input type="text" name="new[city]"></label>
+                        <label><?php esc_html_e('IVA %', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="new[vat_rate]" value="21"></label>
+                        <label><?php esc_html_e('IRPF %', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="new[irpf_rate]" value="15"></label>
+                    </div>
+                    <label class="madof-check"><input type="checkbox" name="new[office]" value="1" checked data-office> <?php esc_html_e('Crearlo también como cliente de la oficina (portal, reuniones, tareas)', 'mad-oficina'); ?></label>
+                    <div class="madof-cols" data-office-fields>
+                        <label><?php esc_html_e('Nombre comercial', 'mad-oficina'); ?><input type="text" name="new[name]" value="<?php echo esc_attr($lead['company'] ?? $o['prospect_name']); ?>"></label>
+                        <label><?php esc_html_e('Código corto', 'mad-oficina'); ?><input type="text" name="new[code]" maxlength="12" placeholder="MOM" value="<?php echo esc_attr(strtoupper(substr(preg_replace('/[^A-Za-z]/', '', remove_accents((string) $o['prospect_name'])), 0, 3))); ?>">
+                            <small><?php esc_html_e('El que usas en Calendar (2 a 12 letras o números).', 'mad-oficina'); ?></small></label>
+                    </div>
+                </fieldset>
+
+                <table class="madof-table madof-accept-lines">
+                    <thead><tr><th><span class="screen-reader-text"><?php esc_html_e('Aceptada', 'mad-oficina'); ?></span></th><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th><?php esc_html_e('Presupuestado', 'mad-oficina'); ?></th><th><?php esc_html_e('Acordado: cómo se paga', 'mad-oficina'); ?></th><th><?php esc_html_e('Importe', 'mad-oficina'); ?></th><th><?php esc_html_e('Desde', 'mad-oficina'); ?></th><th><?php esc_html_e('Meses', 'mad-oficina'); ?></th></tr></thead>
+                    <tbody>
+                    <?php foreach ( array_values($o['lines']) as $i => $l ) : $n = 'pick[' . (int) $i . ']'; ?>
+                        <tr data-pick>
+                            <td><input type="checkbox" name="<?php echo esc_attr($n); ?>[on]" value="1" checked aria-label="<?php echo esc_attr(sprintf(__('Aceptada: %s', 'mad-oficina'), $l['concept'])); ?>"></td>
+                            <td><input type="text" name="<?php echo esc_attr($n); ?>[concept]" value="<?php echo esc_attr($l['concept']); ?>" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"></td>
+                            <td class="madof-muted"><?php echo esc_html(Quotes::describe(['lines' => [$l]])); ?></td>
+                            <td><select name="<?php echo esc_attr($n); ?>[kind]" aria-label="<?php esc_attr_e('Cómo se paga', 'mad-oficina'); ?>"><option value="once" <?php selected($l['kind'], 'once'); ?>><?php esc_html_e('Una vez', 'mad-oficina'); ?></option><option value="monthly" <?php selected($l['kind'], 'monthly'); ?>><?php esc_html_e('Al mes (o a plazos)', 'mad-oficina'); ?></option></select></td>
+                            <td><input type="text" inputmode="decimal" class="madof-price" name="<?php echo esc_attr($n); ?>[amount]" value="<?php echo esc_attr(number_format((float) $l['amount'], 2, ',', '')); ?>" aria-label="<?php esc_attr_e('Importe acordado (sin IVA)', 'mad-oficina'); ?>"></td>
+                            <td><input type="month" name="<?php echo esc_attr($n); ?>[start_month]" value="<?php echo esc_attr($l['start_month']); ?>" aria-label="<?php esc_attr_e('Desde', 'mad-oficina'); ?>"></td>
+                            <td><input type="number" min="1" max="120" class="madof-qty" name="<?php echo esc_attr($n); ?>[months]" value="<?php echo esc_attr($l['kind'] === 'monthly' ? (string) ($l['months'] ?? '') : ''); ?>" placeholder="∞" aria-label="<?php esc_attr_e('Meses (vacío = sin fin)', 'mad-oficina'); ?>"></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <p class="description"><?php esc_html_e('Desmarca lo que no han aceptado y ajusta lo acordado: importe sin IVA de cada pago, si es una vez o al mes (para pagar a plazos: «al mes», el importe de cada plazo y cuántos meses), y desde cuándo.', 'mad-oficina'); ?></p>
+                <fieldset class="madof-choice">
+                    <legend><?php esc_html_e('Lo que no se acepta', 'mad-oficina'); ?></legend>
+                    <label class="madof-check"><input type="radio" name="rest" value="reject" checked> <?php esc_html_e('Se queda apuntado como no aceptado', 'mad-oficina'); ?></label>
+                    <label class="madof-check"><input type="radio" name="rest" value="new"> <?php esc_html_e('Pasa a un presupuesto nuevo para replantearlo', 'mad-oficina'); ?></label>
+                </fieldset>
+                <button class="madof-btn is-small"><?php esc_html_e('Aceptar lo marcado y crear los acuerdos', 'mad-oficina'); ?></button>
             </form>
         </details>
     </section>
@@ -145,3 +184,17 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
     </details>
     <?php endif; ?>
 <?php endif; ?>
+<script>
+document.querySelectorAll('.madof-accept form').forEach(function (f) {
+    var who = f.querySelector('[data-who]'), box = f.querySelector('[data-new-client]'), office = f.querySelector('[data-office]'), of = f.querySelector('[data-office-fields]');
+    var sync = function () {
+        box.hidden = who.value !== 'new';
+        of.hidden = !office.checked;
+        box.querySelector('[name="new[legal_name]"]').required = who.value === 'new';
+    };
+    who.addEventListener('change', sync); office.addEventListener('change', sync); sync();
+    f.querySelectorAll('[data-pick] input[type=checkbox]').forEach(function (c) {
+        c.addEventListener('change', function () { c.closest('tr').classList.toggle('is-removed', !c.checked); });
+    });
+});
+</script>

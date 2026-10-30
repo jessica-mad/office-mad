@@ -67,7 +67,7 @@ class ForecastTest extends MADOF_TestCase {
         $this->assertSame(1200.0, Quotes::line_in($quote['lines'][0], '2027-01'));
         $this->assertSame(0.0, Quotes::line_in($quote['lines'][0], '2027-02'));
 
-        $ids = Quotes::accept($q, 0, '2026-12'); // starts one month later than planned
+        $ids = Quotes::accept($q, 0, '2026-12')['agreements']; // starts one month later than planned
         $this->assertCount(2, $ids);
         $fee = Agreements::get($ids[0]);
         $this->assertSame(['2026-12', '2027-02'], [$fee['start_month'], $fee['end_month']]);
@@ -75,6 +75,28 @@ class ForecastTest extends MADOF_TestCase {
         $this->assertSame('accepted', Quotes::get($q)['status']);
         $this->assertWPError(Quotes::save(['title' => 'x', 'profile_id' => $this->p_rf], [['kind' => 'once', 'concept' => 'x', 'amount' => '1', 'start_month' => '2026-11']], $q), 'accepted quotes are closed');
         $this->assertWPError(Quotes::accept($q, $this->p_rf));
+    }
+
+    public function test_part_of_a_quote_accepted_with_the_payments_agreed_and_the_rest_to_rethink(){
+        $q = Quotes::save(['title' => 'Plan 2027', 'profile_id' => $this->p_rf, 'sent_on' => '2026-10-01', 'probability' => 50], [
+            ['kind' => 'monthly', 'concept' => 'Redes', 'amount' => '600', 'start_month' => '2026-11', 'months' => 6],
+            ['kind' => 'once', 'concept' => 'Web', 'amount' => '3000', 'start_month' => '2026-11'],
+            ['kind' => 'once', 'concept' => 'Vídeo', 'amount' => '900', 'start_month' => '2026-12'],
+        ]);
+        $this->assertWPError(Quotes::accept($q, 0, null, [0 => [], 1 => [], 2 => []]), 'at least one line');
+        // Redes at 500 for 3 months; the web paid in 3 monthly instalments of 1.000; the video not now.
+        $r = Quotes::accept($q, 0, null, [
+            0 => ['on' => 1, 'amount' => '500', 'kind' => 'monthly', 'months' => '3'],
+            1 => ['on' => 1, 'amount' => '1000', 'kind' => 'monthly', 'months' => '3', 'start_month' => '2027-01'],
+        ], 'new');
+        $this->assertCount(2, $r['agreements']);
+        $redes = Agreements::get($r['agreements'][0]); $web = Agreements::get($r['agreements'][1]);
+        $this->assertSame([500.0, '2026-11', '2027-01'], [(float) $redes['amount'], $redes['start_month'], $redes['end_month']]);
+        $this->assertSame(['monthly', 1000.0, '2027-01', '2027-03'], [$web['kind'], (float) $web['amount'], $web['start_month'], $web['end_month']]);
+        $this->assertSame(1, $r['left']);
+        $rest = Quotes::get($r['new_quote']);
+        $this->assertSame(['Vídeo'], array_column($rest['lines'], 'concept'), 'what was not accepted, to rethink');
+        $this->assertStringContainsString('Aceptado en parte', Quotes::get($q)['notes']);
     }
 
     public function test_quote_for_someone_who_is_not_a_client_yet(){
