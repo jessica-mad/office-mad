@@ -197,6 +197,12 @@ final class Calendar {
             'notes' => $other ? sprintf(__('Ojo: este mes ya hay otra factura para este cliente (%s). Revisa que no se cobre dos veces.', 'mad-oficina'), $other) : '',
         ], $lines);
         if ( ! is_wp_error($id) ) $wpdb->update(Invoices::table(), ['source' => self::SOURCE], ['id' => $id]);
+        // Payments she chose to send alone when accepting the quote: scheduled for their day.
+        $items = array_filter(array_column($lines, 'item_id'));
+        if ( ! is_wp_error($id) && $items && count($items) === count($lines) && ! array_filter($items, fn($i) => ! (Agreements::get((int) $i)['auto_send'] ?? 0)) ) {
+            $r = self::schedule($id, max($date, current_time('Y-m-d')), true);
+            if ( is_wp_error($r) ) $wpdb->update(Invoices::table(), ['notes' => trim(sprintf(__('Tenía que salir sola, pero: %s Te la pregunto ese día.', 'mad-oficina'), $r->get_error_message()))], ['id' => $id]);
+        }
         return $id;
     }
 

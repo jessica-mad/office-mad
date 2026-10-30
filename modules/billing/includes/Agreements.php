@@ -65,10 +65,24 @@ final class Agreements {
             'concept' => $concept, 'amount' => $amount, 'start_month' => $start, 'end_month' => $end,
             'quote_id' => ! empty($d['quote_id']) ? (int) $d['quote_id'] : null,
             'replaces_id' => ! empty($d['replaces_id']) ? (int) $d['replaces_id'] : null,
+            'auto_send' => empty($d['auto_send']) ? 0 : 1,
             'status' => 'active', 'notes' => sanitize_textarea_field($d['notes'] ?? '') ?: null,
             'created_at' => Time::now(), 'updated_at' => Time::now(),
         ]);
         return (int) $wpdb->insert_id;
+    }
+
+    /** How the invoices of these agreements go out on their day: sent alone (true) or asked first. */
+    public static function set_auto_send(array $ids, $on){
+        global $wpdb;
+        $ids = array_filter(array_map('intval', $ids));
+        if ( ! $ids ) return 0;
+        return (int) $wpdb->query($wpdb->prepare('UPDATE ' . self::table() . ' SET auto_send = %d, updated_at = %s WHERE id IN (' . implode(',', $ids) . ')', $on ? 1 : 0, Time::now()));
+    }
+
+    public static function of_quote($quote_id){
+        global $wpdb;
+        return array_map([self::class, 'hydrate'], $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . self::table() . " WHERE quote_id = %d AND status <> 'cancelled' ORDER BY start_month, id", $quote_id), ARRAY_A));
     }
 
     /** Last month of a monthly fee (the client leaves or the project ends); null reopens it. */
@@ -165,6 +179,7 @@ final class Agreements {
     private static function hydrate($r){
         foreach ( ['id', 'profile_id', 'client_id', 'quote_id', 'replaces_id'] as $k ) $r[$k] = $r[$k] === null ? null : (int) $r[$k];
         $r['amount'] = (float) $r['amount'];
+        $r['auto_send'] = (int) ($r['auto_send'] ?? 0);
         return $r;
     }
 }

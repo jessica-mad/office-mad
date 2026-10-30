@@ -97,6 +97,24 @@ class ForecastTest extends MADOF_TestCase {
         $rest = Quotes::get($r['new_quote']);
         $this->assertSame(['Vídeo'], array_column($rest['lines'], 'concept'), 'what was not accepted, to rethink');
         $this->assertStringContainsString('Aceptado en parte', Quotes::get($q)['notes']);
+
+        // Its payment plan: one invoice per month, with VAT, and how it goes out.
+        $plan = Quotes::payment_plan(Quotes::get($q), new MAD_Oficina\Billing\Issuing(['billing_day' => 28]));
+        $this->assertSame(['2026-11', '2026-12', '2027-01', '2027-02', '2027-03'], array_column($plan, 'month'));
+        $this->assertSame(['2026-11-28', 500.0, false], [$plan[0]['date'], $plan[0]['base'], $plan[0]['auto']]);
+        $this->assertSame(1500.0, $plan[2]['base'], 'January: Redes and the first instalment of the web');
+    }
+
+    public function test_links_and_documents_go_with_the_quote(){
+        $q = Quotes::save(['title' => 'Web', 'profile_id' => $this->p_rf, 'probability' => 50], [['kind' => 'once', 'concept' => 'Web', 'amount' => '3000', 'start_month' => '2026-12']]);
+        $this->assertWPError(MAD_Oficina\Billing\QuoteFiles::add_link($q, 'javascript:alert(1)'));
+        $this->assertTrue(MAD_Oficina\Billing\QuoteFiles::add_link($q, 'https://docs.example/propuesta', 'Propuesta'));
+        $this->assertSame('pdf', MAD_Oficina\Billing\QuoteFiles::sniff("%PDF-1.7 ..."));
+        $this->assertNull(MAD_Oficina\Billing\QuoteFiles::sniff('<?php echo 1;'), 'only PDFs and images, by their bytes');
+        $list = MAD_Oficina\Billing\QuoteFiles::of(Quotes::get($q));
+        $this->assertSame(['link', 'Propuesta', 'https://docs.example/propuesta'], [$list[0]['type'], $list[0]['name'], $list[0]['url']]);
+        $this->assertTrue(MAD_Oficina\Billing\QuoteFiles::remove($q, $list[0]['id']));
+        $this->assertSame([], MAD_Oficina\Billing\QuoteFiles::of(Quotes::get($q)));
     }
 
     public function test_quote_for_someone_who_is_not_a_client_yet(){

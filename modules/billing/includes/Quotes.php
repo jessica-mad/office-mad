@@ -117,7 +117,7 @@ final class Quotes {
      * @param string     $rest  what is not accepted: 'reject' (noted) or 'new' (a new quote with it, to rethink)
      * @return array{agreements:int[], left:int, new_quote:int}|\WP_Error
      */
-    public static function accept($id, $profile_id, $start = null, ?array $picks = null, $rest = 'reject'){
+    public static function accept($id, $profile_id, $start = null, ?array $picks = null, $rest = 'reject', $auto_send = false){
         global $wpdb;
         $q = self::get($id);
         if ( ! $q || ! in_array($q['status'], self::OPEN, true) ) return new \WP_Error('madof_quote', __('Solo se aceptan presupuestos en borrador o enviados.', 'mad-oficina'));
@@ -144,7 +144,7 @@ final class Quotes {
             $r = Agreements::create([
                 'profile_id' => $profile['id'], 'kind' => $l['kind'], 'concept' => $l['concept'], 'amount' => $l['amount'],
                 'start_month' => $l['start_month'], 'end_month' => $l['kind'] === 'monthly' && $l['months'] ? Months::add($l['start_month'], $l['months'] - 1) : null,
-                'quote_id' => $q['id'], 'notes' => sprintf(__('Del presupuesto %s', 'mad-oficina'), $q['number']),
+                'quote_id' => $q['id'], 'notes' => sprintf(__('Del presupuesto %s', 'mad-oficina'), $q['number']), 'auto_send' => $auto_send,
             ]);
             if ( is_wp_error($r) ) return $r;
             $ids[] = $r;
@@ -163,6 +163,38 @@ final class Quotes {
         $wpdb->update(self::table(), ['status' => 'accepted', 'decided_at' => Time::now(), 'profile_id' => $profile['id'], 'client_id' => $profile['client_id'],
             'notes' => trim((string) $q['notes'] . "\n" . $note) ?: null, 'updated_at' => Time::now()], ['id' => $id]);
         return ['agreements' => $ids, 'left' => count($left), 'new_quote' => (int) $new];
+    }
+
+    /**
+     * The payments of an accepted quote, one per billing date (agreements of the same client
+     * and month go on one invoice): date, concepts, base, total with VAT and IRPF, and what
+     * happened to it (invoiced, a draft, still to come). Open-ended fees: the next 12 months.
+     * @return array<int,array{month:string, date:string, lines:array, base:float, total:float, invoice:?array, auto:bool}>
+     */
+    public static function payment_plan(array $q, Issuing $issuing){
+        global $wpdb;
+        $profile = Profiles::get((int) $q['profile_id']);
+        if ( ! $profile ) return [];
+        $by = [];
+        foreach ( Agreements::of_quote($q['id']) as $a ) {
+            $last = $a['end_month'] ?: Months::add(max($a['start_month'], Months::current()), 11);
+            for ( $m = $a['start_month']; $m <= $last; $m = Months::add($m, 1) ) {
+                if ( Calendar::skipped($a['id'], $m) ) continue;
+                $by[$m]['lines'][] = ['concept' => $a['concept'], 'amount' => $a['amount'], 'item_id' => $a['id']];
+                $by[$m]['auto'] = ($by[$m]['auto'] ?? true) && $a['auto_send'];
+                if ( ! $a['end_month'] && $m === $last ) $by[$m]['open_ended'] = true;
+            }
+        }
+        ksort($by);
+        $out = [];
+        foreach ( $by as $m => $p ) {
+            $base = Money::round(array_sum(array_column($p['lines'], 'amount')));
+            $t = Invoices::totals([['amount' => $base]], $profile['vat_rate'], $profile['irpf_rate']);
+            $inv = null;
+            foreach ( $p['lines'] as $l ) if ( ($b = Calendar::billed_in($l['item_id'], $m)) ) { $inv = $b; break; }
+            $out[] = ['month' => $m, 'date' => $issuing->default_issue_date($profile, $m . '-01'), 'lines' => $p['lines'], 'base' => $base, 'total' => $t['total'], 'invoice' => $inv, 'auto' => (bool) $p['auto'], 'open_ended' => ! empty($p['open_ended'])];
+        }
+        return $out;
     }
 
     /** Base amount of a quote line in a month (0 outside its months). */

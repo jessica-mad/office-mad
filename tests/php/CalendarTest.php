@@ -206,4 +206,14 @@ class CalendarTest extends MADOF_TestCase {
         $this->assertGreaterThan(0, $this->cal()->prepare_one(Profiles::get($this->profile), '2026-11'));
         $this->assertFalse(Issuing::delete_draft(999999), 'nothing to delete');
     }
+
+    public function test_payments_chosen_to_go_alone_are_scheduled_when_their_draft_is_prepared(){
+        Agreements::set_auto_send([$this->fee, $this->once], true);
+        $id = $this->cal()->prepare_one(Profiles::get($this->profile), '2027-01');
+        $inv = MAD_Oficina\Billing\Invoices::get($id);
+        $this->assertSame([1, '2027-01-28'], [(int) $inv['auto_send'], MAD_Oficina\Billing\Calendar::scheduled_for($inv)], 'sent alone on its day');
+        Agreements::set_auto_send([$this->fee], false);
+        $id2 = $this->cal()->prepare_one(Profiles::get($this->profile), '2027-02');
+        $this->assertSame(0, (int) MAD_Oficina\Billing\Invoices::get($id2)['auto_send'], 'asked first');
+    }
 }
