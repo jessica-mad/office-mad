@@ -297,3 +297,5 @@ details.madof-approval > summary:focus-visible{outline:3px solid var(--y);outlin
 .madof-attach-add{flex-basis:100%}
 .madof-plan{border-width:2px}
 .madof-next-bills div{white-space:nowrap;margin:2px 0;font-size:13px}
+.madof-new-contacts input[type=text],.madof-new-contacts input[type=email]{width:100%;min-width:140px}
+@media (max-width:900px){.madof-new-contacts{display:block;overflow-x:auto}}

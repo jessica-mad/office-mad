@@ -148,7 +148,7 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                 <label><?php esc_html_e('Se factura a', 'mad-oficina'); ?>
                     <select name="profile_id" data-who required><?php echo $profile_options($o['profile_id']); ?><option value="new" <?php selected(! $o['profile_id']); ?>><?php esc_html_e('+ Cliente nuevo (lo creo ahora)', 'mad-oficina'); ?></option></select></label>
                 <fieldset class="madof-new-client" data-new-client <?php echo $o['profile_id'] ? 'hidden' : ''; ?>>
-                    <legend><?php esc_html_e('Cliente nuevo: sus datos fiscales', 'mad-oficina'); ?></legend>
+                    <legend><?php esc_html_e('Cliente nuevo: su ficha completa', 'mad-oficina'); ?></legend>
                     <div class="madof-cols">
                         <label><?php esc_html_e('Nombre fiscal', 'mad-oficina'); ?><input type="text" name="new[legal_name]" value="<?php echo esc_attr($o['prospect_name']); ?>"></label>
                         <label><?php esc_html_e('NIF / CIF', 'mad-oficina'); ?><input type="text" name="new[tax_id]"></label>
@@ -161,10 +161,38 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                         <label><?php esc_html_e('IRPF %', 'mad-oficina'); ?><input type="text" inputmode="decimal" name="new[irpf_rate]" value="15"></label>
                     </div>
                     <label class="madof-check"><input type="checkbox" name="new[office]" value="1" checked data-office> <?php esc_html_e('Crearlo también como cliente de la oficina (portal, reuniones, tareas)', 'mad-oficina'); ?></label>
-                    <div class="madof-cols" data-office-fields>
+                    <div data-office-fields>
+                    <?php
+                    $domain = $lead ? strtolower(substr(strrchr((string) $lead['email'], '@'), 1)) : '';
+                    $webmail = ['gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.es', 'outlook.com', 'outlook.es', 'live.com', 'yahoo.com', 'yahoo.es', 'icloud.com', 'me.com', 'protonmail.com', 'proton.me'];
+                    $code = class_exists('\\MAD_Oficina\\Visitors\\Leads') ? \MAD_Oficina\Visitors\Leads::free_code($lead['company'] ?? $o['prospect_name']) : strtoupper(substr(preg_replace('/[^A-Za-z]/', '', remove_accents((string) $o['prospect_name'])), 0, 3)); ?>
+                    <div class="madof-cols">
                         <label><?php esc_html_e('Nombre comercial', 'mad-oficina'); ?><input type="text" name="new[name]" value="<?php echo esc_attr($lead['company'] ?? $o['prospect_name']); ?>"></label>
-                        <label><?php esc_html_e('Código corto', 'mad-oficina'); ?><input type="text" name="new[code]" maxlength="12" placeholder="MOM" value="<?php echo esc_attr(strtoupper(substr(preg_replace('/[^A-Za-z]/', '', remove_accents((string) $o['prospect_name'])), 0, 3))); ?>">
+                        <label><?php esc_html_e('Código corto', 'mad-oficina'); ?><input type="text" name="new[code]" maxlength="12" placeholder="MOM" value="<?php echo esc_attr($code); ?>">
                             <small><?php esc_html_e('El que usas en Calendar (2 a 12 letras o números).', 'mad-oficina'); ?></small></label>
+                        <label><?php esc_html_e('Dominios de su email', 'mad-oficina'); ?><input type="text" name="new[domains]" value="<?php echo esc_attr($domain && ! in_array($domain, $webmail, true) ? $domain : ''); ?>" placeholder="empresa.com, empresa.es">
+                            <small><?php esc_html_e('Para reconocer sus reuniones y emails. No pongas gmail.com ni similares.', 'mad-oficina'); ?></small></label>
+                    </div>
+                    <div class="madof-cols">
+                        <label><?php esc_html_e('Carpeta de Drive (enlace o ID, opcional)', 'mad-oficina'); ?><input type="text" name="new[drive_folder_id]" placeholder="https://drive.google.com/drive/folders/…"></label>
+                        <label><?php esc_html_e('Notas', 'mad-oficina'); ?><input type="text" name="new[notes]"></label>
+                    </div>
+                    <span class="madof-kicker"><?php esc_html_e('Contactos', 'mad-oficina'); ?></span>
+                    <table class="madof-table madof-new-contacts">
+                        <thead><tr><th><?php esc_html_e('Nombre', 'mad-oficina'); ?></th><th><?php esc_html_e('Cargo', 'mad-oficina'); ?></th><th><?php esc_html_e('Email de trabajo', 'mad-oficina'); ?></th><th><?php esc_html_e('Email personal', 'mad-oficina'); ?></th><th><?php esc_html_e('Resúmenes', 'mad-oficina'); ?></th><th></th></tr></thead>
+                        <tbody data-contacts>
+                            <tr>
+                                <td><input type="text" name="contacts[0][name]" value="<?php echo esc_attr($lead['name'] ?? ''); ?>" aria-label="<?php esc_attr_e('Nombre', 'mad-oficina'); ?>"></td>
+                                <td><input type="text" name="contacts[0][role]" aria-label="<?php esc_attr_e('Cargo', 'mad-oficina'); ?>"></td>
+                                <td><input type="email" name="contacts[0][work]" value="<?php echo esc_attr($lead['email'] ?? ''); ?>" aria-label="<?php esc_attr_e('Email de trabajo', 'mad-oficina'); ?>"></td>
+                                <td><input type="email" name="contacts[0][personal]" aria-label="<?php esc_attr_e('Email personal', 'mad-oficina'); ?>"></td>
+                                <td><input type="checkbox" name="contacts[0][receives_summaries]" value="1" checked aria-label="<?php esc_attr_e('Recibe los resúmenes de las reuniones', 'mad-oficina'); ?>"></td>
+                                <td><button type="button" class="madof-link" data-drop-contact><?php esc_html_e('Quitar', 'mad-oficina'); ?></button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p><button type="button" class="madof-btn is-ghost is-small" data-add-contact><?php esc_html_e('+ Otro contacto', 'mad-oficina'); ?></button>
+                        <small class="madof-muted"><?php esc_html_e('Los destinos de Chat, la hoja de seguimiento y lo demás, en su ficha cuando quieras.', 'mad-oficina'); ?></small></p>
                     </div>
                 </fieldset>
 
@@ -224,6 +252,17 @@ document.querySelectorAll('.madof-accept form').forEach(function (f) {
         box.querySelector('[name="new[legal_name]"]').required = who.value === 'new';
     };
     who.addEventListener('change', sync); office.addEventListener('change', sync); sync();
+    var cbody = f.querySelector('[data-contacts]');
+    f.querySelector('[data-add-contact]')?.addEventListener('click', function () {
+        var row = cbody.rows[cbody.rows.length - 1].cloneNode(true), n = cbody.rows.length;
+        row.querySelectorAll('input').forEach(function (el) { el.name = el.name.replace(/contacts\[\d+\]/, 'contacts[' + n + ']'); if (el.type === 'checkbox') el.checked = true; else el.value = ''; });
+        cbody.appendChild(row);
+    });
+    cbody?.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-drop-contact]');
+        if (!b) return;
+        if (cbody.rows.length > 1) b.closest('tr').remove(); else b.closest('tr').querySelectorAll('input:not([type=checkbox])').forEach(function (el) { el.value = ''; });
+    });
     f.querySelectorAll('[data-pick] input[type=checkbox]').forEach(function (c) {
         c.addEventListener('change', function () { c.closest('tr').classList.toggle('is-removed', !c.checked); });
     });

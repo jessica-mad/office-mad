@@ -688,14 +688,27 @@ return new class($core) implements MAD_Oficina_Module {
             if ( trim((string) ($n['legal_name'] ?? '')) === '' ) $this->back_to('quotes', __('Escribe el nombre fiscal del cliente nuevo.', 'mad-oficina'), 'error');
             $client_id = null;
             if ( ! empty($n['office']) ) {
-                $c = \MAD_Oficina\Core\Repo\Clients::save(['name' => ($n['name'] ?? '') ?: $n['legal_name'], 'code' => $n['code'] ?? '']); // domains and contacts: on its card, where they are checked
+                // The whole client card: name, code, domains, Drive folder, notes and its contacts.
+                $contacts = [];
+                foreach ( (array) ($p['contacts'] ?? []) as $ct ) {
+                    if ( ! is_array($ct) || trim((string) ($ct['name'] ?? '')) === '' ) continue;
+                    $emails = [];
+                    foreach ( ['work', 'personal'] as $kind ) if ( ! empty($ct[$kind]) && is_email(trim($ct[$kind])) ) $emails[] = ['email' => trim($ct[$kind]), 'kind' => $kind];
+                    foreach ( $emails as $em ) if ( ($owner = \MAD_Oficina\Core\Repo\Clients::find_by_email($em['email'])) ) $this->back_to('quotes', sprintf(__('El email %s ya está en otro contacto: revísalo antes de crear el cliente.', 'mad-oficina'), $em['email']), 'error');
+                    $contacts[] = [$ct, $emails];
+                }
+                $c = \MAD_Oficina\Core\Repo\Clients::save(['name' => ($n['name'] ?? '') ?: $n['legal_name'], 'code' => $n['code'] ?? '', 'domains' => (string) ($n['domains'] ?? ''), 'drive_folder_id' => (string) ($n['drive_folder_id'] ?? ''), 'notes' => (string) ($n['notes'] ?? ''), 'status' => 'active']);
                 if ( is_wp_error($c) ) $this->back_to('quotes', $c->get_error_message(), 'error');
                 $client_id = (int) $c;
+                foreach ( $contacts as [$ct, $emails] ) \MAD_Oficina\Core\Repo\Clients::save_contact($client_id, ['name' => $ct['name'], 'role' => $ct['role'] ?? '', 'receives_summaries' => ! empty($ct['receives_summaries'])], $emails);
+                // A lead that becomes a client is not a lead any more.
+                $qq = \MAD_Oficina\Billing\Quotes::get(absint($p['quote_id'] ?? 0));
+                if ( $qq && $qq['lead_id'] && class_exists('\\MAD_Oficina\\Visitors\\Leads') ) \MAD_Oficina\Visitors\Leads::update((int) $qq['lead_id'], ['client_id' => $client_id, 'status' => 'client']);
             }
             $profile_id = \MAD_Oficina\Billing\Profiles::save(['legal_name' => $n['legal_name'], 'tax_id' => $n['tax_id'] ?? '', 'address' => $n['address'] ?? '', 'city' => $n['city'] ?? '', 'email' => $n['email'] ?? '',
                 'vat_rate' => str_replace(',', '.', (string) ($n['vat_rate'] ?? '21')), 'irpf_rate' => str_replace(',', '.', (string) ($n['irpf_rate'] ?? '15')), 'client_id' => $client_id]);
             if ( $client_id ) \MAD_Oficina\Billing\Profiles::link($profile_id, $client_id);
-            $made = ' ' . ($client_id ? __('Cliente nuevo creado (en la oficina y en facturación).', 'mad-oficina') : __('Cliente de facturación nuevo creado.', 'mad-oficina'));
+            $made = ' ' . ($client_id ? __('Cliente nuevo creado, con su ficha y contactos en Clientes y sus datos fiscales en facturación.', 'mad-oficina') : __('Cliente de facturación nuevo creado.', 'mad-oficina'));
         }
         $picks = isset($p['pick']) ? array_map(fn($x) => is_array($x) ? $x : [], (array) $p['pick']) : null;
         $r = \MAD_Oficina\Billing\Quotes::accept(absint($p['quote_id'] ?? 0), $profile_id, sanitize_text_field($p['start_month'] ?? ''), $picks, ($p['rest'] ?? '') === 'new' ? 'new' : 'reject', ($p['auto_send'] ?? '') === '1');
