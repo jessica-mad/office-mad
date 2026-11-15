@@ -82,9 +82,11 @@ $status_pill = function($inv){
         <?php if ( $inv['status'] === 'draft' ) : ?>
             <a class="madof-btn" href="<?php echo esc_url($base . '&edit=' . $inv['id'] . ($inv['series'] === 'AR' ? '' : '#enviar')); ?>"><?php echo $inv['series'] === 'AR' ? esc_html__('Editar', 'mad-oficina') : esc_html__('Ver y enviar', 'mad-oficina'); ?></a>
             <?php if ( $inv['series'] !== 'AR' ) : ?><a class="madof-btn is-ghost" href="<?php echo esc_url($base . '&edit=' . $inv['id']); ?>"><?php esc_html_e('Editar', 'mad-oficina'); ?></a><?php endif; ?>
-            <?php if ( $inv['series'] === 'AR' ) : echo AdminUi::form_open('billing_ar_issued', 'madof-inline'); ?>
+            <?php if ( $inv['series'] === 'AR' ) : ?>
+            <a class="madof-btn" href="#enviar"><?php esc_html_e('Enviar con el PDF de ARCA', 'mad-oficina'); ?></a>
+            <?php echo AdminUi::form_open('billing_ar_issued', 'madof-inline'); ?>
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
-                <button class="madof-btn is-ghost"><?php esc_html_e('Marcar como emitida en Argentina', 'mad-oficina'); ?></button>
+                <button class="madof-btn is-ghost"><?php esc_html_e('Ya la envié: marcarla como emitida', 'mad-oficina'); ?></button>
             </form><?php endif; ?>
             <?php echo AdminUi::form_open('billing_draft_delete', 'madof-inline'); ?>
                 <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
@@ -118,6 +120,7 @@ $status_pill = function($inv){
             </form>
         </details>
         <?php endif; ?>
+        <?php if ( $inv['series'] === 'AR' && $inv['status'] !== 'cancelled' ) include __DIR__ . '/ar-send.php'; ?>
         <?php if ( $err = get_transient('madof_new_details_error_' . $inv['id']) ) : ?><p class="madof-warn" role="alert"><strong><?php esc_html_e('«Corregir los datos del cliente» no se ha hecho:', 'mad-oficina'); ?></strong> <?php echo esc_html($err); ?></p><?php endif; ?>
         <?php if ( in_array($inv['status'], ['issued', 'sent'], true) ) : // Argentina too: its due date is asked like any other ?>
             <?php echo AdminUi::form_open('billing_paid', 'madof-inline'); ?>

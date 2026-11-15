@@ -787,7 +787,8 @@ final class Issuing {
      */
     public function queue_resend($id, array $input){
         $inv = Invoices::get($id);
-        if ( ! $inv || ! $inv['number'] || $inv['series'] === 'AR' ) return new \WP_Error('madof_inv', __('Solo se reenvían facturas emitidas.', 'mad-oficina'));
+        $ar_ok = $inv && $inv['series'] === 'AR' && $inv['status'] !== 'draft' && InvoiceFiles::exists($inv['id']);
+        if ( ! $inv || ( ! $inv['number'] && ! $ar_ok ) || ( $inv['series'] === 'AR' && ! $ar_ok ) ) return new \WP_Error('madof_inv', __('Solo se reenvían facturas emitidas (las de Argentina, con su PDF de ARCA subido).', 'mad-oficina'));
         $to = [];
         foreach ( preg_split('/[\s,;]+/', (string) ($input['to'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $e ) if ( is_email($e) ) $to[] = strtolower($e);
         if ( ! $to ) return new \WP_Error('madof_inv_to', __('Escribe a qué email la reenvío.', 'mad-oficina'));
@@ -880,7 +881,7 @@ final class Issuing {
     public static function libro_row(array $inv){
         $client = $inv['client_id'] ? Clients::get($inv['client_id']) : null;
         return [
-            'Número' => $inv['number'] ?: ($inv['series'] === 'AR' ? 'AR' : ''),
+            'Número' => $inv['number'] ?: ($inv['series'] === 'AR' ? trim('AR ' . (string) $inv['external_id']) : ''),
             'Fecha' => $inv['issue_date'],
             'Vencimiento' => $inv['due_date'] ?: '',
             'Cliente' => $inv['client_name'],

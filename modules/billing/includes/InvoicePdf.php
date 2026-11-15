@@ -44,6 +44,7 @@ final class InvoicePdf {
         $name = sanitize_file_name(remove_accents($inv['client_name']));
         // Issued again after «Deshacer la emisión»: a new file, never the wrong one already in Drive.
         $v = $inv['number'] ? \MAD_Oficina\Billing\Issuing::times_undone((int) $inv['id']) : 0;
+        if ( $inv['series'] === 'AR' ) return 'AR ' . sanitize_file_name((string) ($inv['external_id'] ?: $inv['id'])) . ' ' . $name . '.pdf';
         return ($inv['number'] ?: 'borrador-' . $inv['id']) . ' ' . $name . ($v ? ' (v' . ($v + 1) . ')' : '') . '.pdf';
     }
 

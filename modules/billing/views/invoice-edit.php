@@ -124,8 +124,8 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
         <div class="madof-actions">
             <button class="madof-btn is-ghost" name="do" value="save"><?php esc_html_e('Guardar borrador', 'mad-oficina'); ?></button>
             <?php if ( $is_ar ) : ?>
-                <?php if ( $draft ) : ?><button class="madof-btn" form="madof-ar-issued" onclick="return confirm('<?php echo esc_js(__('¿Ya la has emitido y enviado desde la plataforma argentina (ARCA)? Aquí solo queda apuntada como emitida.', 'mad-oficina')); ?>')"><?php esc_html_e('Ya la emití en Argentina: marcarla como emitida', 'mad-oficina'); ?></button><?php endif; ?>
-                <span class="description"><?php esc_html_e('Serie Argentina: esta factura no se emite ni se envía desde aquí. Hazla y envíala en la plataforma argentina (ARCA) y después márcala como emitida para que quede en tus libros.', 'mad-oficina'); ?></span>
+                <?php if ( $draft ) : ?><button class="madof-btn" form="madof-ar-issued" onclick="return confirm('<?php echo esc_js(__('¿Ya la has emitido y enviado desde la plataforma argentina (ARCA)? Aquí solo queda apuntada como emitida.', 'mad-oficina')); ?>')"><?php esc_html_e('Ya la emití y envié en ARCA: marcarla como emitida', 'mad-oficina'); ?></button><?php endif; ?>
+                <span class="description"><?php esc_html_e('Serie Argentina: el número y el PDF los da ARCA. Guarda el borrador y, abajo, sube el PDF de ARCA para enviarla desde aquí.', 'mad-oficina'); ?></span>
             <?php else : ?>
                 <button class="madof-btn is-ghost" name="do" value="test"><?php esc_html_e('Enviarme una prueba', 'mad-oficina'); ?></button>
                 <button class="madof-btn" name="do" value="issue"><?php esc_html_e('Guardar y ver cómo queda', 'mad-oficina'); ?></button>
@@ -162,6 +162,7 @@ $pending = $draft ? array_filter(Approvals::for_object('invoice', $draft['id']),
     <?php endif; ?>
 
     <?php if ( $draft && $is_ar ) echo str_replace('<form ', '<form id="madof-ar-issued" ', AdminUi::form_open('billing_ar_issued', 'madof-inline')) . '<input type="hidden" name="invoice_id" value="' . (int) $draft['id'] . '"></form>'; ?>
+    <?php if ( $draft && $is_ar ) { $inv = $draft; include __DIR__ . '/ar-send.php'; } ?>
 
     <?php if ( ! $draft ) : // a new one: drawn as it is being written
         $first = $issuing->save_draft(['profile_id' => $profile['id'], 'issue_date' => $issue, 'due_date' => $due], array_map(fn($l) => $l + ['quantity' => 1, 'unit_price' => ''], $lines), 0, true); ?>

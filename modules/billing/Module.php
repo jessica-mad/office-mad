@@ -47,7 +47,7 @@ return new class($core) implements MAD_Oficina_Module {
     public function init(){
         add_action('admin_post_madof_billing_pdf', [$this, 'handle_billing_pdf']);
         add_action('admin_post_madof_billing_quote_file', [$this, 'handle_billing_quote_file']);
-        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_undo_issue', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued',
+        foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_undo_issue', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued', 'billing_ar_send',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept', 'billing_quote_attach', 'billing_quote_detach', 'billing_item_autosend',
             'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
@@ -155,7 +155,8 @@ return new class($core) implements MAD_Oficina_Module {
             'callback' => function(\WP_REST_Request $req){
                 $inv = \MAD_Oficina\Billing\Invoices::get((int) $req['id']);
                 if ( ! $inv ) return new \WP_Error('madof_not_found', 'Unknown invoice', ['status' => 404]);
-                $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
+                // One made elsewhere (ARCA) goes as it is; ours is drawn.
+                $pdf = \MAD_Oficina\Billing\InvoiceFiles::read($inv['id']) ?? \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
                 if ( is_wp_error($pdf) ) return $pdf;
                 return rest_ensure_response(['filename' => \MAD_Oficina\Billing\InvoicePdf::filename($inv), 'base64' => base64_encode($pdf)]);
             },
@@ -625,6 +626,49 @@ return new class($core) implements MAD_Oficina_Module {
         $this->back(['invoice' => $id], __('Apuntada como emitida en Argentina.', 'mad-oficina'));
     }
 
+    /**
+     * An Argentine invoice made in ARCA: its PDF goes up here, the invoice is recorded as issued
+     * with ARCA's number and date, and the cartero archives it and (if she says so) sends it from
+     * her Gmail, as with any other invoice.
+     */
+    public function handle_billing_ar_send(){
+        $this->guard('billing_ar_send');
+        global $wpdb;
+        $p = wp_unslash($_POST);
+        $id = absint($p['invoice_id'] ?? 0);
+        $inv = \MAD_Oficina\Billing\Invoices::get($id);
+        $back = fn($msg, $type = 'error') => $this->back(['invoice' => $id], $msg, $type);
+        if ( ! $inv || $inv['series'] !== 'AR' ) $back(__('Esa factura no es de la serie Argentina.', 'mad-oficina'));
+        $has_file = \MAD_Oficina\Billing\InvoiceFiles::exists($id);
+        if ( ! empty($_FILES['pdf']['tmp_name']) ) {
+            $r = \MAD_Oficina\Billing\InvoiceFiles::store($id, $_FILES['pdf']);
+            if ( is_wp_error($r) ) $back($r->get_error_message());
+        } elseif ( ! $has_file ) {
+            $back(__('Sube el PDF de la factura que te dio ARCA.', 'mad-oficina'));
+        }
+        $send = ($p['mode'] ?? '') === 'send';
+        $to = [];
+        foreach ( preg_split('/[\s,;]+/', (string) ($p['to'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $e ) if ( is_email($e) ) $to[] = strtolower($e);
+        if ( $send && ! $to ) $back(__('Escribe el email del cliente o elige «Solo guardarla».', 'mad-oficina'));
+        $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($p['issue_date'] ?? '')) ? $p['issue_date'] : $inv['issue_date'];
+        $fields = ['external_id' => mb_substr(sanitize_text_field($p['external_id'] ?? ''), 0, 128) ?: $inv['external_id'], 'issue_date' => $date, 'year' => (int) substr($date, 0, 4), 'updated_at' => \MAD_Oficina\Core\Time::now()];
+        if ( $inv['status'] === 'draft' ) $fields += ['status' => 'issued', 'issued_at' => \MAD_Oficina\Core\Time::now()];
+        if ( ! empty($p['save_email']) && $to ) \MAD_Oficina\Billing\Profiles::set_email((int) $inv['profile_id'], $to[0]);
+        $wpdb->update(\MAD_Oficina\Billing\Invoices::table(), $fields, ['id' => $id]);
+        $inv = \MAD_Oficina\Billing\Invoices::get($id);
+        $issuing = $this->issuing();
+        $email = null;
+        if ( $send ) {
+            $d = $issuing->email_for($inv, $date, $inv['external_id'] ?: '');
+            $email = ['to' => implode(',', $to), 'subject' => sanitize_text_field($p['subject'] ?? '') ?: $d['subject'], 'body' => sanitize_textarea_field($p['body'] ?? '') ?: $d['body']];
+        }
+        // Sent already once (a second press): as a resend; otherwise archived and sent together.
+        if ( $send && $inv['status'] === 'sent' ) $issuing->queue_resend($id, $email);
+        else $issuing->queue_archive($inv, $email);
+        $back($send ? sprintf(__('Factura de Argentina guardada como emitida. El cartero la archiva en Emitidas y la envía a %s desde tu Gmail en unos minutos.', 'mad-oficina'), $email['to'])
+            : __('Factura de Argentina guardada como emitida, con su PDF. El cartero la archiva en Emitidas; no se envía.', 'mad-oficina'), 'success');
+    }
+
     /* ==== Agreements and quotes (forecast) ==== */
 
     private function back_to($default_tab, $notice, $type = 'success', array $extra = []){
@@ -856,7 +900,7 @@ return new class($core) implements MAD_Oficina_Module {
         check_admin_referer('madof_billing_pdf_' . $id);
         $inv = \MAD_Oficina\Billing\Invoices::get($id);
         if ( ! $inv ) wp_die(esc_html__('Esa factura no existe.', 'mad-oficina'), 404);
-        $pdf = \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
+        $pdf = \MAD_Oficina\Billing\InvoiceFiles::read($inv['id']) ?? \MAD_Oficina\Billing\InvoicePdf::render($inv, \MAD_Oficina\Billing\Issuing::issuer_for($inv, $this->settings()));
         if ( is_wp_error($pdf) ) wp_die(esc_html($pdf->get_error_message()));
         nocache_headers();
         header('Content-Type: application/pdf');
