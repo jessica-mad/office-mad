@@ -643,8 +643,8 @@ return new class($core) implements MAD_Oficina_Module {
         if ( ! empty($_FILES['pdf']['tmp_name']) ) {
             $r = \MAD_Oficina\Billing\InvoiceFiles::store($id, $_FILES['pdf']);
             if ( is_wp_error($r) ) $back($r->get_error_message());
-        } elseif ( ! $has_file ) {
-            $back(__('Sube el PDF de la factura que te dio ARCA.', 'mad-oficina'));
+        } elseif ( ! $has_file && empty($p['own_pdf']) ) {
+            $back(__('Sube el PDF de ARCA, o marca «Enviar sin el PDF de ARCA» para mandar la factura con el diseño de MAD.', 'mad-oficina'));
         }
         $send = ($p['mode'] ?? '') === 'send';
         $to = [];

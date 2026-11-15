@@ -14,13 +14,16 @@ $ar_sent = $inv['status'] === 'sent';
 ?>
 <section class="madof-card madof-ar-send" id="enviar">
     <span class="madof-kicker"><?php echo esc_html($inv['status'] === 'draft' ? __('Enviar la factura de Argentina', 'mad-oficina') : __('Reenviar la factura de Argentina', 'mad-oficina')); ?></span>
-    <p class="description"><?php esc_html_e('Hazla en ARCA, descarga su PDF y súbelo aquí: queda emitida con su número y su fecha, se guarda en Emitidas y sale desde tu Gmail con el PDF de ARCA.', 'mad-oficina'); ?></p>
+    <p class="description"><?php esc_html_e('Hazla en ARCA y sube aquí su PDF (o envíala sin él, con el diseño de MAD): queda emitida con su número y su fecha, se guarda en Emitidas y sale desde tu Gmail.', 'mad-oficina'); ?></p>
     <form method="post" enctype="multipart/form-data" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="madof-form">
         <input type="hidden" name="action" value="madof_billing_ar_send"><?php wp_nonce_field('madof_billing_ar_send'); ?>
         <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
         <div class="madof-cols">
-            <label><?php esc_html_e('PDF de ARCA', 'mad-oficina'); ?><input type="file" name="pdf" accept="application/pdf" <?php echo $ar_has ? '' : 'required'; ?>>
+            <label><?php esc_html_e('PDF de ARCA', 'mad-oficina'); ?><input type="file" name="pdf" accept="application/pdf" data-ar-pdf>
                 <?php if ( $ar_has ) : ?><small><?php esc_html_e('Ya está subido. Sube otro solo si quieres cambiarlo.', 'mad-oficina'); ?> <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $inv['id']), 'madof_billing_pdf_' . $inv['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Verlo', 'mad-oficina'); ?></a></small><?php endif; ?></label>
+            <?php if ( ! $ar_has ) : ?>
+            <label class="madof-check"><input type="checkbox" name="own_pdf" value="1" data-ar-own> <span><?php esc_html_e('Enviar sin el PDF de ARCA', 'mad-oficina'); ?><br><small><?php esc_html_e('Va la factura con el diseño de MAD (con el nº de ARCA si lo pones).', 'mad-oficina'); ?> <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=madof_billing_pdf&invoice=' . $inv['id']), 'madof_billing_pdf_' . $inv['id'])); ?>" target="_blank" rel="noopener"><?php esc_html_e('Ver cómo queda', 'mad-oficina'); ?></a></small></span></label>
+            <?php endif; ?>
             <label><?php esc_html_e('Nº de factura en ARCA', 'mad-oficina'); ?><input type="text" name="external_id" maxlength="60" value="<?php echo esc_attr((string) $inv['external_id']); ?>" placeholder="0001-00000123"></label>
             <label><?php esc_html_e('Fecha de la factura', 'mad-oficina'); ?><input type="date" name="issue_date" value="<?php echo esc_attr($inv['issue_date']); ?>"></label>
         </div>
@@ -35,3 +38,13 @@ $ar_sent = $inv['status'] === 'sent';
         </p>
     </form>
 </section>
+<script>
+(function(){
+    var f = document.querySelector('.madof-ar-send form'); if (!f) return;
+    var pdf = f.querySelector('[data-ar-pdf]'), own = f.querySelector('[data-ar-own]');
+    // Either ARCA's PDF or, on purpose, ours.
+    f.addEventListener('submit', function(e){
+        if (own && !own.checked && !pdf.files.length) { e.preventDefault(); alert(<?php echo wp_json_encode(__('Sube el PDF de ARCA o marca «Enviar sin el PDF de ARCA».', 'mad-oficina')); ?>); }
+    });
+})();
+</script>

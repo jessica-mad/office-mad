@@ -107,7 +107,10 @@ final class InvoicePdf {
         ]);
         $pay = array_filter([$issuer['issuer_bank'] ?? '', ! empty($issuer['issuer_iban']) ? 'IBAN ' . $issuer['issuer_iban'] : '', $issuer['payment_terms'] ?? '']);
         $contact = implode(' / ', array_filter([$issuer['issuer_phone'] ?? '', $issuer['issuer_email'] ?? '']));
-        $draft = $inv['number'] ? '' : '<div class="draft">' . $e(__('BORRADOR', 'mad-oficina')) . '</div>';
+        // An Argentine one issued without ARCA's PDF: ARCA's number if she gave it, and no «BORRADOR».
+        $ar_issued = $inv['series'] === 'AR' && ($inv['status'] ?? 'draft') !== 'draft';
+        $shown = $inv['number'] ?: ($inv['series'] === 'AR' ? (string) ($inv['external_id'] ?? '') : '');
+        $draft = $inv['number'] || $ar_issued ? '' : '<div class="draft">' . $e(__('BORRADOR', 'mad-oficina')) . '</div>';
         // A rectifying invoice (RD 1619/2012, arts. 6 and 15): says so, identifies the invoice it
         // rectifies (series, number, date), the reason, and the amounts before, after and the difference.
         $is_r = $inv['series'] === 'R';
@@ -193,7 +196,7 @@ body{position:relative;width:210mm;min-height:297mm;margin:0;padding:14mm 16mm 1
 <?php echo $draft; ?>
 <img class="header" src="<?php echo esc_attr($header); ?>" alt="">
 <?php if ( $is_r ) : ?><div class="rect-band"><?php echo $e(__('Factura rectificativa', 'mad-oficina') . ' · ' . ($sub ? __('por sustitución', 'mad-oficina') : __('por diferencias', 'mad-oficina'))); ?></div><?php endif; ?>
-<table class="meta"><tr><th><?php echo $e($is_r ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($inv['number'] ?: '—'); ?></td></tr>
+<table class="meta"><tr><th><?php echo $e($is_r ? __('Factura rectificativa Nº:', 'mad-oficina') : __('Factura Nº:', 'mad-oficina')); ?></th><td><?php echo $e($shown ?: '—'); ?></td></tr>
 <tr><th><?php echo $e($is_r ? __('Fecha de expedición:', 'mad-oficina') : __('Fecha:', 'mad-oficina')); ?></th><td><?php echo $e($date); ?></td></tr>
 <?php if ( $is_r && $original && $original['issue_date'] !== $inv['issue_date'] ) : ?><tr><th><?php echo $e(__('Fecha de la operación:', 'mad-oficina')); ?></th><td><?php echo $e($fmt($original['issue_date'])); ?></td></tr><?php endif; ?></table>
 <?php if ( $corr ) : ?><p class="corrected"><?php echo $e(sprintf(__('Factura corregida mediante la factura rectificativa %1$s del %2$s, que detalla lo que cambia y el motivo.', 'mad-oficina'), $corr['number'] ?: Invoices::preview_number($corr), $fmt($corr['issue_date']))); ?></p><?php endif; ?>
