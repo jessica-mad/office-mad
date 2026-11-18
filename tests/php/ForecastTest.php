@@ -96,11 +96,48 @@ class ForecastTest extends MADOF_TestCase {
         $this->assertSame(1, $r['left']);
         $rest = Quotes::get($r['new_quote']);
         $this->assertSame(['Vídeo'], array_column($rest['lines'], 'concept'), 'what was not accepted, to rethink');
-        $this->assertStringContainsString('Aceptado en parte', Quotes::get($q)['notes']);
+        $this->assertStringContainsString('Lo demás pasa al presupuesto', Quotes::get($q)['notes']);
+        $this->assertSame('accepted', Quotes::get($q)['status'], 'nothing left to decide here: it went to the new quote');
 
         // What was accepted is ordinary agreements, linked to the quote, with how their invoices go out.
         $this->assertSame([$q, $q], array_column(Agreements::of_quote($q), 'quote_id'));
         $this->assertSame([0, 0], array_column(Agreements::of_quote($q), 'auto_send'), 'asked first unless she chose otherwise');
+    }
+
+    public function test_what_is_not_accepted_stays_pending_in_the_same_quote_and_can_be_accepted_later(){
+        $q = Quotes::save(['title' => 'Plan', 'profile_id' => $this->p_rf, 'sent_on' => '2026-10-01', 'probability' => 50], [
+            ['kind' => 'monthly', 'concept' => 'Redes', 'amount' => '600', 'start_month' => '2026-11', 'months' => 3],
+            ['kind' => 'once', 'concept' => 'Vídeo', 'amount' => '900', 'start_month' => '2026-12'],
+        ]);
+        $r = Quotes::accept($q, 0, null, [0 => ['on' => 1], 1 => []]);
+        $this->assertTrue($r['kept']);
+        $quote = Quotes::get($q);
+        $this->assertSame('partial', $quote['status'], 'aceptado en parte: still open');
+        $this->assertSame(['accepted', null], array_column($quote['lines'], 'state'));
+        $this->assertSame($r['agreements'][0], $quote['lines'][0]['agreement_id']);
+        $this->assertWPError(Quotes::save(['title' => 'x', 'profile_id' => $this->p_rf], [['kind' => 'once', 'concept' => 'x', 'amount' => '1', 'start_month' => '2026-11']], $q), 'not edited any more: decided line by line');
+        // The forecast counts only what is still to decide.
+        $f = MAD_Oficina\Billing\Forecast::compute('2026-11', '2026-12', '2026-10-15');
+        $this->assertSame(900.0, array_sum($f['totals']['possible']));
+
+        // Later: the video is accepted too, and the quote is closed.
+        $r2 = Quotes::accept($q, 0, null, [1 => ['on' => 1, 'amount' => '800']]);
+        $this->assertCount(1, $r2['agreements']);
+        $this->assertSame(800.0, (float) Agreements::get($r2['agreements'][0])['amount']);
+        $this->assertSame('accepted', Quotes::get($q)['status']);
+        $this->assertWPError(Quotes::accept($q, 0), 'nothing left');
+    }
+
+    public function test_a_partial_quote_turned_down_keeps_what_was_accepted(){
+        $q = Quotes::save(['title' => 'Plan', 'profile_id' => $this->p_rf, 'sent_on' => '2026-10-01'], [
+            ['kind' => 'once', 'concept' => 'Web', 'amount' => '3000', 'start_month' => '2026-11'],
+            ['kind' => 'once', 'concept' => 'Vídeo', 'amount' => '900', 'start_month' => '2026-12'],
+        ]);
+        Quotes::accept($q, 0, null, [0 => ['on' => 1]]);
+        $this->assertTrue(Quotes::set_status($q, 'rejected'));
+        $quote = Quotes::get($q);
+        $this->assertSame(['accepted', ['accepted', 'rejected']], [$quote['status'], array_column($quote['lines'], 'state')]);
+        $this->assertCount(1, Agreements::of_quote($q));
     }
 
     public function test_links_and_documents_go_with_the_quote(){

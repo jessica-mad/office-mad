@@ -157,6 +157,26 @@ final class Calendar {
     }
 
     /**
+     * The drafts of the next $months months (this one included), now: for every client with
+     * agreements to bill then, or only one. Deleted ones she said not to redo are respected.
+     * @return int drafts prepared or completed
+     */
+    public function prepare_ahead($months, $profile_id = null){
+        $n = 0;
+        $start = Months::current();
+        for ( $i = 0; $i < $months; $i++ ) {
+            $month = Months::add($start, $i);
+            foreach ( $this->month($month) as $row ) {
+                if ( ! $row['pending'] || ( $profile_id && (int) $row['profile']['id'] !== (int) $profile_id ) ) continue;
+                if ( self::dismissed($row['profile']['id'], $month) ) continue;
+                $r = $this->prepare_one($row['profile'], $month);
+                if ( ! is_wp_error($r) && $r ) $n++;
+            }
+        }
+        return $n;
+    }
+
+    /**
      * The client's draft for the month: the lines still missing are added to its
      * calendar draft, or a new draft is created. @return int|\WP_Error invoice id (0 = nothing to add)
      */

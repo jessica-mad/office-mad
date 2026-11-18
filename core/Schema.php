@@ -658,6 +658,8 @@ final class Schema {
   amount decimal(12,2) NOT NULL DEFAULT 0,
   start_month char(7) NOT NULL,
   months smallint(5) unsigned NULL,
+  state varchar(10) NULL,
+  agreement_id bigint(20) unsigned NULL,
   PRIMARY KEY  (id),
   KEY quote_id (quote_id)",
         ];

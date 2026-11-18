@@ -39,6 +39,16 @@ $done = array_sum(array_map(fn($r) => in_array($r['state'], ['issued', 'sent'], 
     </form>
 </section>
 
+<section class="madof-card">
+    <span class="madof-kicker"><?php esc_html_e('Ver ya las próximas facturas', 'mad-oficina'); ?></span>
+    <?php echo AdminUi::form_open('billing_prepare_ahead', 'madof-inline'); ?>
+        <label><?php esc_html_e('Preparar ahora los borradores de', 'mad-oficina'); ?>
+            <select name="months"><?php foreach ( [1, 2, 3, 6, 12] as $m ) echo '<option value="' . $m . '" ' . selected($m, 3, false) . '>' . esc_html(sprintf(_n('este mes', 'los próximos %d meses', $m, 'mad-oficina'), $m)) . '</option>'; ?></select></label>
+        <button class="madof-btn is-small"><?php esc_html_e('Preparar', 'mad-oficina'); ?></button>
+    </form>
+    <p class="description"><?php esc_html_e('Así los ves y los revisas desde ya. No sale nada antes de tiempo: cada uno se envía (o te pregunto) en su fecha. Si un acuerdo cambia después, el borrador ya preparado no se rehace solo: edítalo o bórralo.', 'mad-oficina'); ?></p>
+</section>
+
 <div class="madof-forecast-tools">
     <h2><?php echo esc_html(ucfirst(Months::label($month))); ?> · <?php echo esc_html(Money::format($total)); ?> <small class="madof-muted"><?php echo esc_html(sprintf(__('(emitido %s)', 'mad-oficina'), Money::format($done))); ?></small></h2>
     <nav class="madof-filters">

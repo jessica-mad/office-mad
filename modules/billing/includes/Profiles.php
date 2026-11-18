@@ -74,6 +74,27 @@ final class Profiles {
         return (int) $wpdb->insert_id;
     }
 
+    /**
+     * Its billing day (1–31). Drafts still waiting for their day (prepared by the calendar or
+     * scheduled, not yet asked) move to it within their month. @return int drafts moved
+     */
+    public static function set_billing_day($profile_id, $day, Issuing $issuing){
+        global $wpdb;
+        $p = self::get($profile_id);
+        $day = max(1, min(31, (int) $day));
+        if ( ! $p ) return 0;
+        if ( (int) $p['billing_day'] !== $day ) $wpdb->update(self::table(), ['billing_day' => $day, 'updated_at' => Time::now()], ['id' => (int) $profile_id]);
+        $p['billing_day'] = $day;
+        $n = 0;
+        foreach ( $wpdb->get_results($wpdb->prepare('SELECT id, issue_date, due_date FROM ' . Invoices::table() . " WHERE profile_id = %d AND status = 'draft' AND number IS NULL AND asked_at IS NULL AND source IN ('calendar','scheduled')", $profile_id), ARRAY_A) as $d ) {
+            $to = $issuing->default_issue_date($p, $d['issue_date']);
+            if ( $to === $d['issue_date'] ) continue;
+            $wpdb->update(Invoices::table(), ['issue_date' => $to, 'due_date' => $issuing->due_date($to, $p), 'updated_at' => Time::now()], ['id' => (int) $d['id']]);
+            $n++;
+        }
+        return $n;
+    }
+
     /** The address its invoices go to, typed where it was missing (and on its pending drafts). */
     public static function set_email($profile_id, $email){
         global $wpdb;

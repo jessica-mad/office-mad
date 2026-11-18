@@ -12,12 +12,13 @@ use MAD_Oficina\Core\Repo\Clients;
 
 if ( ! defined('ABSPATH') ) exit;
 $now = Months::current();
+Quotes::migrate_line_states(); // once: quotes accepted in part before lines had their own state
 $profiles = Profiles::all('active');
 $codes = array_column(Clients::all(), 'code', 'id');
 $leads = class_exists('\\MAD_Oficina\\Visitors\\Leads') ? array_filter(\MAD_Oficina\Visitors\Leads::all(), fn($l) => ! $l['client_id'] && $l['status'] !== 'archived') : [];
 $profile_options = function($selected = 0) use ($profiles, $codes){
     $out = '<option value="">' . esc_html__('— Cliente con datos fiscales —', 'mad-oficina') . '</option>';
-    foreach ( $profiles as $p ) $out .= '<option value="' . (int) $p['id'] . '" ' . selected((int) $selected, (int) $p['id'], false) . '>' . esc_html(($p['client_id'] && isset($codes[$p['client_id']]) ? $codes[$p['client_id']] . ' · ' : '') . $p['legal_name']) . '</option>';
+    foreach ( $profiles as $p ) $out .= '<option value="' . (int) $p['id'] . '" data-day="' . (int) ($p['billing_day'] ?: 0) . '" ' . selected((int) $selected, (int) $p['id'], false) . '>' . esc_html(($p['client_id'] && isset($codes[$p['client_id']]) ? $codes[$p['client_id']] . ' · ' : '') . $p['legal_name']) . '</option>';
     return $out;
 };
 // Links and documents of a quote, and a small form to add more.
@@ -45,7 +46,7 @@ $attachments = function(array $q){
 $editing = $_GET['quote'] ?? null;
 $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
 ?>
-<?php if ( $editing && ( $q || $editing === 'new' ) && ( ! $q || in_array($q['status'], Quotes::OPEN, true) ) ) :
+<?php if ( $editing && ( $q || $editing === 'new' ) && ( ! $q || in_array($q['status'], Quotes::EDITABLE, true) ) ) :
     $lines = $q['lines'] ?? [['kind' => 'monthly', 'concept' => '', 'amount' => '', 'start_month' => Months::add($now, 1), 'months' => null]]; ?>
     <?php echo AdminUi::form_open('billing_quote_save', 'madof-form madof-quote-form'); ?>
         <input type="hidden" name="quote_id" value="<?php echo (int) ($q['id'] ?? 0); ?>">
@@ -133,7 +134,8 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
         <p><?php echo esc_html(Quotes::describe($o)); ?></p>
         <?php $attachments($o); ?>
         <div class="madof-actions">
-            <a class="madof-btn is-small is-ghost" href="<?php echo esc_url($base . '&tab=quotes&quote=' . $o['id']); ?>"><?php esc_html_e('Editar', 'mad-oficina'); ?></a>
+            <?php if ( in_array($o['status'], Quotes::EDITABLE, true) ) : ?><a class="madof-btn is-small is-ghost" href="<?php echo esc_url($base . '&tab=quotes&quote=' . $o['id']); ?>"><?php esc_html_e('Editar', 'mad-oficina'); ?></a><?php endif; ?>
+            <?php if ( $o['status'] === 'partial' ) : ?><a class="madof-btn is-small is-ghost" href="<?php echo esc_url($base . '&tab=agreements&from_quote=' . (int) $o['id']); ?>"><?php esc_html_e('Lo aceptado: sus acuerdos', 'mad-oficina'); ?></a><?php endif; ?>
             <?php if ( $o['status'] === 'draft' ) : echo AdminUi::form_open('billing_quote_status', 'madof-inline'); ?>
                 <input type="hidden" name="quote_id" value="<?php echo (int) $o['id']; ?>"><input type="hidden" name="status" value="sent">
                 <button class="madof-btn is-small is-ghost"><?php esc_html_e('Marcar como enviado hoy', 'mad-oficina'); ?></button></form><?php endif; ?>
@@ -142,7 +144,7 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                 <button class="madof-link"><?php echo esc_html($label); ?></button></form>
             <?php endforeach; ?>
         </div>
-        <details class="madof-more madof-accept"><summary><?php esc_html_e('¡Aceptado! (todo o una parte)', 'mad-oficina'); ?></summary>
+        <details class="madof-more madof-accept"><summary><?php echo esc_html($o['status'] === 'partial' ? __('Aceptar lo que estaba pendiente', 'mad-oficina') : __('¡Aceptado! (todo o una parte)', 'mad-oficina')); ?></summary>
             <?php echo AdminUi::form_open('billing_quote_accept', 'madof-form madof-mini'); $lead = ! empty($o['lead_id']) && class_exists('\\MAD_Oficina\\Visitors\\Leads') ? \MAD_Oficina\Visitors\Leads::get((int) $o['lead_id']) : null; ?>
                 <input type="hidden" name="quote_id" value="<?php echo (int) $o['id']; ?>">
                 <label><?php esc_html_e('Se factura a', 'mad-oficina'); ?>
@@ -196,10 +198,16 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                     </div>
                 </fieldset>
 
+                <?php $done_lines = array_filter($o['lines'], fn($l) => ! Quotes::pending($l)); if ( $done_lines ) : ?>
+                <p class="madof-muted"><?php echo esc_html(__('Ya decidido:', 'mad-oficina') . ' ' . implode(' · ', array_map(fn($l) => $l['concept'] . ' (' . ($l['state'] === 'accepted' ? __('aceptado', 'mad-oficina') : ($l['state'] === 'moved' ? __('a otro presupuesto', 'mad-oficina') : __('no aceptado', 'mad-oficina'))) . ')', $done_lines))); ?></p>
+                <?php endif; ?>
+                <label class="madof-bill-day"><?php esc_html_e('Día del mes en que se le factura', 'mad-oficina'); ?>
+                    <input type="number" name="billing_day" min="1" max="31" data-bill-day value="<?php echo esc_attr((string) (\MAD_Oficina\Billing\Profiles::get((int) $o['profile_id'])['billing_day'] ?? ($settings['billing_day'] ?? 28))); ?>">
+                    <small><?php esc_html_e('Es el día de facturación del cliente: vale para todas sus facturas (también las que ya están en borrador sin enviar).', 'mad-oficina'); ?></small></label>
                 <table class="madof-table madof-accept-lines">
                     <thead><tr><th><span class="screen-reader-text"><?php esc_html_e('Aceptada', 'mad-oficina'); ?></span></th><th><?php esc_html_e('Concepto', 'mad-oficina'); ?></th><th><?php esc_html_e('Presupuestado', 'mad-oficina'); ?></th><th><?php esc_html_e('Acordado: cómo se paga', 'mad-oficina'); ?></th><th><?php esc_html_e('Importe', 'mad-oficina'); ?></th><th><?php esc_html_e('Desde', 'mad-oficina'); ?></th><th><?php esc_html_e('Meses', 'mad-oficina'); ?></th></tr></thead>
                     <tbody>
-                    <?php foreach ( array_values($o['lines']) as $i => $l ) : $n = 'pick[' . (int) $i . ']'; ?>
+                    <?php foreach ( array_filter(array_values($o['lines']), [Quotes::class, 'pending']) as $i => $l ) : $n = 'pick[' . (int) $i . ']'; // only what is still to decide ?>
                         <tr data-pick>
                             <td><input type="checkbox" name="<?php echo esc_attr($n); ?>[on]" value="1" checked aria-label="<?php echo esc_attr(sprintf(__('Aceptada: %s', 'mad-oficina'), $l['concept'])); ?>"></td>
                             <td><input type="text" name="<?php echo esc_attr($n); ?>[concept]" value="<?php echo esc_attr($l['concept']); ?>" aria-label="<?php esc_attr_e('Concepto', 'mad-oficina'); ?>"></td>
@@ -220,7 +228,8 @@ $q = $editing && $editing !== 'new' ? Quotes::get(absint($editing)) : null;
                 </fieldset>
                 <fieldset class="madof-choice">
                     <legend><?php esc_html_e('Lo que no se acepta', 'mad-oficina'); ?></legend>
-                    <label class="madof-check"><input type="radio" name="rest" value="reject" checked> <?php esc_html_e('Se queda apuntado como no aceptado', 'mad-oficina'); ?></label>
+                    <label class="madof-check"><input type="radio" name="rest" value="keep" checked> <?php esc_html_e('Se queda pendiente en este presupuesto (lo decides más adelante)', 'mad-oficina'); ?></label>
+                    <label class="madof-check"><input type="radio" name="rest" value="reject"> <?php esc_html_e('No lo aceptan', 'mad-oficina'); ?></label>
                     <label class="madof-check"><input type="radio" name="rest" value="new"> <?php esc_html_e('Pasa a un presupuesto nuevo para replantearlo', 'mad-oficina'); ?></label>
                 </fieldset>
                 <button class="madof-btn is-small"><?php esc_html_e('Aceptar lo marcado y crear los acuerdos', 'mad-oficina'); ?></button>
@@ -252,6 +261,9 @@ document.querySelectorAll('.madof-accept form').forEach(function (f) {
         box.querySelector('[name="new[legal_name]"]').required = who.value === 'new';
     };
     who.addEventListener('change', sync); office.addEventListener('change', sync); sync();
+    // The billing day shown is the chosen client's own.
+    var day = f.querySelector('[data-bill-day]');
+    who.addEventListener('change', function () { var o = who.selectedOptions[0], d = o && +o.dataset.day; if (day && d) day.value = d; });
     var cbody = f.querySelector('[data-contacts]');
     f.querySelector('[data-add-contact]')?.addEventListener('click', function () {
         var row = cbody.rows[cbody.rows.length - 1].cloneNode(true), n = cbody.rows.length;

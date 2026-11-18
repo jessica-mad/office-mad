@@ -216,4 +216,17 @@ class CalendarTest extends MADOF_TestCase {
         $id2 = $this->cal()->prepare_one(Profiles::get($this->profile), '2027-02');
         $this->assertSame(0, (int) MAD_Oficina\Billing\Invoices::get($id2)['auto_send'], 'asked first');
     }
+
+    public function test_the_next_months_drafts_can_be_prepared_now_and_follow_the_billing_day(){
+        $n = $this->cal()->prepare_ahead(3, $this->profile);
+        $this->assertGreaterThanOrEqual(2, $n);
+        $ids = $GLOBALS['wpdb']->get_col($GLOBALS['wpdb']->prepare('SELECT id FROM ' . MAD_Oficina\Billing\Invoices::table() . " WHERE profile_id = %d AND status = 'draft' ORDER BY issue_date", $this->profile));
+        $this->assertSame('28', substr(MAD_Oficina\Billing\Invoices::get((int) end($ids))['issue_date'], 8, 2));
+        $this->assertSame(0, $this->cal()->prepare_ahead(3, $this->profile), 'already there: nothing twice');
+        // A new billing day moves the drafts still waiting for their day.
+        $moved = Profiles::set_billing_day($this->profile, 10, new MAD_Oficina\Billing\Issuing(get_option(MAD_Oficina_Core::option_key('billing'))));
+        $this->assertSame(count($ids), $moved);
+        $this->assertSame('10', substr(MAD_Oficina\Billing\Invoices::get((int) end($ids))['issue_date'], 8, 2));
+        $this->assertSame(10, (int) Profiles::get($this->profile)['billing_day']);
+    }
 }

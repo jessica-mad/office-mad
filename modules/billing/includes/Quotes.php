@@ -14,8 +14,14 @@ if ( ! defined('ABSPATH') ) exit;
  */
 final class Quotes {
 
-    const STATUSES = ['draft' => 'Borrador', 'sent' => 'Enviado', 'accepted' => 'Aceptado', 'rejected' => 'Rechazado', 'expired' => 'Caducado'];
-    const OPEN = ['draft', 'sent'];
+    const STATUSES = ['draft' => 'Borrador', 'sent' => 'Enviado', 'partial' => 'Aceptado en parte', 'accepted' => 'Aceptado', 'rejected' => 'Rechazado', 'expired' => 'Caducado'];
+    /** Still with lines to decide (a «partial» one has some accepted and some pending). */
+    const OPEN = ['draft', 'sent', 'partial'];
+    /** Whose lines can still be edited freely. */
+    const EDITABLE = ['draft', 'sent'];
+
+    /** A line still to decide (not accepted, not turned down). */
+    public static function pending(array $l){ return empty($l['state']); }
 
     public static function table(){ return Schema::table('quotes'); }
 
@@ -47,7 +53,7 @@ final class Quotes {
         if ( $id ) {
             $old = self::get($id);
             if ( ! $old ) return new \WP_Error('madof_quote', __('Ese presupuesto no existe.', 'mad-oficina'));
-            if ( ! in_array($old['status'], self::OPEN, true) ) return new \WP_Error('madof_quote_locked', __('Un presupuesto aceptado o rechazado ya no se edita.', 'mad-oficina'));
+            if ( ! in_array($old['status'], self::EDITABLE, true) ) return new \WP_Error('madof_quote_locked', __('Un presupuesto aceptado (aunque sea en parte) o rechazado ya no se edita: lo pendiente se acepta o se descarta desde «¡Aceptado!».', 'mad-oficina'));
         }
         $title = mb_substr(sanitize_text_field($d['title'] ?? ''), 0, 255);
         if ( $title === '' ) return new \WP_Error('madof_quote_title', __('Ponle un título al presupuesto.', 'mad-oficina'));
@@ -101,6 +107,13 @@ final class Quotes {
         $q = self::get($id);
         if ( ! $q || ! isset(self::STATUSES[$status]) || $status === 'accepted' ) return new \WP_Error('madof_quote', __('No puedo cambiar ese presupuesto así.', 'mad-oficina'));
         if ( $q['status'] === 'accepted' ) return new \WP_Error('madof_quote_locked', __('Ya está aceptado: sus acuerdos están en Acuerdos.', 'mad-oficina'));
+        if ( $q['status'] === 'partial' ) {
+            // What was still pending is turned down; what was accepted stays.
+            if ( ! in_array($status, ['rejected', 'expired'], true) ) return new \WP_Error('madof_quote', __('Ya está aceptado en parte.', 'mad-oficina'));
+            $wpdb->query($wpdb->prepare('UPDATE ' . Schema::table('quote_lines') . " SET state = 'rejected' WHERE quote_id = %d AND state IS NULL", $id));
+            $wpdb->update(self::table(), ['status' => 'accepted', 'decided_at' => Time::now(), 'updated_at' => Time::now()], ['id' => $id]);
+            return true;
+        }
         $fields = ['status' => $status, 'updated_at' => Time::now()];
         if ( $status === 'sent' && ! $q['sent_on'] ) $fields['sent_on'] = current_time('Y-m-d');
         if ( in_array($status, ['rejected', 'expired'], true) ) $fields['decided_at'] = Time::now();
@@ -109,25 +122,28 @@ final class Quotes {
     }
 
     /**
-     * Accepted, all of it or the part agreed: each chosen line becomes an agreement for the
-     * chosen fiscal profile, with the amount, kind (monthly or once), months and start agreed
-     * (they may differ from the quote). $start shifts the whole quote when the work starts
-     * later (or earlier) than planned; a line's own start wins over it.
-     * @param array|null $picks [line index => {on, concept, amount, kind, months, start_month}]; null = all as quoted
-     * @param string     $rest  what is not accepted: 'reject' (noted) or 'new' (a new quote with it, to rethink)
-     * @return array{agreements:int[], left:int, new_quote:int}|\WP_Error
+     * Accepted, all of it or the part agreed: each chosen pending line becomes an agreement for
+     * the chosen fiscal profile, with the amount, kind (monthly or once), months and start agreed
+     * (they may differ from the quote). Lines keep their state: what is not accepted now stays
+     * pending in the same quote («Aceptado en parte») unless she turns it down or moves it to a
+     * new quote to rethink it.
+     * @param array|null $picks [line index => {on, concept, amount, kind, months, start_month}]; null = all pending, as quoted
+     * @param string     $rest  what is left: 'keep' (pending here), 'reject' or 'new' (a new quote with it)
+     * @return array{agreements:int[], left:int, new_quote:int, kept:bool}|\WP_Error
      */
-    public static function accept($id, $profile_id, $start = null, ?array $picks = null, $rest = 'reject', $auto_send = false){
+    public static function accept($id, $profile_id, $start = null, ?array $picks = null, $rest = 'keep', $auto_send = false){
         global $wpdb;
         $q = self::get($id);
-        if ( ! $q || ! in_array($q['status'], self::OPEN, true) ) return new \WP_Error('madof_quote', __('Solo se aceptan presupuestos en borrador o enviados.', 'mad-oficina'));
+        if ( ! $q || ! in_array($q['status'], self::OPEN, true) ) return new \WP_Error('madof_quote', __('Solo se aceptan presupuestos en borrador, enviados o aceptados en parte.', 'mad-oficina'));
         $profile = Profiles::get((int) ($profile_id ?: $q['profile_id']));
         if ( ! $profile ) return new \WP_Error('madof_quote_profile', __('Para aceptarlo, elige a quién se facturará (sus datos fiscales) o crea el cliente aquí mismo.', 'mad-oficina'));
-        $first = min(array_column($q['lines'], 'start_month'));
+        $pending = array_filter(array_values($q['lines']), [self::class, 'pending']);
+        if ( ! $pending ) return new \WP_Error('madof_quote_none', __('No le queda nada por decidir.', 'mad-oficina'));
+        $first = min(array_column($pending, 'start_month'));
         $shift = ($start = Months::valid($start)) ? Months::diff($first, $start) : 0;
 
         $agreed = []; $left = [];
-        foreach ( array_values($q['lines']) as $i => $l ) {
+        foreach ( $pending as $i => $l ) {
             $p = $picks === null ? ['on' => 1] : (array) ($picks[$i] ?? []);
             if ( empty($p['on']) ) { $left[] = $l; continue; }
             $kind = ($p['kind'] ?? $l['kind']) === 'once' ? 'once' : 'monthly';
@@ -140,6 +156,7 @@ final class Quotes {
         if ( ! $agreed ) return new \WP_Error('madof_quote_none', __('Marca al menos una línea aceptada. Si no aceptan nada, márcalo como rechazado.', 'mad-oficina'));
 
         $ids = [];
+        $lt = Schema::table('quote_lines');
         foreach ( $agreed as $l ) {
             $r = Agreements::create([
                 'profile_id' => $profile['id'], 'kind' => $l['kind'], 'concept' => $l['concept'], 'amount' => $l['amount'],
@@ -148,11 +165,9 @@ final class Quotes {
             ]);
             if ( is_wp_error($r) ) return $r;
             $ids[] = $r;
+            $wpdb->update($lt, ['state' => 'accepted', 'agreement_id' => $r], ['id' => (int) $l['was']['id']]);
         }
-        // What was agreed, against what was quoted, stays on the quote.
-        $note = $left || array_filter($agreed, fn($l) => (float) $l['amount'] !== (float) $l['was']['amount'] || $l['kind'] !== $l['was']['kind'] || $l['months'] !== $l['was']['months'])
-            ? sprintf(__('Aceptado en parte (%1$s): %2$s.', 'mad-oficina'), current_time('d/m/Y'), self::describe(['lines' => $agreed])) . ( $left ? ' ' . sprintf(__('No aceptado: %s.', 'mad-oficina'), implode(', ', array_column($left, 'concept'))) : '' )
-            : '';
+        $note = sprintf(__('Aceptado (%1$s): %2$s.', 'mad-oficina'), current_time('d/m/Y'), self::describe(['lines' => $agreed]));
         $new = 0;
         if ( $left && $rest === 'new' ) {
             $new = self::save(['title' => $q['title'] . ' ' . __('(por replantear)', 'mad-oficina'), 'profile_id' => $profile['id'], 'probability' => $q['probability'], 'notes' => sprintf(__('Lo que no se aceptó del presupuesto %s.', 'mad-oficina'), $q['number'])],
@@ -160,9 +175,41 @@ final class Quotes {
             if ( is_wp_error($new) ) $new = 0;
             elseif ( $new ) $note .= ' ' . sprintf(__('Lo demás pasa al presupuesto %s.', 'mad-oficina'), self::get($new)['number']);
         }
-        $wpdb->update(self::table(), ['status' => 'accepted', 'decided_at' => Time::now(), 'profile_id' => $profile['id'], 'client_id' => $profile['client_id'],
+        $keep = $left && $rest !== 'new' && $rest !== 'reject';
+        if ( $left && ! $keep ) {
+            foreach ( $left as $l ) $wpdb->update($lt, ['state' => $new ? 'moved' : 'rejected'], ['id' => (int) $l['id']]);
+            if ( ! $new ) $note .= ' ' . sprintf(__('No aceptado: %s.', 'mad-oficina'), implode(', ', array_column($left, 'concept')));
+        }
+        if ( $keep ) $note .= ' ' . sprintf(__('Pendiente de decidir: %s.', 'mad-oficina'), implode(', ', array_column($left, 'concept')));
+        $wpdb->update(self::table(), ['status' => $keep ? 'partial' : 'accepted', 'decided_at' => $keep ? null : Time::now(), 'profile_id' => $profile['id'], 'client_id' => $profile['client_id'],
             'notes' => trim((string) $q['notes'] . "\n" . $note) ?: null, 'updated_at' => Time::now()], ['id' => $id]);
-        return ['agreements' => $ids, 'left' => count($left), 'new_quote' => (int) $new];
+        return ['agreements' => $ids, 'left' => count($left), 'new_quote' => (int) $new, 'kept' => $keep];
+    }
+
+    /**
+     * DB 25: quotes accepted before lines had a state. A line that became one of the quote's
+     * agreements (same concept) is accepted; the rest of a quote accepted «en parte» is pending again.
+     */
+    public static function migrate_line_states(){
+        global $wpdb;
+        if ( get_option('madoficina_quote_states_done') ) return;
+        update_option('madoficina_quote_states_done', 1, false);
+        $lt = Schema::table('quote_lines');
+        foreach ( $wpdb->get_col('SELECT id FROM ' . self::table() . " WHERE status = 'accepted'") as $qid ) {
+            $q = self::get((int) $qid);
+            if ( ! $q || array_filter($q['lines'], fn($l) => ! empty($l['state'])) ) continue;
+            $agreements = Agreements::of_quote($q['id']);
+            $partial = str_contains((string) $q['notes'], 'No aceptado:');
+            $left = 0;
+            foreach ( $q['lines'] as $l ) {
+                $match = null;
+                foreach ( $agreements as $k => $a ) if ( mb_strtolower(trim($a['concept'])) === mb_strtolower(trim($l['concept'])) ) { $match = $a; unset($agreements[$k]); break; }
+                if ( $match ) $wpdb->update($lt, ['state' => 'accepted', 'agreement_id' => $match['id']], ['id' => $l['id']]);
+                elseif ( $partial && ! str_contains((string) $q['notes'], 'Lo demás pasa al presupuesto') ) $left++;
+                else $wpdb->update($lt, ['state' => 'accepted'], ['id' => $l['id']]);
+            }
+            if ( $left ) $wpdb->update(self::table(), ['status' => 'partial', 'decided_at' => null], ['id' => $q['id']]);
+        }
     }
 
     /** Base amount of a quote line in a month (0 outside its months). */
@@ -196,6 +243,8 @@ final class Quotes {
 
     private static function hydrate_line($r){
         $r['amount'] = (float) $r['amount'];
+        $r['state'] = $r['state'] ?? null;
+        $r['agreement_id'] = isset($r['agreement_id']) ? (int) $r['agreement_id'] : null;
         $r['months'] = $r['months'] === null ? null : (int) $r['months'];
         return $r;
     }

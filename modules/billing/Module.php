@@ -49,7 +49,7 @@ return new class($core) implements MAD_Oficina_Module {
         add_action('admin_post_madof_billing_quote_file', [$this, 'handle_billing_quote_file']);
         foreach ( ['billing_import', 'billing_import_apply', 'billing_paid', 'billing_profile', 'billing_settings', 'billing_note', 'billing_link', 'billing_unlink', 'billing_profile_from_client', 'billing_link_bulk', 'billing_profile_status', 'billing_draft_save', 'billing_draft_delete', 'billing_bank_upload', 'billing_bank_action', 'billing_rectify', 'billing_rectify_lines', 'billing_send', 'billing_resend', 'billing_undo_issue', 'billing_new_details', 'billing_libro_sync', 'billing_ar_issued', 'billing_ar_send',
             'billing_item_create', 'billing_item_end', 'billing_item_change', 'billing_item_cancel', 'billing_quote_save', 'billing_quote_status', 'billing_quote_accept', 'billing_quote_attach', 'billing_quote_detach', 'billing_item_autosend',
-            'billing_calendar_settings', 'billing_prepare', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
+            'billing_calendar_settings', 'billing_prepare', 'billing_prepare_ahead', 'billing_postpone', 'billing_skip', 'billing_tax_save', 'billing_tax_delete', 'billing_autonomos_settings', 'billing_finance_access'] as $a ) {
             add_action('admin_post_madof_' . $a, [$this, 'handle_' . $a]);
         }
         add_action('wp_ajax_madof_billing_preview', [$this, 'ajax_billing_preview']);
@@ -755,12 +755,19 @@ return new class($core) implements MAD_Oficina_Module {
             $made = ' ' . ($client_id ? __('Cliente nuevo creado, con su ficha y contactos en Clientes y sus datos fiscales en facturación.', 'mad-oficina') : __('Cliente de facturación nuevo creado.', 'mad-oficina'));
         }
         $picks = isset($p['pick']) ? array_map(fn($x) => is_array($x) ? $x : [], (array) $p['pick']) : null;
-        $r = \MAD_Oficina\Billing\Quotes::accept(absint($p['quote_id'] ?? 0), $profile_id, sanitize_text_field($p['start_month'] ?? ''), $picks, ($p['rest'] ?? '') === 'new' ? 'new' : 'reject', ($p['auto_send'] ?? '') === '1');
+        $r = \MAD_Oficina\Billing\Quotes::accept(absint($p['quote_id'] ?? 0), $profile_id, sanitize_text_field($p['start_month'] ?? ''), $picks, in_array($p['rest'] ?? '', ['new', 'reject'], true) ? $p['rest'] : 'keep', ($p['auto_send'] ?? '') === '1');
         if ( is_wp_error($r) ) $this->back_to('quotes', $r->get_error_message() . $made, 'error');
+        // The client's billing day, asked here: its pending drafts move to it too.
+        $day = (int) ($p['billing_day'] ?? 0);
+        $pid = $profile_id ?: (int) (\MAD_Oficina\Billing\Quotes::get(absint($p['quote_id'] ?? 0))['profile_id'] ?? 0);
+        $moved = $day >= 1 && $day <= 31 && $pid ? \MAD_Oficina\Billing\Profiles::set_billing_day($pid, $day, $this->issuing()) : 0;
+        if ( $moved ) $made .= ' ' . sprintf(_n('%d borrador pasa al día %d.', '%d borradores pasan al día %d.', $moved, 'mad-oficina'), $moved, $day);
         $n = count($r['agreements']);
         // Its agreements, where every payment to come and how it goes out are.
         $this->back(['tab' => 'agreements', 'from_quote' => absint($p['quote_id'] ?? 0)], sprintf(_n('¡Aceptado! He creado %d acuerdo: ya cuenta como confirmado.', '¡Aceptado! He creado %d acuerdos: ya cuentan como confirmados.', $n, 'mad-oficina'), $n)
-            . ( $r['left'] ? ' ' . ($r['new_quote'] ? __('Lo no aceptado está en un presupuesto nuevo para replantearlo.', 'mad-oficina') : sprintf(_n('%d línea queda como no aceptada.', '%d líneas quedan como no aceptadas.', $r['left'], 'mad-oficina'), $r['left'])) : '' ) . $made);
+            . ( $r['left'] ? ' ' . ($r['new_quote'] ? __('Lo no aceptado está en un presupuesto nuevo para replantearlo.', 'mad-oficina')
+                : ( $r['kept'] ? sprintf(_n('%d línea sigue pendiente en el presupuesto (Presupuestos → «Aceptado en parte»).', '%d líneas siguen pendientes en el presupuesto (Presupuestos → «Aceptado en parte»).', $r['left'], 'mad-oficina'), $r['left'])
+                : sprintf(_n('%d línea queda como no aceptada.', '%d líneas quedan como no aceptadas.', $r['left'], 'mad-oficina'), $r['left'])) ) : '' ) . $made);
     }
 
     /** A link or the quote document (PDF or image), for quick access. */
@@ -834,6 +841,20 @@ return new class($core) implements MAD_Oficina_Module {
         global $wpdb;
         $wpdb->update(\MAD_Oficina\Billing\Invoices::table(), ['source' => \MAD_Oficina\Billing\Calendar::SOURCE], ['id' => $id]);
         $this->back(['edit' => $id], __('Borrador preparado con los acuerdos del mes. Revísalo y pide la emisión cuando quieras (o espera: te pregunto el día que toca).', 'mad-oficina'));
+    }
+
+    /**
+     * «Preparar ya los próximos meses»: the drafts of the coming months, now, to see them (each
+     * one is still asked, or goes out alone, on its own date). One client, or all.
+     */
+    public function handle_billing_prepare_ahead(){
+        $this->guard('billing_prepare_ahead');
+        $months = max(1, min(12, absint($_POST['months'] ?? 3)));
+        $only = absint($_POST['profile_id'] ?? 0);
+        $r = $this->calendar()->prepare_ahead($months, $only ?: null);
+        $extra = ! empty($_POST['from_quote']) ? ['tab' => 'agreements', 'from_quote' => absint($_POST['from_quote'])] : ['tab' => 'calendar'];
+        $this->back($extra, $r ? sprintf(_n('%d borrador preparado o completado para los próximos meses. Los ves en Facturas (borradores) y en el calendario; cada uno se envía (o te pregunto) en su fecha.', '%d borradores preparados o completados para los próximos meses. Los ves en Facturas (borradores) y en el calendario; cada uno se envía (o te pregunto) en su fecha.', $r, 'mad-oficina'), $r)
+            : __('No había nada nuevo que preparar: esos meses ya tienen su borrador o su factura.', 'mad-oficina'));
     }
 
     public function handle_billing_postpone(){

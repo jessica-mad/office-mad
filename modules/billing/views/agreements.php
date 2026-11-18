@@ -51,6 +51,11 @@ foreach ( Profiles::all() as $p ) $names[$p['id']] = $p['legal_name'];
     <p><strong><?php echo esc_html($from_quote['prospect_name'] . ' · ' . $from_quote['title']); ?></strong></p>
     <p class="description"><?php esc_html_e('Lo aceptado ya son acuerdos, como los demás: el calendario prepara cada factura unos días antes de su fecha y, ese día, sale sola o te la pregunta (cámbialo en «Cambiar»).', 'mad-oficina'); ?></p>
     <?php $q_atts = \MAD_Oficina\Billing\QuoteFiles::of($from_quote); if ( $q_atts ) : ?><p><?php foreach ( $q_atts as $a ) echo '<a class="madof-pill" href="' . esc_url(\MAD_Oficina\Billing\QuoteFiles::url($from_quote['id'], $a)) . '" target="_blank" rel="noopener">' . esc_html($a['name']) . '</a> '; ?></p><?php endif; ?>
+    <?php if ( $from_quote['profile_id'] ) : echo AdminUi::form_open('billing_prepare_ahead', 'madof-inline'); ?>
+        <input type="hidden" name="profile_id" value="<?php echo (int) $from_quote['profile_id']; ?>"><input type="hidden" name="from_quote" value="<?php echo (int) $from_quote['id']; ?>">
+        <label><?php esc_html_e('Ver ya sus facturas como borradores:', 'mad-oficina'); ?> <select name="months"><?php foreach ( [1, 2, 3, 6, 12] as $m ) echo '<option value="' . $m . '" ' . selected($m, 3, false) . '>' . esc_html(sprintf(_n('este mes', 'los próximos %d meses', $m, 'mad-oficina'), $m)) . '</option>'; ?></select></label>
+        <button class="madof-btn is-small"><?php esc_html_e('Preparar los borradores', 'mad-oficina'); ?></button>
+    </form><?php endif; ?>
     <p><a href="<?php echo esc_url($base . '&tab=agreements'); ?>"><?php esc_html_e('Ver todos los acuerdos', 'mad-oficina'); ?></a></p>
 </section>
 <?php endif; ?>

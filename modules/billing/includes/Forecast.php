@@ -55,13 +55,13 @@ final class Forecast {
             foreach ( $months as $m ) if ( Agreements::covers($it, $m) && ! Calendar::skipped($it['id'], $m) ) $rows[$k]['confirmed'][$m] += $it['amount'];
         }
 
-        $quotes = Quotes::all(['sent']);
+        $quotes = Quotes::all(['sent', 'partial']);
         foreach ( $quotes as $q ) {
             $k = $q['client_id'] || $q['profile_id'] ? $key_for($q['client_id'], $q['profile_id'], $q['prospect_name']) : $row('q' . $q['id'], $q['prospect_name']);
             $rows[$k]['quotes'][] = ['number' => $q['number'], 'title' => $q['title'], 'probability' => $q['probability'], 'id' => $q['id']];
             foreach ( $months as $m ) {
                 $v = 0.0;
-                foreach ( $q['lines'] as $l ) $v += Quotes::line_in($l, $m);
+                foreach ( $q['lines'] as $l ) if ( Quotes::pending($l) ) $v += Quotes::line_in($l, $m); // what is still to decide
                 $rows[$k]['possible'][$m] += $v;
                 $rows[$k]['weighted'][$m] += $v * $q['probability'] / 100;
             }
